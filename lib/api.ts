@@ -9,7 +9,7 @@ function auth() { return `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_s
 async function wcFetch<T>(path: string, fallback: T): Promise<T> {
   try {
     const sep = path.includes('?') ? '&' : '?';
-    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { cache: 'no-store' });
+    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } });
     if (!res.ok) return fallback;
     return await res.json();
   } catch { return fallback; }
@@ -18,7 +18,7 @@ async function wcFetch<T>(path: string, fallback: T): Promise<T> {
 async function wcFetchWithTotal<T>(path: string): Promise<{ data: T[]; total: number }> {
   try {
     const sep = path.includes('?') ? '&' : '?';
-    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { cache: 'no-store' });
+    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } });
     if (!res.ok) return { data: [], total: 0 };
     return { data: await res.json(), total: Number(res.headers.get('X-WP-Total') ?? 0) };
   } catch { return { data: [], total: 0 }; }
@@ -28,9 +28,9 @@ async function wcFetchWithTotal<T>(path: string): Promise<{ data: T[]; total: nu
 export async function getDashboardStats() {
   const [recentOrders, customersRes, revenueRes, ordersCountRes] = await Promise.all([
     wcFetch<WCOrder[]>('/orders?per_page=8&status=any', []),
-    fetch(`${wcBase()}/customers?per_page=1&${auth()}`, { cache: 'no-store' }),
-    fetch(`${wcBase()}/reports/sales?${auth()}`, { cache: 'no-store' }),
-    fetch(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { cache: 'no-store' }),
+    fetch(`${wcBase()}/customers?per_page=1&${auth()}`, { next: { revalidate: 30 } }),
+    fetch(`${wcBase()}/reports/sales?${auth()}`, { next: { revalidate: 30 } }),
+    fetch(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { next: { revalidate: 30 } }),
   ]);
 
   const totalCustomers = Number(customersRes.headers?.get('X-WP-Total') ?? 0);
@@ -83,7 +83,7 @@ export async function getCustomers(page = 1, search = '') {
 // ── Site Settings ──────────────────────────────────────────
 export async function getSiteSettings(): Promise<SiteSettings | null> {
   try {
-    const res = await fetch(`${WP_API_URL}/prag-core/v1/settings`, { cache: 'no-store' });
+    const res = await fetch(`${WP_API_URL}/prag-core/v1/settings`, { next: { revalidate: 30 } });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -104,7 +104,7 @@ export async function saveSiteSettings(settings: SiteSettings, token: string): P
 export async function getPosts(page = 1, search = ''): Promise<{ data: WPPost[]; total: number }> {
   try {
     const qs = new URLSearchParams({ per_page: '20', page: String(page), _embed: '1', ...(search && { search }) });
-    const res = await fetch(`${wpBase()}/posts?${qs}`, { cache: 'no-store' });
+    const res = await fetch(`${wpBase()}/posts?${qs}`, { next: { revalidate: 30 } });
     if (!res.ok) return { data: [], total: 0 };
     return { data: await res.json(), total: Number(res.headers.get('X-WP-Total') ?? 0) };
   } catch { return { data: [], total: 0 }; }

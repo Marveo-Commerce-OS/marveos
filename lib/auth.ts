@@ -22,6 +22,17 @@ export async function getSession() {
 
 export async function isAdmin(token: string): Promise<boolean> {
   try {
+    const cookieStore = await cookies();
+    const userInfoStr = cookieStore.get('admin_user')?.value;
+    if (userInfoStr) {
+      const userInfo = JSON.parse(userInfoStr);
+      if (typeof userInfo.isAdmin === 'boolean') {
+        return userInfo.isAdmin;
+      }
+    }
+  } catch {}
+
+  try {
     const res = await fetch(`${WP_API_URL}/wp/v2/users/me?context=edit`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',

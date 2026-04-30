@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
   cookieStore.set('admin_user', JSON.stringify({
     user_display_name: data.user_display_name,
     user_email: data.user_email,
+    isAdmin: allowed,
   }), opts);
 
   return NextResponse.json({ success: true, redirect: '/portal' });
