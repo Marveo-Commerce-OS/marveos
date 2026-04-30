@@ -31,8 +31,16 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-sky-700">PRAG Admin</h1>
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative w-48 h-16 mb-2">
+            <Image 
+              src="https://central.prag.global/wp-content/uploads/2026/04/Prag-Logo.png" 
+              alt="PRAG" 
+              fill 
+              className="object-contain" 
+              priority 
+            />
+          </div>
           <p className="text-gray-500 text-sm mt-1">Core by Avario — Control Center</p>
         </div>
 
