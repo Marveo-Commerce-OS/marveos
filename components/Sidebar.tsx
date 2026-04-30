@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X } from 'lucide-react';
 
@@ -28,8 +29,8 @@ export default function Sidebar({ displayName, email }: { displayName: string; e
     <>
       {/* Mobile Top Bar */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 z-40 flex items-center justify-between px-4">
-        <div>
-          <p className="text-lg font-bold text-sky-700">PRAG Admin</p>
+        <div className="relative w-28 h-8">
+          <Image src="https://central.prag.global/wp-content/uploads/2026/04/Prag-Logo.png" alt="PRAG" fill className="object-contain" priority />
         </div>
         <button onClick={() => setIsOpen(true)} className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg">
           <Menu size={24} />
@@ -48,8 +49,10 @@ export default function Sidebar({ displayName, email }: { displayName: string; e
       <aside className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 flex flex-col h-screen transform transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 shrink-0`}>
         <div className="px-6 py-5 border-b border-gray-100 flex items-center justify-between">
           <div>
-            <p className="text-xl font-bold text-sky-700">PRAG Admin</p>
-            <p className="text-xs text-gray-400 mt-0.5">Core by Avario</p>
+            <div className="relative w-32 h-10 mb-1">
+              <Image src="https://central.prag.global/wp-content/uploads/2026/04/Prag-Logo.png" alt="PRAG" fill className="object-contain" priority />
+            </div>
+            <p className="text-xs text-gray-400">Core by Avario</p>
           </div>
           <button onClick={() => setIsOpen(false)} className="md:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg">
             <X size={20} />
