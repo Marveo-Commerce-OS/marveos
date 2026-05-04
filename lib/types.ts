@@ -54,12 +54,53 @@ export interface WCCustomer {
   billing: { phone: string; city: string; state: string };
 }
 
+export interface SlideItem {
+  title: string;
+  description: string;
+  cta: string;
+  link: string;
+  productImage: string;
+  productAlt: string;
+}
+
+export interface CategoryItem {
+  name: string;
+  slug: string;
+  image: string;
+}
+
+export interface SocialLinks {
+  facebook: string;
+  instagram: string;
+  linkedin: string;
+  twitter: string;
+  whatsapp: string;
+}
+
 export interface SiteSettings {
-  hero_title: string;
-  hero_subtitle: string;
+  // Contact
   contact_phone: string;
   contact_email: string;
+  whatsapp: string;
+  address: string;
+  business_hours_weekday: string;
+  business_hours_saturday: string;
+  // Socials
+  socials: SocialLinks;
+  // Announcement
   announcement_bar: string;
+  // Footer
+  footer_description: string;
+  // Brand Banner
+  brand_banner_title: string;
+  brand_banner_description: string;
+  brand_banner_cta: string;
+  brand_banner_link: string;
+  brand_banner_image: string;
+  // Hero Slides
+  slides: SlideItem[];
+  // Category Grid
+  categories: CategoryItem[];
 }
 
 export interface WPPost {

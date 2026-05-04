@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X, MapPin, BookOpen } from 'lucide-react';
 
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -12,6 +12,8 @@ const NAV = [
   { href: '/dashboard/orders', label: 'Orders', icon: ShoppingCart },
   { href: '/dashboard/customers', label: 'Customers', icon: Users },
   { href: '/dashboard/blog', label: 'Blog Posts', icon: FileText },
+  { href: '/dashboard/stores', label: 'Stores', icon: MapPin },
+  { href: '/dashboard/docs', label: 'Tech Documents', icon: BookOpen },
   { href: '/dashboard/settings', label: 'Site Settings', icon: Settings },
 ];
 

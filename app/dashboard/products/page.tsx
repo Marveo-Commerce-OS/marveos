@@ -79,14 +79,20 @@ export default async function ProductsPage({ searchParams }: Props) {
                       <ProductActions id={p.id} field="featured" value={p.featured} label="Featured" />
                     </td>
                     <td className="px-6 py-4">
-                      <ProductActions
-                        id={p.id}
-                        field="status"
-                        value={p.status}
-                        label={p.status === 'publish' ? 'Unpublish' : 'Publish'}
-                        toggleValue={p.status === 'publish' ? 'draft' : 'publish'}
-                        variant="status"
-                      />
+                      <div className="flex items-center gap-2">
+                        <Link href={`/dashboard/products/${p.id}`}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-50 text-sky-700 hover:bg-sky-100 transition-colors">
+                          Edit
+                        </Link>
+                        <ProductActions
+                          id={p.id}
+                          field="status"
+                          value={p.status}
+                          label={p.status === 'publish' ? 'Unpublish' : 'Publish'}
+                          toggleValue={p.status === 'publish' ? 'draft' : 'publish'}
+                          variant="status"
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}
