@@ -255,14 +255,10 @@ export async function readAdminStore(): Promise<AdminConfigStore> {
 }
 
 export async function writeAdminStore(next: AdminConfigStore): Promise<void> {
-  try {
-    if (process.env.VERCEL) {
-      await writeToWordPress(next);
-    } else {
-      await writeToFile(next);
-    }
-  } catch {
-    // Best-effort write.
+  if (process.env.VERCEL) {
+    await writeToWordPress(next);
+  } else {
+    await writeToFile(next);
   }
 }
 

@@ -103,6 +103,8 @@ export default function AdminSettingsClient() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [auditActionLoading, setAuditActionLoading] = useState<'pdf' | 'excel' | 'clear' | null>(null);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [applyingWpEmail, setApplyingWpEmail] = useState(false);
 
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
@@ -203,16 +205,110 @@ export default function AdminSettingsClient() {
   async function saveSettings() {
     if (!settings) return;
     setSaving(true);
-    const res = await fetch('/api/admin/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-    setSaving(false);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      await loadData();
+    setStatusMessage('');
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const data = await res.json().catch(() => null);
+      setSaving(false);
+      setStatus(res.ok ? 'success' : 'error');
+      setStatusMessage(res.ok ? 'Changes saved successfully.' : String(data?.error ?? data?.message ?? 'Something failed. Please retry.'));
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 2600);
+      if (res.ok) {
+        await loadData();
+      }
+    } catch {
+      setSaving(false);
+      setStatus('error');
+      setStatusMessage('Could not reach the server while saving settings.');
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 2600);
+    }
+  }
+
+  async function applyWordPressAdminEmail() {
+    if (!settings) return;
+    setApplyingWpEmail(true);
+    setStatusMessage('');
+
+    try {
+      const res = await fetch('/api/admin/wp-admin-email', { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.email) {
+        setStatus('error');
+        setStatusMessage(String(data?.error ?? 'Unable to resolve WordPress admin email.'));
+        setTimeout(() => {
+          setStatus('idle');
+          setStatusMessage('');
+        }, 2600);
+        return;
+      }
+
+      const wpEmail = String(data.email).trim();
+      if (!wpEmail) {
+        setStatus('error');
+        setStatusMessage('WordPress admin email is empty.');
+        setTimeout(() => {
+          setStatus('idle');
+          setStatusMessage('');
+        }, 2600);
+        return;
+      }
+
+      const next: SettingsPayload = {
+        ...settings,
+        smtp: {
+          ...settings.smtp,
+          fromEmail: wpEmail,
+        },
+        forms: settings.forms.map((rule) => ({
+          ...rule,
+          fromEmail: wpEmail,
+          recipients: [wpEmail],
+        })),
+      };
+
+      setSettings(next);
+
+      const saveRes = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      const saveData = await saveRes.json().catch(() => null);
+
+      setStatus(saveRes.ok ? 'success' : 'error');
+      setStatusMessage(
+        saveRes.ok
+          ? `Using WordPress admin email (${wpEmail}) for SMTP + all form routing.`
+          : String(saveData?.error ?? 'Failed to save WordPress admin email settings.'),
+      );
+
+      if (saveRes.ok) {
+        await loadData();
+      }
+
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 3200);
+    } catch {
+      setStatus('error');
+      setStatusMessage('Failed to apply WordPress admin email settings.');
+      setTimeout(() => {
+        setStatus('idle');
+        setStatusMessage('');
+      }, 2600);
+    } finally {
+      setApplyingWpEmail(false);
     }
   }
 
@@ -463,12 +559,12 @@ export default function AdminSettingsClient() {
     <div className="space-y-5">
       {status === 'success' && (
         <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm">
-          <CheckCircle2 size={16} /> Changes saved successfully.
+          <CheckCircle2 size={16} /> {statusMessage || 'Changes saved successfully.'}
         </div>
       )}
       {status === 'error' && (
         <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">
-          <AlertCircle size={16} /> Something failed. Please retry.
+          <AlertCircle size={16} /> {statusMessage || 'Something failed. Please retry.'}
         </div>
       )}
 
@@ -773,6 +869,17 @@ export default function AdminSettingsClient() {
         {activeTab === 'smtp' && (
           <div className="space-y-4">
             <h2 className="text-base font-semibold text-gray-900">Microsoft 365 SMTP</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={applyWordPressAdminEmail}
+                disabled={applyingWpEmail}
+                className="px-4 py-2 bg-white border border-sky-200 text-sky-700 rounded-lg text-sm font-medium hover:bg-sky-50 disabled:opacity-60"
+              >
+                {applyingWpEmail ? 'Applying...' : 'Use WordPress admin email'}
+              </button>
+              <span className="text-xs text-gray-500">Applies to SMTP from-email and all form-routing recipients.</span>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <input className={inputCls} value={settings.smtp.host} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, host: e.target.value } } : p)} placeholder="smtp.office365.com" />
               <input className={inputCls} value={settings.smtp.port} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, port: Number(e.target.value) || 587 } } : p)} placeholder="587" />

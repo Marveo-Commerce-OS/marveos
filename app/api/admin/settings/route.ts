@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
-import { ADMIN_MODULE_KEYS, appendAuditLog, updateAdminStore } from '@/lib/adminStore';
+import { ADMIN_MODULE_KEYS, appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 
 const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
 
@@ -45,7 +45,7 @@ export async function GET() {
   if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const discovered = await discoverForms();
-  const store = await updateAdminStore((current) => {
+  const mergeForms = (current: Awaited<ReturnType<typeof readAdminStore>>) => {
     if (discovered.length === 0) return current;
 
     const existingKeys = new Set(current.forms.map((f) => f.formKey));
@@ -65,7 +65,16 @@ export async function GET() {
       ...current,
       forms: mergedForms,
     };
-  });
+  };
+
+  let store;
+  try {
+    store = await updateAdminStore(mergeForms);
+  } catch {
+    // Read-only fallback for environments where writes are unavailable.
+    store = mergeForms(await readAdminStore());
+  }
+
   return NextResponse.json({
     tracking: store.tracking,
     smtp: store.smtp,
@@ -98,42 +107,47 @@ export async function PUT(req: NextRequest) {
       )
     : undefined;
 
-  const next = await updateAdminStore((current) => ({
-    ...current,
-    tracking: {
-      ...current.tracking,
-      ...(body.tracking ?? {}),
-    },
-    smtp: {
-      ...current.smtp,
-      ...(body.smtp ?? {}),
-    },
-    forms: Array.isArray(body.forms)
-      ? (body.forms as FormPayload[]).map((f) => ({
-          formKey: String(f.formKey ?? ''),
-          formName: String(f.formName ?? ''),
-          fromEmail: String(f.fromEmail ?? ''),
-          senderName: String(f.senderName ?? ''),
-          recipients: Array.isArray(f.recipients) ? f.recipients.map((r: unknown) => String(r).trim()).filter(Boolean) : [],
-        }))
-      : current.forms,
+  try {
+    const next = await updateAdminStore((current) => ({
+      ...current,
+      tracking: {
+        ...current.tracking,
+        ...(body.tracking ?? {}),
+      },
+      smtp: {
+        ...current.smtp,
+        ...(body.smtp ?? {}),
+      },
+      forms: Array.isArray(body.forms)
+        ? (body.forms as FormPayload[]).map((f) => ({
+            formKey: String(f.formKey ?? ''),
+            formName: String(f.formName ?? ''),
+            fromEmail: String(f.fromEmail ?? ''),
+            senderName: String(f.senderName ?? ''),
+            recipients: Array.isArray(f.recipients) ? f.recipients.map((r: unknown) => String(r).trim()).filter(Boolean) : [],
+          }))
+        : current.forms,
       roleModuleVisibility: sanitizedRoleModuleVisibility ?? current.roleModuleVisibility,
-  }));
+    }));
 
-  await appendAuditLog({
-    actorEmail: actor?.email ?? session.user?.user_email ?? 'unknown',
-    action: 'settings.updated',
-    target: 'ecommerce-admin-settings',
-    details: 'Updated tracking, SMTP, forms routing, or backend access settings.',
-  });
+    await appendAuditLog({
+      actorEmail: actor?.email ?? session.user?.user_email ?? 'unknown',
+      action: 'settings.updated',
+      target: 'ecommerce-admin-settings',
+      details: 'Updated tracking, SMTP, forms routing, or backend access settings.',
+    });
 
-  return NextResponse.json({
-    success: true,
-    tracking: next.tracking,
-    smtp: next.smtp,
-    forms: next.forms,
-    accessControl: {
-      roleModuleVisibility: next.roleModuleVisibility,
-    },
-  });
+    return NextResponse.json({
+      success: true,
+      tracking: next.tracking,
+      smtp: next.smtp,
+      forms: next.forms,
+      accessControl: {
+        roleModuleVisibility: next.roleModuleVisibility,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to persist admin settings.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
