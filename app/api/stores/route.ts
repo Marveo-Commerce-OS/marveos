@@ -55,7 +55,7 @@ export async function PUT(req: NextRequest) {
 
   const data = await req.json() as StorePayload;
   const res = await fetch(`${WP}/prag_store/${data.id}`, {
-    method: 'POST',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
     body: JSON.stringify(storeBody(data)),
   });
