@@ -84,7 +84,8 @@ const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
   adminSettings: true,
 };
 
-const STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-config.json');
+const STORE_BASE_PATH = process.env.VERCEL ? '/tmp' : process.cwd();
+const STORE_PATH = path.join(STORE_BASE_PATH, '.admin-data', 'ecommerce-admin-config.json');
 
 const DEFAULT_STORE: AdminConfigStore = {
   users: {},
@@ -161,19 +162,23 @@ const DEFAULT_STORE: AdminConfigStore = {
 };
 
 async function ensureStoreFile() {
-  const dir = path.dirname(STORE_PATH);
-  await fs.mkdir(dir, { recursive: true });
   try {
+    const dir = path.dirname(STORE_PATH);
+    await fs.mkdir(dir, { recursive: true });
     await fs.access(STORE_PATH);
   } catch {
-    await fs.writeFile(STORE_PATH, JSON.stringify(DEFAULT_STORE, null, 2), 'utf8');
+    try {
+      await fs.writeFile(STORE_PATH, JSON.stringify(DEFAULT_STORE, null, 2), 'utf8');
+    } catch {
+      // In serverless read-only environments, skip local file initialization.
+    }
   }
 }
 
 export async function readAdminStore(): Promise<AdminConfigStore> {
-  await ensureStoreFile();
-  const raw = await fs.readFile(STORE_PATH, 'utf8');
   try {
+    await ensureStoreFile();
+    const raw = await fs.readFile(STORE_PATH, 'utf8');
     const parsed = JSON.parse(raw) as Partial<AdminConfigStore>;
     return {
       ...DEFAULT_STORE,
@@ -189,13 +194,18 @@ export async function readAdminStore(): Promise<AdminConfigStore> {
       audit: Array.isArray(parsed.audit) ? parsed.audit : [],
     };
   } catch {
+    // Never block auth/settings reads when local FS is unavailable.
     return DEFAULT_STORE;
   }
 }
 
 export async function writeAdminStore(next: AdminConfigStore) {
-  await ensureStoreFile();
-  await fs.writeFile(STORE_PATH, JSON.stringify(next, null, 2), 'utf8');
+  try {
+    await ensureStoreFile();
+    await fs.writeFile(STORE_PATH, JSON.stringify(next, null, 2), 'utf8');
+  } catch {
+    // Best-effort write for serverless environments without durable local storage.
+  }
 }
 
 export async function updateAdminStore(
