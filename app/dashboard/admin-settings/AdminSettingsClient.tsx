@@ -201,17 +201,23 @@ export default function AdminSettingsClient() {
 
   async function saveMaintenance() {
     setSavingMaintenance(true);
-    const current = await fetch('/api/settings').then((r) => (r.ok ? r.json() : {}));
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...current, ...maintenance }),
-    });
-    setSavingMaintenance(false);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      await loadData();
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(maintenance),
+      });
+      setSavingMaintenance(false);
+      setStatus(res.ok ? 'success' : 'error');
+      setTimeout(() => setStatus('idle'), 2200);
+      if (res.ok) {
+        await loadData();
+      }
+    } catch (err) {
+      console.error('Save maintenance failed:', err);
+      setSavingMaintenance(false);
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 2200);
     }
   }
 

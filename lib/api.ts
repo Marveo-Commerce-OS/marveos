@@ -221,13 +221,16 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
 
 export async function saveSiteSettings(settings: SiteSettings, token: string): Promise<boolean> {
   try {
-    const res = await fetch(`${WP_API_URL}/prag-core/v1/settings`, {
+    const res = await fetchWithTimeout(`${WP_API_URL}/prag-core/v1/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(settings),
-    });
+    }, 2);
     return res.ok;
-  } catch { return false; }
+  } catch (err) {
+    console.error('Save site settings failed:', err);
+    return false;
+  }
 }
 
 // ── Blog Posts ─────────────────────────────────────────────
