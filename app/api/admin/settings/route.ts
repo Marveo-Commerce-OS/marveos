@@ -67,13 +67,7 @@ export async function GET() {
     };
   };
 
-  let store;
-  try {
-    store = await updateAdminStore(mergeForms);
-  } catch {
-    // Read-only fallback for environments where writes are unavailable.
-    store = mergeForms(await readAdminStore());
-  }
+  const store = mergeForms(await readAdminStore());
 
   return NextResponse.json({
     tracking: store.tracking,

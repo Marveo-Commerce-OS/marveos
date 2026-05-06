@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
-import { appendAuditLog, updateAdminStore } from '@/lib/adminStore';
+import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 
 const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
 
@@ -66,7 +66,7 @@ export async function GET() {
     const status = Number((error as Error).message);
     return NextResponse.json({ error: 'Failed to fetch users from WordPress.' }, { status: Number.isFinite(status) ? status : 500 });
   }
-  const store = await updateAdminStore((current) => current);
+  const store = await readAdminStore();
 
   const users = wpUsers.map((user) => {
     const state = store.users[String(user.id)] ?? { active: true, portals: ['b2c'] };

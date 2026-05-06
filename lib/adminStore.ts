@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { cookies } from 'next/headers';
 
 export type PortalAccess = 'b2c' | 'b2b';
 
@@ -93,7 +94,17 @@ const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.g
 const WP_APP_USER = process.env.WP_APP_USER || '';
 const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD || '';
 
-function wpAuthHeader(): Record<string, string> {
+async function wpAuthHeader(): Promise<Record<string, string>> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get('admin_token')?.value;
+    if (token) {
+      return { Authorization: `Bearer ${token}` };
+    }
+  } catch {
+    // No request cookie context available; fall back to app credentials.
+  }
+
   if (!WP_APP_USER || !WP_APP_PASSWORD) return {};
   const encoded = Buffer.from(`${WP_APP_USER}:${WP_APP_PASSWORD}`).toString('base64');
   return { Authorization: `Basic ${encoded}` };
@@ -197,7 +208,7 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
 
 async function readFromWordPress(): Promise<AdminConfigStore> {
   const res = await fetch(`${WP_API_URL}/prag-core/v1/admin-config`, {
-    headers: { 'Content-Type': 'application/json', ...wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
     cache: 'no-store',
   });
   if (res.status === 204 || res.status === 404) return DEFAULT_STORE;
@@ -209,7 +220,7 @@ async function readFromWordPress(): Promise<AdminConfigStore> {
 async function writeToWordPress(data: AdminConfigStore): Promise<void> {
   const res = await fetch(`${WP_API_URL}/prag-core/v1/admin-config`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...wpAuthHeader() },
+    headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(`WP admin-config POST failed: ${res.status}`);
