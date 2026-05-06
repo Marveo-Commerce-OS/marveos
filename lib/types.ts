@@ -106,6 +106,8 @@ export interface SiteSettings {
   slides: SlideItem[];
   // Category Grid
   categories: CategoryItem[];
+  // Payments
+  paystack_public_key: string;
 }
 
 export interface WPPost {

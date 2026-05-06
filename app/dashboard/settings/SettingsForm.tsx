@@ -9,7 +9,7 @@ const inputCls = 'w-full h-11 px-4 rounded-xl border border-gray-200 text-sm foc
 const labelCls = 'text-sm font-semibold text-gray-700';
 const sectionCls = 'space-y-4 pt-4 border-t border-gray-100 first:border-0 first:pt-0';
 
-const TABS = ['Contact', 'Socials', 'Hero Slides', 'Brand Banner', 'Categories', 'Footer'];
+const TABS = ['Contact', 'Socials', 'Hero Slides', 'Brand Banner', 'Categories', 'Footer', 'Payments'];
 
 const DEFAULT_SLIDE: SlideItem = { title: '', description: '', cta: '', link: '/products', productImage: '', productAlt: '' };
 const DEFAULT_CATEGORY: CategoryItem = { name: '', slug: '', image: '' };
@@ -51,6 +51,7 @@ const HARDCODED_DEFAULTS: SiteSettings = {
     { name: 'Solar Panels',        slug: 'solar',                image: 'https://central.prag.global/wp-content/uploads/2026/04/b5564cf299de3eea9dbe804a547cf74e99bc41a7.png' },
     { name: 'Batteries',           slug: 'batteries',            image: 'https://central.prag.global/wp-content/uploads/2026/04/dd4b835690b546ee636b7659added08cd02d9891.png' },
   ],
+  paystack_public_key: '',
 };
 
 function mergeWithDefaults(saved: SiteSettings | null): SiteSettings {
@@ -61,6 +62,7 @@ function mergeWithDefaults(saved: SiteSettings | null): SiteSettings {
     socials: { ...HARDCODED_DEFAULTS.socials, ...(saved.socials ?? {}) },
     slides: Array.isArray(saved.slides) && saved.slides.length > 0 ? saved.slides : HARDCODED_DEFAULTS.slides,
     categories: Array.isArray(saved.categories) && saved.categories.length > 0 ? saved.categories : HARDCODED_DEFAULTS.categories,
+    paystack_public_key: saved.paystack_public_key ?? '',
   };
 }
 
@@ -438,6 +440,29 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
             <textarea value={form.footer_description} onChange={e => setField('footer_description', e.target.value)} rows={4}
               className="w-full p-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all resize-none"
               placeholder="Nigeria's leading power engineering company..." />
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'Payments' && (
+        <div className="space-y-5">
+          <div className={sectionCls}>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Paystack</p>
+            <div className="space-y-1.5">
+              <label className={labelCls}>Paystack Public Key</label>
+              <input
+                value={form.paystack_public_key}
+                onChange={e => setField('paystack_public_key', e.target.value)}
+                className={inputCls}
+                placeholder="pk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
+              />
+              <p className="text-xs text-gray-400">
+                Your Paystack public key — safe to expose on the frontend. Find it in your{' '}
+                <a href="https://dashboard.paystack.com/#/settings/developer" target="_blank" rel="noreferrer" className="text-sky-600 underline">
+                  Paystack dashboard → Settings → API Keys
+                </a>.
+              </p>
+            </div>
           </div>
         </div>
       )}
