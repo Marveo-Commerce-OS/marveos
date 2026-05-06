@@ -4,7 +4,7 @@ import { getOrders } from '@/lib/api';
 import Link from 'next/link';
 import OrderStatusSelect from './OrderStatusSelect';
 
-interface Props { searchParams: Promise<{ page?: string; status?: string; search?: string }> }
+interface Props { searchParams: Promise<{ page?: string; status?: string; search?: string; sort?: string }> }
 
 const STATUS_COLORS: Record<string, string> = {
   completed: 'bg-green-100 text-green-700',
@@ -27,18 +27,26 @@ const STATUS_LABELS: Record<string, string> = {
   refunded: 'Refunded',
 };
 
-function pageHref(page: number, params: { status?: string; search?: string }) {
+const SORT_LABELS: Record<string, string> = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+};
+
+function pageHref(page: number, params: { status?: string; search?: string; sort?: string }) {
   const qs = new URLSearchParams();
   qs.set('page', String(page));
   if (params.status) qs.set('status', params.status);
   if (params.search) qs.set('search', params.search);
+  if (params.sort) qs.set('sort', params.sort);
   return `?${qs.toString()}`;
 }
 
 export default async function OrdersPage({ searchParams }: Props) {
   const sp = await searchParams;
   const page = Number(sp.page ?? 1);
-  const { data: orders, total } = await getOrders(page, sp.status ?? 'any', sp.search ?? '');
+  const sort = sp.sort === 'oldest' ? 'oldest' : 'newest';
+  const order = sort === 'oldest' ? 'asc' : 'desc';
+  const { data: orders, total } = await getOrders(page, sp.status ?? 'any', sp.search ?? '', order);
   const totalPages = Math.ceil(total / 20);
 
   return (
@@ -54,6 +62,10 @@ export default async function OrdersPage({ searchParams }: Props) {
         <select name="status" defaultValue={sp.status ?? 'any'}
           className="h-10 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 w-full md:w-auto">
           {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>)}
+        </select>
+        <select name="sort" defaultValue={sort}
+          className="h-10 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 w-full md:w-auto">
+          {Object.entries(SORT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
         <button type="submit" className="h-10 px-5 bg-sky-700 text-white rounded-xl text-sm font-medium hover:bg-sky-800 transition-colors w-full md:w-auto">Filter</button>
       </form>

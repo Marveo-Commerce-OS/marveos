@@ -116,8 +116,15 @@ export async function createProductCategory(data: { name: string; slug?: string 
 }
 
 // ── Orders ─────────────────────────────────────────────────
-export async function getOrders(page = 1, status = 'any', search = '') {
-  const qs = new URLSearchParams({ per_page: '20', page: String(page), status, ...(search && { search }) });
+export async function getOrders(page = 1, status = 'any', search = '', order: 'asc' | 'desc' = 'desc') {
+  const qs = new URLSearchParams({
+    per_page: '20',
+    page: String(page),
+    status,
+    orderby: 'date',
+    order,
+    ...(search && { search }),
+  });
   return wcFetchWithTotal<WCOrder>(`/orders?${qs}`);
 }
 
