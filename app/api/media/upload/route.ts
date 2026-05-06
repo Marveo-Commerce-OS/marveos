@@ -11,15 +11,31 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file');
   if (!(file instanceof File)) return NextResponse.json({ error: 'Missing file' }, { status: 400 });
 
-  const res = await fetch(`${WP}/media`, {
+  const wpFormData = new FormData();
+  wpFormData.append('file', file, file.name);
+
+  let res = await fetch(`${WP}/media`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.token}`,
-      'Content-Type': file.type || 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${file.name}"`,
+      Accept: 'application/json',
     },
-    body: await file.arrayBuffer(),
+    body: wpFormData,
   });
+
+  // Some WP setups still expect raw binary uploads. Keep a fallback for those.
+  if (!res.ok) {
+    res = await fetch(`${WP}/media`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.token}`,
+        Accept: 'application/json',
+        'Content-Type': file.type || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${file.name}"`,
+      },
+      body: await file.arrayBuffer(),
+    });
+  }
 
   if (!res.ok) {
     const detail = await res.text();
