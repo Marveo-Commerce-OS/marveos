@@ -288,7 +288,15 @@ export default function AdminSettingsClient() {
     setStatus(res.ok ? 'success' : 'error');
     setTimeout(() => setStatus('idle'), 2200);
     if (res.ok) {
-      await loadData();
+      setUsers((prev) => prev.map((existing) => {
+        if (existing.id !== user.id) return existing;
+        return {
+          ...existing,
+          active: typeof updates.active === 'boolean' ? updates.active : existing.active,
+          portals: updates.portals ?? existing.portals,
+          roles: updates.role ? [updates.role] : existing.roles,
+        };
+      }));
     }
   }
 
@@ -321,7 +329,15 @@ export default function AdminSettingsClient() {
     setStatus(res.ok ? 'success' : 'error');
     setTimeout(() => setStatus('idle'), 2200);
     if (res.ok) {
-      await loadData();
+      const updated = await res.json().catch(() => ({ updated: [] as Array<{ userId: number; active: boolean; portals: Portal[] }> }));
+      const updatesById = new Map<number, { active: boolean; portals: Portal[] }>(
+        (updated.updated ?? []).map((item: { userId: number; active: boolean; portals: Portal[] }) => [item.userId, { active: item.active, portals: item.portals }]),
+      );
+      setUsers((prev) => prev.map((user) => {
+        const next = updatesById.get(user.id);
+        if (!next) return user;
+        return { ...user, active: next.active, portals: next.portals };
+      }));
     }
   }
 
@@ -337,7 +353,15 @@ export default function AdminSettingsClient() {
     setStatus(res.ok ? 'success' : 'error');
     setTimeout(() => setStatus('idle'), 2200);
     if (res.ok) {
-      await loadData();
+      const updated = await res.json().catch(() => ({ updated: [] as Array<{ userId: number; active: boolean; portals: Portal[] }> }));
+      const updatesById = new Map<number, { active: boolean; portals: Portal[] }>(
+        (updated.updated ?? []).map((item: { userId: number; active: boolean; portals: Portal[] }) => [item.userId, { active: item.active, portals: item.portals }]),
+      );
+      setUsers((prev) => prev.map((user) => {
+        const next = updatesById.get(user.id);
+        if (!next) return user;
+        return { ...user, active: next.active, portals: next.portals };
+      }));
     }
   }
 

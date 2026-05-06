@@ -185,9 +185,13 @@ export async function PUT(req: NextRequest) {
 
     for (const userId of targetIds) {
       const existing = users[String(userId)] ?? { active: true, portals: ['b2c'] as ('b2c' | 'b2b')[] };
+      const nextPortals = Array.isArray(body.portals)
+        ? body.portals
+            .filter((portal: unknown): portal is 'b2c' | 'b2b' => portal === 'b2c' || portal === 'b2b')
+        : existing.portals;
       users[String(userId)] = {
         active: typeof body.active === 'boolean' ? body.active : existing.active,
-        portals: Array.isArray(body.portals) && body.portals.length > 0 ? body.portals : existing.portals,
+        portals: nextPortals,
       };
     }
 
