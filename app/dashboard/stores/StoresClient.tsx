@@ -1,10 +1,13 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
-import { Plus, Trash2, Save, Pencil, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Save, Pencil, X, CheckCircle2, AlertCircle, Database } from 'lucide-react';
 
 const inputCls = 'w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all';
 const labelCls = 'text-sm font-semibold text-gray-700';
+
+type StoreType = 'prag' | 'online' | 'chain';
 
 interface Store {
   id?: number;
@@ -13,18 +16,28 @@ interface Store {
   address: string;
   phone: string;
   map_url: string;
-  store_type: string;
+  store_type: StoreType;
+  logo_url: string;
+  logo_alt: string;
 }
 
-const EMPTY: Store = { name: '', city: '', address: '', phone: '', map_url: '', store_type: 'prag' };
+const EMPTY: Store = { name: '', city: '', address: '', phone: '', map_url: '', store_type: 'prag', logo_url: '', logo_alt: '' };
 
-const TYPE_LABELS: Record<string, string> = { prag: 'PRAG Store', online: 'Online Store', chain: 'Chain Store' };
+const SECTION_ORDER: StoreType[] = ['prag', 'online', 'chain'];
+const TYPE_LABELS: Record<StoreType, string> = { prag: 'PRAG Stores', online: 'Online Stores', chain: 'Chain Stores' };
+const TYPE_HELP: Record<StoreType, string> = {
+  prag: 'Physical PRAG locations with address, phone, and map directions.',
+  online: 'Backend-managed marketplace and partner online store logos.',
+  chain: 'Backend-managed chain store logos and contact records.',
+};
 
 export default function StoresClient({ initialStores }: { initialStores: Store[] }) {
   const [stores, setStores] = useState<Store[]>(initialStores);
   const [editing, setEditing] = useState<Store | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
@@ -33,9 +46,36 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
     setTimeout(() => setToast(null), 3000);
   }
 
-  function openNew() { setEditing({ ...EMPTY }); setIsNew(true); }
+  function openNew(storeType: StoreType = 'prag') { setEditing({ ...EMPTY, store_type: storeType }); setIsNew(true); }
   function openEdit(s: Store) { setEditing({ ...s }); setIsNew(false); }
   function closeEdit() { setEditing(null); setIsNew(false); }
+
+  function updateEditing<K extends keyof Store>(key: K, value: Store[K]) {
+    setEditing((current) => current ? { ...current, [key]: value } : current);
+  }
+
+  async function handleLogoUpload(file: File) {
+    setUploadingLogo(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/media/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    setUploadingLogo(false);
+
+    if (!res.ok) {
+      showToast('error', 'Logo upload failed.');
+      return;
+    }
+
+    const media = await res.json() as { source_url?: string };
+    updateEditing('logo_url', media.source_url ?? '');
+    if (!editing?.logo_alt) updateEditing('logo_alt', file.name.replace(/\.[^.]+$/, ''));
+    showToast('success', 'Logo uploaded.');
+  }
 
   async function handleSave() {
     if (!editing) return;
@@ -70,6 +110,28 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
     }
   }
 
+  async function handleImportExisting() {
+    setImporting(true);
+    const res = await fetch('/api/stores/seed', { method: 'POST' });
+    setImporting(false);
+
+    if (!res.ok) {
+      showToast('error', 'Failed to import existing stores.');
+      return;
+    }
+
+    const payload = await res.json() as { stores?: Store[]; created?: number };
+    if (payload.stores) setStores(payload.stores);
+    showToast('success', payload.created ? `Imported ${payload.created} existing stores.` : 'Existing stores already synced.');
+  }
+
+  const storesByType = SECTION_ORDER.reduce<Record<StoreType, Store[]>>((acc, type) => {
+    acc[type] = stores.filter((store) => store.store_type === type);
+    return acc;
+  }, { prag: [], online: [], chain: [] });
+
+  const showLocationFields = editing?.store_type === 'prag';
+
   return (
     <div className="space-y-4">
       {toast && (
@@ -79,10 +141,17 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
         </div>
       )}
 
-      <div className="flex justify-end">
-        <button onClick={openNew}
-          className="flex items-center gap-2 px-4 py-2.5 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 transition-colors">
-          <Plus size={16} /> Add Store
+      <div className="flex flex-col md:flex-row md:justify-end gap-2">
+        <button
+          onClick={handleImportExisting}
+          disabled={importing}
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-60"
+        >
+          <Database size={16} /> {importing ? 'Importing...' : 'Import Existing Data'}
+        </button>
+        <button onClick={() => openNew('prag')}
+          className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 transition-colors">
+          <Plus size={16} /> Add PRAG Store
         </button>
       </div>
 
@@ -96,32 +165,75 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className={labelCls}>Store Name</label>
-              <input value={editing.name} onChange={e => setEditing(p => ({ ...p!, name: e.target.value }))} className={inputCls} placeholder="PRAG Lagos" />
+              <input value={editing.name} onChange={e => updateEditing('name', e.target.value)} className={inputCls} placeholder="PRAG Lagos" />
             </div>
             <div className="space-y-1.5">
               <label className={labelCls}>Store Type</label>
-              <select value={editing.store_type} onChange={e => setEditing(p => ({ ...p!, store_type: e.target.value }))} className={inputCls}>
+              <select value={editing.store_type} onChange={e => updateEditing('store_type', e.target.value as StoreType)} className={inputCls}>
                 <option value="prag">PRAG Store</option>
                 <option value="online">Online Store</option>
                 <option value="chain">Chain Store</option>
               </select>
             </div>
-            <div className="space-y-1.5">
-              <label className={labelCls}>City</label>
-              <input value={editing.city} onChange={e => setEditing(p => ({ ...p!, city: e.target.value }))} className={inputCls} placeholder="Lagos" />
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelCls}>Phone</label>
-              <input value={editing.phone} onChange={e => setEditing(p => ({ ...p!, phone: e.target.value }))} className={inputCls} placeholder="+234..." />
+            {showLocationFields && (
+              <>
+                <div className="space-y-1.5">
+                  <label className={labelCls}>City</label>
+                  <input value={editing.city} onChange={e => updateEditing('city', e.target.value)} className={inputCls} placeholder="Lagos" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelCls}>Phone</label>
+                  <input value={editing.phone} onChange={e => updateEditing('phone', e.target.value)} className={inputCls} placeholder="+234..." />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className={labelCls}>Address</label>
+                  <input value={editing.address} onChange={e => updateEditing('address', e.target.value)} className={inputCls} placeholder="14 Industrial Layout, VI, Lagos" />
+                </div>
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className={labelCls}>Google Maps URL</label>
+                  <input value={editing.map_url} onChange={e => updateEditing('map_url', e.target.value)} className={inputCls} placeholder="https://maps.google.com/..." />
+                </div>
+              </>
+            )}
+            {!showLocationFields && (
+              <div className="space-y-1.5 md:col-span-2">
+                <label className={labelCls}>Store Link URL</label>
+                <input value={editing.map_url} onChange={e => updateEditing('map_url', e.target.value)} className={inputCls} placeholder="https://shop.prag.global" />
+              </div>
+            )}
+            <div className="space-y-1.5 md:col-span-2">
+              <label className={labelCls}>Logo</label>
+              <div className="flex flex-col gap-3 md:items-start">
+                <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+                  {uploadingLogo ? 'Uploading...' : 'Upload Logo'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      await handleLogoUpload(file);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
             </div>
             <div className="space-y-1.5 md:col-span-2">
-              <label className={labelCls}>Address</label>
-              <input value={editing.address} onChange={e => setEditing(p => ({ ...p!, address: e.target.value }))} className={inputCls} placeholder="14 Industrial Layout, VI, Lagos" />
+              <label className={labelCls}>Logo Alt Text</label>
+              <input value={editing.logo_alt} onChange={e => updateEditing('logo_alt', e.target.value)} className={inputCls} placeholder="Store logo alt text" />
             </div>
-            <div className="space-y-1.5 md:col-span-2">
-              <label className={labelCls}>Google Maps URL</label>
-              <input value={editing.map_url} onChange={e => setEditing(p => ({ ...p!, map_url: e.target.value }))} className={inputCls} placeholder="https://maps.google.com/..." />
-            </div>
+            {editing.logo_url && (
+              <div className="md:col-span-2 rounded-2xl border border-gray-100 p-4 bg-gray-50">
+                <Image src={editing.logo_url} alt={editing.logo_alt || editing.name || 'Store logo preview'} width={128} height={64} unoptimized className="h-16 w-auto object-contain" />
+              </div>
+            )}
+            {!showLocationFields && (
+              <div className="md:col-span-2 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Online and chain entries drive storefront logo sections. Add logo, name, and Store Link URL for clickable logos.
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={closeEdit} className="px-4 py-2.5 text-sm text-gray-600 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">Cancel</button>
@@ -134,37 +246,57 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
       )}
 
       {/* Stores List */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        {stores.length === 0 ? (
-          <div className="px-6 py-12 text-center text-gray-400 text-sm">No stores yet. Click "Add Store" to create one.</div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr>{['Store', 'Type', 'City', 'Phone', 'Actions'].map(h => (
-                <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-              ))}</tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {stores.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-4 font-medium text-gray-900">{s.name}</td>
-                  <td className="px-5 py-4">
-                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-sky-50 text-sky-700">{TYPE_LABELS[s.store_type] ?? s.store_type}</span>
-                  </td>
-                  <td className="px-5 py-4 text-gray-500">{s.city}</td>
-                  <td className="px-5 py-4 text-gray-500">{s.phone}</td>
-                  <td className="px-5 py-4">
+      <div className="grid grid-cols-1 gap-5">
+        {SECTION_ORDER.map((type) => (
+          <div key={type} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-100 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">{TYPE_LABELS[type]}</h3>
+                <p className="text-sm text-gray-500">{TYPE_HELP[type]}</p>
+              </div>
+              <button
+                onClick={() => openNew(type)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-50 text-sky-700 rounded-xl text-sm font-semibold hover:bg-sky-100 transition-colors"
+              >
+                <Plus size={16} /> Add {TYPE_LABELS[type].slice(0, -1)}
+              </button>
+            </div>
+
+            {storesByType[type].length === 0 ? (
+              <div className="px-6 py-12 text-center text-gray-400 text-sm">No {TYPE_LABELS[type].toLowerCase()} yet.</div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {storesByType[type].map((store) => (
+                  <div key={store.id} className="px-6 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 hover:bg-gray-50 transition-colors">
+                    <div className="flex items-center gap-4 min-w-0">
+                      <div className="w-14 h-14 rounded-xl border border-gray-100 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0">
+                        {store.logo_url ? (
+                            <Image src={store.logo_url} alt={store.logo_alt || store.name} width={96} height={40} unoptimized className="max-h-10 w-auto object-contain" />
+                        ) : (
+                          <span className="text-xs font-semibold text-gray-400">No Logo</span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{store.name}</p>
+                        <p className="text-sm text-gray-500 truncate">
+                          {type === 'prag'
+                            ? [store.city, store.phone].filter(Boolean).join(' • ') || 'No contact details yet'
+                            : store.logo_alt || 'Logo-driven storefront section'}
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-2">
-                      <button onClick={() => openEdit(s)} className="p-1.5 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"><Pencil size={14} /></button>
-                      <button onClick={() => s.id && handleDelete(s.id)} disabled={deleting === s.id}
+                      <button onClick={() => openEdit(store)} className="p-1.5 text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"><Pencil size={14} /></button>
+                      <button onClick={() => store.id && handleDelete(store.id)} disabled={deleting === store.id}
                         className="p-1.5 text-red-400 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"><Trash2 size={14} /></button>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import type { SiteSettings, SlideItem, CategoryItem } from '@/lib/types';
 import { Save, CheckCircle2, AlertCircle, Plus, Trash2, GripVertical } from 'lucide-react';
@@ -21,6 +22,9 @@ const HARDCODED_DEFAULTS: SiteSettings = {
   business_hours_weekday: 'Mon–Fri: 8:00 AM – 6:00 PM',
   business_hours_saturday: 'Sat: 9:00 AM – 2:00 PM',
   announcement_bar: '',
+  site_under_construction: false,
+  under_construction_title: 'We are coming back soon',
+  under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
   footer_description: "Nigeria's leading power engineering company. We design, supply and install power solutions for homes, businesses and industrial facilities across the country.",
   brand_banner_title: 'No Hype. Just Inverters That Deliver.',
   brand_banner_description: 'Explore stabilizers, inverters, batteries, and complete power solutions designed to keep your home or business running without interruption.',
@@ -63,6 +67,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
   const [form, setForm] = useState<SiteSettings>(() => mergeWithDefaults(initialSettings));
   const [activeTab, setActiveTab] = useState('Contact');
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
 
   function setField(field: keyof SiteSettings, value: unknown) {
     setForm(p => ({ ...p, [field]: value }));
@@ -89,6 +94,27 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
 
   function addCategory() { setField('categories', [...form.categories, { ...DEFAULT_CATEGORY }]); }
   function removeCategory(i: number) { setField('categories', form.categories.filter((_, idx) => idx !== i)); }
+
+  async function uploadMedia(file: File, fieldKey: string) {
+    setUploadingField(fieldKey);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch('/api/media/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    setUploadingField(null);
+    if (!res.ok) {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 3000);
+      return null;
+    }
+
+    const media = await res.json() as { source_url?: string };
+    return media.source_url ?? null;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -170,6 +196,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
         </div>
       )}
 
+
       {/* ── Socials ── */}
       {activeTab === 'Socials' && (
         <div className="space-y-4">
@@ -195,7 +222,7 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
           </div>
 
           {form.slides.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8 border-2 border-dashed border-gray-200 rounded-xl">No slides yet. Click "Add Slide" to create one.</p>
+            <p className="text-sm text-gray-400 text-center py-8 border-2 border-dashed border-gray-200 rounded-xl">No slides yet. Click &quot;Add Slide&quot; to create one.</p>
           )}
 
           {form.slides.map((slide, i) => (
@@ -228,10 +255,24 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
                   <input value={slide.link} onChange={e => setSlide(i, 'link', e.target.value)} className={inputCls} placeholder="/products" />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className={labelCls}>Product Image URL</label>
-                  <input value={slide.productImage} onChange={e => setSlide(i, 'productImage', e.target.value)} className={inputCls} placeholder="https://..." />
+                  <label className={labelCls}>Product Image</label>
+                  <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+                    {uploadingField === `slide-${i}` ? 'Uploading...' : 'Upload Image'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        const url = await uploadMedia(file, `slide-${i}`);
+                        if (url) setSlide(i, 'productImage', url);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
                   {slide.productImage && (
-                    <img src={slide.productImage} alt="preview" className="h-20 object-contain rounded-lg border border-gray-100 mt-1" />
+                    <Image src={slide.productImage} alt="preview" width={160} height={80} unoptimized className="h-20 w-auto object-contain rounded-lg border border-gray-100 mt-1" />
                   )}
                 </div>
                 <div className="space-y-1.5">
@@ -268,10 +309,24 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
               <input value={form.brand_banner_link} onChange={e => setField('brand_banner_link', e.target.value)} className={inputCls} placeholder="/products/inverters" />
             </div>
             <div className="space-y-1.5 md:col-span-2">
-              <label className={labelCls}>Product Image URL</label>
-              <input value={form.brand_banner_image} onChange={e => setField('brand_banner_image', e.target.value)} className={inputCls} placeholder="https://..." />
+              <label className={labelCls}>Product Image</label>
+              <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+                {uploadingField === 'brand-banner' ? 'Uploading...' : 'Upload Image'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    const url = await uploadMedia(file, 'brand-banner');
+                    if (url) setField('brand_banner_image', url);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
               {form.brand_banner_image && (
-                <img src={form.brand_banner_image} alt="preview" className="h-24 object-contain rounded-lg border border-gray-100 mt-1" />
+                <Image src={form.brand_banner_image} alt="preview" width={192} height={96} unoptimized className="h-24 w-auto object-contain rounded-lg border border-gray-100 mt-1" />
               )}
             </div>
           </div>
@@ -312,10 +367,24 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
                   <input value={cat.slug} onChange={e => setCategory(i, 'slug', e.target.value)} className={inputCls} placeholder="voltage-stabilizers" />
                 </div>
                 <div className="space-y-1.5 md:col-span-2">
-                  <label className={labelCls}>Image URL</label>
-                  <input value={cat.image} onChange={e => setCategory(i, 'image', e.target.value)} className={inputCls} placeholder="https://..." />
+                  <label className={labelCls}>Image</label>
+                  <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+                    {uploadingField === `category-${i}` ? 'Uploading...' : 'Upload Image'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        const url = await uploadMedia(file, `category-${i}`);
+                        if (url) setCategory(i, 'image', url);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
                   {cat.image && (
-                    <img src={cat.image} alt="preview" className="h-16 object-contain rounded-lg border border-gray-100 mt-1" />
+                    <Image src={cat.image} alt="preview" width={128} height={64} unoptimized className="h-16 w-auto object-contain rounded-lg border border-gray-100 mt-1" />
                   )}
                 </div>
               </div>

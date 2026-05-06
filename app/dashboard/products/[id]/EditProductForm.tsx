@@ -1,18 +1,51 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Save, CheckCircle2, AlertCircle, Plus, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 
 const inputCls = 'w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all';
 const labelCls = 'text-sm font-semibold text-gray-700';
-const TABS = ['General', 'Description', 'Specifications', 'Images'];
+const TABS = ['General', 'Description', 'Specifications', 'Images', 'Documents'];
 
 interface Attribute { id: number; name: string; options: string[] }
 interface ProductImage { id: number; src: string; alt: string }
+interface ProductCategory { id: number; name: string; slug: string }
+interface ProductRecord {
+  id: number;
+  name?: string;
+  regular_price?: string;
+  sale_price?: string;
+  status?: string;
+  featured?: boolean;
+  stock_status?: string;
+  short_description?: string;
+  description?: string;
+  weight?: string;
+  dimensions?: { length: string; width: string; height: string };
+  attributes?: Attribute[];
+  categories?: { id: number; name?: string; slug?: string }[];
+  images?: ProductImage[];
+}
+interface ProductDoc {
+  id: number;
+  title: string;
+  file_url: string;
+  file_type: string;
+  file_size: string;
+  media_id?: number;
+}
 
-export default function EditProductForm({ product }: { product: Record<string, any> }) {
+export default function EditProductForm({
+  product,
+  categories,
+  isCreateMode = false,
+}: {
+  product: ProductRecord;
+  categories: ProductCategory[];
+  isCreateMode?: boolean;
+}) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('General');
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -29,7 +62,24 @@ export default function EditProductForm({ product }: { product: Record<string, a
   const [dimensions, setDimensions] = useState<{ length: string; width: string; height: string }>(product.dimensions ?? { length: '', width: '', height: '' });
   const [attributes, setAttributes] = useState<Attribute[]>(product.attributes ?? []);
   const [images, setImages] = useState<ProductImage[]>(product.images ?? []);
-  const [newImageUrl, setNewImageUrl] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<{ id: number; name?: string; slug?: string }[]>(product.categories ?? []);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [categoryOptions, setCategoryOptions] = useState<ProductCategory[]>(categories ?? []);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [docs, setDocs] = useState<ProductDoc[]>([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docTitle, setDocTitle] = useState('');
+  const [docFile, setDocFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    async function loadDocs() {
+      if (!product.id) return;
+      const res = await fetch(`/api/products/${product.id}/documents`, { cache: 'no-store' });
+      if (!res.ok) return;
+      setDocs(await res.json());
+    }
+    void loadDocs();
+  }, [product.id]);
 
   function addAttribute() {
     setAttributes(prev => [...prev, { id: Date.now(), name: '', options: [''] }]);
@@ -47,20 +97,111 @@ export default function EditProductForm({ product }: { product: Record<string, a
     setAttributes(prev => prev.map((a, idx) => idx === i ? { ...a, options: val.split(',').map(s => s.trim()) } : a));
   }
 
-  function addImage() {
-    if (!newImageUrl.trim()) return;
-    setImages(prev => [...prev, { id: Date.now(), src: newImageUrl.trim(), alt: name }]);
-    setNewImageUrl('');
+  async function uploadImages(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploadingImages(true);
+
+    const uploaded: ProductImage[] = [];
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/media/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        setUploadingImages(false);
+        setStatus('error');
+        setTimeout(() => setStatus('idle'), 2500);
+        return;
+      }
+
+      const media = await res.json() as { id: number; source_url: string };
+      uploaded.push({ id: media.id ?? Date.now(), src: media.source_url, alt: name || file.name.replace(/\.[^.]+$/, '') });
+    }
+
+    setImages((prev) => [...prev, ...uploaded]);
+    setUploadingImages(false);
   }
 
   function removeImage(i: number) {
     setImages(prev => prev.filter((_, idx) => idx !== i));
   }
 
+  async function createCategory() {
+    const name = newCategoryName.trim();
+    if (!name) return;
+    const res = await fetch('/api/product-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 2500);
+      return;
+    }
+
+    const created = await res.json();
+    setCategoryOptions((prev) => [...prev, created]);
+    setSelectedCategories((prev) => [...prev, { id: created.id, name: created.name, slug: created.slug }]);
+    setNewCategoryName('');
+  }
+
+  function toggleCategory(category: ProductCategory) {
+    const exists = selectedCategories.some((c) => c.id === category.id);
+    if (exists) {
+      setSelectedCategories((prev) => prev.filter((c) => c.id !== category.id));
+      return;
+    }
+    setSelectedCategories((prev) => [...prev, { id: category.id, name: category.name, slug: category.slug }]);
+  }
+
+  async function uploadDocument() {
+    if (!product.id || !docFile) return;
+    setUploadingDoc(true);
+    const formData = new FormData();
+    formData.append('title', docTitle);
+    formData.append('file', docFile);
+
+    const res = await fetch(`/api/products/${product.id}/documents`, {
+      method: 'POST',
+      body: formData,
+    });
+    setUploadingDoc(false);
+
+    if (!res.ok) {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 2500);
+      return;
+    }
+
+    const created = await res.json();
+    setDocs((prev) => [created, ...prev]);
+    setDocTitle('');
+    setDocFile(null);
+    setStatus('success');
+    setTimeout(() => setStatus('idle'), 1800);
+  }
+
+  async function deleteDocument(doc: ProductDoc) {
+    if (!product.id) return;
+    const res = await fetch(`/api/products/${product.id}/documents?docId=${doc.id}&mediaId=${doc.media_id ?? ''}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 2500);
+      return;
+    }
+    setDocs((prev) => prev.filter((d) => d.id !== doc.id));
+  }
+
   async function handleSave() {
     setStatus('saving');
     const payload = {
-      id: product.id,
       name,
       regular_price: regularPrice,
       sale_price: salePrice,
@@ -71,18 +212,29 @@ export default function EditProductForm({ product }: { product: Record<string, a
       description,
       weight,
       dimensions,
+      categories: selectedCategories.map((c) => ({ id: c.id })),
       attributes: attributes.map(a => ({ id: a.id, name: a.name, options: a.options, visible: true })),
       images: images.map(img => ({ src: img.src, alt: img.alt })),
     };
 
     const res = await fetch('/api/products', {
-      method: 'PUT',
+      method: isCreateMode ? 'POST' : 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(isCreateMode ? payload : { id: product.id, ...payload }),
     });
 
     setStatus(res.ok ? 'success' : 'error');
-    if (res.ok) setTimeout(() => { setStatus('idle'); router.refresh(); }, 2000);
+    if (res.ok) {
+      const data = await res.json();
+      setTimeout(() => {
+        setStatus('idle');
+        if (isCreateMode && data?.id) {
+          router.push(`/dashboard/products/${data.id}`);
+          return;
+        }
+        router.refresh();
+      }, 1200);
+    }
     else setTimeout(() => setStatus('idle'), 3000);
   }
 
@@ -147,6 +299,31 @@ export default function EditProductForm({ product }: { product: Record<string, a
                 </select>
               </div>
             </div>
+
+            <div className="space-y-3 pt-2 border-t border-gray-100">
+              <label className={labelCls}>Categories</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {categoryOptions.map((category) => {
+                  const checked = selectedCategories.some((c) => c.id === category.id);
+                  return (
+                    <label key={category.id} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input type="checkbox" checked={checked} onChange={() => toggleCategory(category)} />
+                      {category.name}
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <input
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  className={`${inputCls} flex-1`}
+                  placeholder="Create new category"
+                />
+                <button type="button" onClick={createCategory} className="px-4 h-11 bg-gray-900 text-white rounded-xl text-sm font-medium hover:bg-black transition-colors">Create</button>
+              </div>
+            </div>
+
             <div className="flex items-center gap-3">
               <button type="button" onClick={() => setFeatured((f: boolean) => !f)}
                 className={`w-10 h-6 rounded-full transition-colors relative ${featured ? 'bg-sky-700' : 'bg-gray-200'}`}>
@@ -207,7 +384,7 @@ export default function EditProductForm({ product }: { product: Record<string, a
                 </button>
               </div>
               {attributes.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">No attributes yet. Click "Add Attribute".</p>
+                <p className="text-sm text-gray-400 text-center py-6 border-2 border-dashed border-gray-200 rounded-xl">No attributes yet. Click &quot;Add Attribute&quot;.</p>
               )}
               {attributes.map((attr, i) => (
                 <div key={i} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
@@ -253,18 +430,70 @@ export default function EditProductForm({ product }: { product: Record<string, a
               ))}
             </div>
             <div className="space-y-1.5 pt-2 border-t border-gray-100">
-              <label className={labelCls}>Add Image by URL</label>
-              <div className="flex gap-2">
-                <input value={newImageUrl} onChange={e => setNewImageUrl(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addImage())}
-                  className={`${inputCls} flex-1`} placeholder="https://..." />
-                <button type="button" onClick={addImage}
-                  className="px-4 h-11 bg-sky-700 text-white rounded-xl text-sm font-medium hover:bg-sky-800 transition-colors whitespace-nowrap">
-                  Add
-                </button>
-              </div>
+              <label className={labelCls}>Upload Product Images</label>
+              <label className="inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors">
+                {uploadingImages ? 'Uploading...' : 'Upload Images'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={async (event) => {
+                    await uploadImages(event.target.files);
+                    event.target.value = '';
+                  }}
+                />
+              </label>
               <p className="text-xs text-gray-400">First image is used as the main product image.</p>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'Documents' && (
+          <div className="space-y-5">
+            {!product.id && (
+              <div className="p-3 bg-yellow-50 border border-yellow-100 rounded-xl text-yellow-700 text-sm">
+                Save this product first, then upload technical documents.
+              </div>
+            )}
+
+            {product.id > 0 && (
+              <>
+                <div className="space-y-3">
+                  <label className={labelCls}>Upload Technical Document</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input value={docTitle} onChange={(e) => setDocTitle(e.target.value)} className={`${inputCls} md:col-span-2`} placeholder="Document title (optional)" />
+                    <input type="file" onChange={(e) => setDocFile(e.target.files?.[0] ?? null)} className="h-11 px-3 rounded-xl border border-gray-200 text-sm" />
+                  </div>
+                  <button type="button" onClick={uploadDocument} disabled={!docFile || uploadingDoc}
+                    className="px-4 py-2 bg-sky-700 text-white rounded-lg text-sm font-medium hover:bg-sky-800 disabled:opacity-60">
+                    {uploadingDoc ? 'Uploading...' : 'Upload to WordPress Media'}
+                  </button>
+                </div>
+
+                <div className="pt-4 border-t border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Uploaded Documents</h3>
+                  {docs.length === 0 ? (
+                    <p className="text-sm text-gray-400">No documents uploaded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {docs.map((doc) => (
+                        <div key={doc.id} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-gray-200">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{doc.title}</p>
+                            <p className="text-xs text-gray-500">{doc.file_type?.toUpperCase() || 'FILE'} {doc.file_size ? `• ${doc.file_size}` : ''}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <a href={doc.file_url} target="_blank" rel="noreferrer" className="px-2.5 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200">Open</a>
+                            <button type="button" onClick={() => deleteDocument(doc)} className="px-2.5 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -273,7 +502,7 @@ export default function EditProductForm({ product }: { product: Record<string, a
         <button type="button" onClick={handleSave} disabled={status === 'saving'}
           className="flex items-center gap-2 px-6 py-3 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 transition-colors disabled:opacity-60">
           <Save size={16} />
-          {status === 'saving' ? 'Saving...' : 'Save Product'}
+          {status === 'saving' ? 'Saving...' : isCreateMode ? 'Create Product' : 'Save Product'}
         </button>
       </div>
     </div>

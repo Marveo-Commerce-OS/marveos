@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { appendAuditLog } from '@/lib/adminStore';
 
 const WC = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wc/v3') ?? 'https://central.prag.global/wp-json/wc/v3'}`;
 const AUTH = `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`;
@@ -18,5 +19,12 @@ export async function PUT(req: NextRequest) {
   });
 
   if (!res.ok) return NextResponse.json({ error: 'WC update failed' }, { status: res.status });
-  return NextResponse.json(await res.json());
+  const updated = await res.json();
+  await appendAuditLog({
+    actorEmail: session.user?.user_email ?? 'unknown',
+    action: 'order.updated',
+    target: `order:${id}`,
+    details: `Status changed to ${status}`,
+  });
+  return NextResponse.json(updated);
 }

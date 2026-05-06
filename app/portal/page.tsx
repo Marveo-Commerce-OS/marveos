@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 
 export default function PortalPage() {
   const router = useRouter();
@@ -125,7 +124,7 @@ export default function PortalPage() {
 
       {/* Footer */}
       <footer className="px-8 py-5 border-t border-gray-100 text-center">
-        <p className="text-xs text-gray-300 font-['Space_Grotesk']">PRAG Control Center · Core by Avario</p>
+        <p className="text-xs text-gray-500/50 font-['Space_Grotesk']">PRAG Control Center · Developed by Avario Digitals</p>
       </footer>
 
     </div>

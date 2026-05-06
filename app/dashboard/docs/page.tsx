@@ -4,12 +4,24 @@ import DocsClient from './DocsClient';
 
 const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
 
+interface RawDoc {
+  id: number;
+  title?: { rendered?: string };
+  meta?: {
+    file_url?: string;
+    file_type?: string;
+    file_size?: string;
+    pages?: string;
+    product_id?: string | number;
+  };
+}
+
 async function getDocs() {
   try {
     const res = await fetch(`${WP}/prag_document?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
     if (!res.ok) return [];
-    const data = await res.json();
-    return data.map((d: any) => ({
+    const data = (await res.json()) as RawDoc[];
+    return data.map((d) => ({
       id: d.id,
       title: d.title?.rendered ?? '',
       file_url: d.meta?.file_url ?? '',

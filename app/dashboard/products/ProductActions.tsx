@@ -9,10 +9,9 @@ interface Props {
   value: boolean | string;
   label: string;
   toggleValue?: string;
-  variant?: 'featured' | 'status';
 }
 
-export default function ProductActions({ id, field, value, label, toggleValue, variant }: Props) {
+export default function ProductActions({ id, field, value, label, toggleValue }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 

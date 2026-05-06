@@ -4,19 +4,27 @@ import StoresClient from './StoresClient';
 
 const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
 
+type StoreType = 'prag' | 'online' | 'chain';
+
+function normalizeStoreType(value: string | undefined): StoreType {
+  return value === 'online' || value === 'chain' ? value : 'prag';
+}
+
 async function getStores() {
   try {
     const res = await fetch(`${WP}/prag_store?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
     if (!res.ok) return [];
-    const data = await res.json();
-    return data.map((s: any) => ({
+    const data = await res.json() as Array<{ id: number; title?: { rendered?: string }; meta?: Record<string, string> }>;
+    return data.map((s) => ({
       id: s.id,
       name: s.title?.rendered ?? '',
       city: s.meta?.city ?? '',
       address: s.meta?.address ?? '',
       phone: s.meta?.phone ?? '',
       map_url: s.meta?.map_url ?? '',
-      store_type: s.meta?.store_type ?? 'prag',
+      store_type: normalizeStoreType(s.meta?.store_type),
+      logo_url: s.meta?.logo_url ?? '',
+      logo_alt: s.meta?.logo_alt ?? '',
     }));
   } catch { return []; }
 }

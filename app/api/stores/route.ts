@@ -3,7 +3,19 @@ import { getSession } from '@/lib/auth';
 
 const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
 
-function storeBody(data: any) {
+interface StorePayload {
+  id?: number;
+  name?: string;
+  city?: string;
+  address?: string;
+  phone?: string;
+  map_url?: string;
+  store_type?: 'prag' | 'online' | 'chain';
+  logo_url?: string;
+  logo_alt?: string;
+}
+
+function storeBody(data: StorePayload) {
   return {
     title: data.name,
     status: 'publish',
@@ -13,6 +25,8 @@ function storeBody(data: any) {
       phone: data.phone ?? '',
       map_url: data.map_url ?? '',
       store_type: data.store_type ?? 'prag',
+      logo_url: data.logo_url ?? '',
+      logo_alt: data.logo_alt ?? '',
     },
   };
 }
@@ -21,7 +35,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const data = await req.json();
+  const data = await req.json() as StorePayload;
   const res = await fetch(`${WP}/prag_store`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
@@ -39,7 +53,7 @@ export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const data = await req.json();
+  const data = await req.json() as StorePayload;
   const res = await fetch(`${WP}/prag_store/${data.id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },

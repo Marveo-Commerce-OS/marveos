@@ -89,6 +89,10 @@ export interface SiteSettings {
   socials: SocialLinks;
   // Announcement
   announcement_bar: string;
+  // Under Construction
+  site_under_construction: boolean;
+  under_construction_title: string;
+  under_construction_message: string;
   // Footer
   footer_description: string;
   // Brand Banner

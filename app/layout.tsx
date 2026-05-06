@@ -6,7 +6,7 @@ const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space
 
 export const metadata: Metadata = {
   title: 'PRAG Admin',
-  description: 'PRAG Control Center — Core by Avario',
+  description: 'PRAG Control Center — Developed by Avario Digitals',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

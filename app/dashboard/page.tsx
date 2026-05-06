@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { getDashboardStats } from '@/lib/api';
 import { TrendingUp, ShoppingBag, Users, Clock } from 'lucide-react';
+import Link from 'next/link';
 
 const STATUS_COLORS: Record<string, string> = {
   completed: 'bg-green-100 text-green-700',
@@ -46,7 +47,7 @@ export default async function DashboardPage() {
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
           <h2 className="font-bold text-gray-900">Recent Orders</h2>
-          <a href="/dashboard/orders" className="text-sm text-sky-700 hover:underline">View all →</a>
+          <Link href="/dashboard/orders" className="text-sm text-sky-700 hover:underline">View all →</Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -60,7 +61,9 @@ export default async function DashboardPage() {
                 ? <tr><td colSpan={5} className="px-6 py-10 text-center text-gray-400">No orders yet</td></tr>
                 : stats.recentOrders.map((o) => (
                   <tr key={o.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 font-medium text-gray-900">#{o.id}</td>
+                    <td className="px-6 py-4 font-medium text-sky-700">
+                      <Link href={`/dashboard/orders/${o.id}`} className="hover:underline">#{o.id}</Link>
+                    </td>
                     <td className="px-6 py-4 text-gray-600">{o.billing.first_name} {o.billing.last_name}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[o.status] ?? 'bg-gray-100 text-gray-600'}`}>{o.status}</span>

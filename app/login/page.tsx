@@ -41,7 +41,7 @@ export default function LoginPage() {
               priority 
             />
           </div>
-          <p className="text-gray-500 text-sm mt-1">Core by Avario — Control Center</p>
+          <p className="text-gray-400/50 text-sm mt-1">Developed by Avario Digitals — Control Center</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">

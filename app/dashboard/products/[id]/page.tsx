@@ -16,11 +16,21 @@ async function getProduct(id: string) {
   } catch { return null; }
 }
 
+async function getCategories() {
+  try {
+    const res = await fetch(`${WC}/products/categories?per_page=100&${AUTH}`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
 interface Props { params: Promise<{ id: string }> }
 
 export default async function EditProductPage({ params }: Props) {
   const { id } = await params;
-  const product = await getProduct(id);
+  const [product, categories] = await Promise.all([getProduct(id), getCategories()]);
   if (!product) notFound();
 
   return (
@@ -34,7 +44,7 @@ export default async function EditProductPage({ params }: Props) {
           <p className="text-gray-400 text-xs mt-0.5">Product #{product.id}</p>
         </div>
       </div>
-      <EditProductForm product={product} />
+      <EditProductForm product={product} categories={categories} />
     </div>
   );
 }

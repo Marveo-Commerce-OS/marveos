@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { readAdminStore } from '@/lib/adminStore';
 
 const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
 
@@ -31,13 +32,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Access denied. Admin or Shop Manager role required.` }, { status: 403 });
   }
 
+  const store = await readAdminStore();
+  const userState = store.users[String(userData.id)];
+  if (userState && !userState.active) {
+    return NextResponse.json({ error: 'This account has been deactivated for admin portal access.' }, { status: 403 });
+  }
+
   const cookieStore = await cookies();
   const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
   cookieStore.set('admin_token', data.token, opts);
   cookieStore.set('admin_user', JSON.stringify({
+    id: userData.id,
     user_display_name: data.user_display_name,
     user_email: data.user_email,
     isAdmin: allowed,
+    roles: Array.isArray(userData.roles) ? userData.roles : [],
+    portals: userState?.portals ?? ['b2c'],
   }), opts);
 
   return NextResponse.json({ success: true, redirect: '/portal' });

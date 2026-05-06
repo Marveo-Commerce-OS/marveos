@@ -3,7 +3,17 @@ import { getSession } from '@/lib/auth';
 
 const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
 
-function docBody(data: any) {
+interface DocumentPayload {
+  id?: number;
+  title?: string;
+  file_url?: string;
+  file_type?: string;
+  file_size?: string;
+  pages?: string;
+  product_id?: number | string;
+}
+
+function docBody(data: DocumentPayload) {
   return {
     title: data.title,
     status: 'publish',
@@ -21,7 +31,7 @@ export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const data = await req.json();
+  const data = (await req.json()) as DocumentPayload;
   const res = await fetch(`${WP}/prag_document`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
@@ -36,7 +46,7 @@ export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const data = await req.json();
+  const data = (await req.json()) as DocumentPayload;
   const res = await fetch(`${WP}/prag_document/${data.id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },

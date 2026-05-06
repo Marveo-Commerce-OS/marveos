@@ -13,7 +13,7 @@ interface Doc {
   file_type: string;
   file_size: string;
   pages: string;
-  product_id: string;
+  product_id: string | number;
 }
 
 const EMPTY: Doc = { title: '', file_url: '', file_type: 'pdf', file_size: '', pages: '', product_id: '' };
@@ -134,7 +134,7 @@ export default function DocsClient({ initialDocs }: { initialDocs: Doc[] }) {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         {docs.length === 0 ? (
-          <div className="px-6 py-12 text-center text-gray-400 text-sm">No documents yet. Click "Add Document" to create one.</div>
+          <div className="px-6 py-12 text-center text-gray-400 text-sm">No documents yet. Click &quot;Add Document&quot; to create one.</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50">

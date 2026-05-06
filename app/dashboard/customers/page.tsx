@@ -6,6 +6,39 @@ import Link from 'next/link';
 
 interface Props { searchParams: Promise<{ page?: string; search?: string }> }
 
+function parseMoney(value: string | number | null | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value !== 'string') return 0;
+
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+
+  const normalized = trimmed.replace(/[^\d.,-]/g, '');
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
+
+  let numeric = normalized;
+  if (hasComma && hasDot) {
+    numeric = normalized.replace(/,/g, '');
+  } else if (hasComma && !hasDot) {
+    numeric = normalized.replace(/,/g, '.');
+  }
+
+  const parsed = Number.parseFloat(numeric);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatNaira(value: string | number | null | undefined): string {
+  return `₦${parseMoney(value).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function pageHref(page: number, params: { search?: string }) {
+  const qs = new URLSearchParams();
+  qs.set('page', String(page));
+  if (params.search) qs.set('search', params.search);
+  return `?${qs.toString()}`;
+}
+
 export default async function CustomersPage({ searchParams }: Props) {
   const sp = await searchParams;
   const page = Number(sp.page ?? 1);
@@ -17,6 +50,10 @@ export default async function CustomersPage({ searchParams }: Props) {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
         <p className="text-gray-500 text-sm mt-1">{total} registered customers</p>
+        <div className="mt-3 flex items-center gap-2">
+          <a href="/api/customers/export?format=xlsx" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-700 text-white hover:bg-sky-800 transition-colors">Export Excel</a>
+          <a href="/api/customers/export?format=pdf" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-900 text-white hover:bg-black transition-colors">Export PDF</a>
+        </div>
       </div>
 
       <form className="flex flex-col md:flex-row gap-3">
@@ -53,7 +90,7 @@ export default async function CustomersPage({ searchParams }: Props) {
                     </td>
                     <td className="px-6 py-4 text-gray-600 text-xs">{[c.billing?.city, c.billing?.state].filter(Boolean).join(', ') || '—'}</td>
                     <td className="px-6 py-4 text-gray-900 font-medium">{c.orders_count}</td>
-                    <td className="px-6 py-4 font-medium text-gray-900">₦{Number(c.total_spent).toLocaleString('en-NG')}</td>
+                    <td className="px-6 py-4 font-medium text-gray-900">{formatNaira(c.total_spent)}</td>
                     <td className="px-6 py-4 text-gray-500">{new Date(c.date_created).toLocaleDateString('en-GB')}</td>
                   </tr>
                 ))}
@@ -64,8 +101,8 @@ export default async function CustomersPage({ searchParams }: Props) {
           <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
             <p className="text-sm text-gray-500">Page {page} of {totalPages}</p>
             <div className="flex gap-2">
-              {page > 1 && <Link href={`?page=${page - 1}&search=${sp.search ?? ''}`} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">← Prev</Link>}
-              {page < totalPages && <Link href={`?page=${page + 1}&search=${sp.search ?? ''}`} className="px-4 py-2 text-sm bg-sky-700 text-white rounded-xl hover:bg-sky-800">Next →</Link>}
+              {page > 1 && <Link href={pageHref(page - 1, sp)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">← Prev</Link>}
+              {page < totalPages && <Link href={pageHref(page + 1, sp)} className="px-4 py-2 text-sm bg-sky-700 text-white rounded-xl hover:bg-sky-800">Next →</Link>}
             </div>
           </div>
         )}

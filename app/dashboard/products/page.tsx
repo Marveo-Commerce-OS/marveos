@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import { getSession, isSuperAdmin } from '@/lib/auth';
 import { getProducts } from '@/lib/api';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -14,17 +15,33 @@ const STATUS_BADGE: Record<string, string> = {
   private: 'bg-purple-100 text-purple-700',
 };
 
+function pageHref(page: number, params: { search?: string; status?: string }) {
+  const qs = new URLSearchParams();
+  qs.set('page', String(page));
+  if (params.search) qs.set('search', params.search);
+  if (params.status) qs.set('status', params.status);
+  return `?${qs.toString()}`;
+}
+
 export default async function ProductsPage({ searchParams }: Props) {
   const sp = await searchParams;
+  const session = await getSession();
   const page = Number(sp.page ?? 1);
   const { data: products, total } = await getProducts(page, sp.search ?? '', sp.status ?? 'any');
   const totalPages = Math.ceil(total / 20);
+  const canManageAccess = session ? await isSuperAdmin(session.token) : false;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Products</h1>
         <p className="text-gray-500 text-sm mt-1">{total} total products in WooCommerce</p>
+        <div className="mt-3 flex items-center gap-2">
+          <Link href="/dashboard/products/new" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-700 text-white hover:bg-sky-800 transition-colors">Create Product</Link>
+          {canManageAccess && (
+            <Link href="/dashboard/admin-settings" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-900 text-white hover:bg-black transition-colors">Manage Access</Link>
+          )}
+        </div>
       </div>
 
       <form className="flex flex-col md:flex-row gap-3">
@@ -90,7 +107,6 @@ export default async function ProductsPage({ searchParams }: Props) {
                           value={p.status}
                           label={p.status === 'publish' ? 'Unpublish' : 'Publish'}
                           toggleValue={p.status === 'publish' ? 'draft' : 'publish'}
-                          variant="status"
                         />
                       </div>
                     </td>
@@ -104,8 +120,8 @@ export default async function ProductsPage({ searchParams }: Props) {
           <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
             <p className="text-sm text-gray-500">Page {page} of {totalPages}</p>
             <div className="flex gap-2">
-              {page > 1 && <Link href={`?page=${page - 1}&search=${sp.search ?? ''}&status=${sp.status ?? ''}`} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">← Prev</Link>}
-              {page < totalPages && <Link href={`?page=${page + 1}&search=${sp.search ?? ''}&status=${sp.status ?? ''}`} className="px-4 py-2 text-sm bg-sky-700 text-white rounded-xl hover:bg-sky-800">Next →</Link>}
+              {page > 1 && <Link href={pageHref(page - 1, sp)} className="px-4 py-2 text-sm border border-gray-200 rounded-xl hover:bg-gray-50">← Prev</Link>}
+              {page < totalPages && <Link href={pageHref(page + 1, sp)} className="px-4 py-2 text-sm bg-sky-700 text-white rounded-xl hover:bg-sky-800">Next →</Link>}
             </div>
           </div>
         )}
