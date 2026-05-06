@@ -102,6 +102,7 @@ export interface SiteSettings {
   brand_banner_link: string;
   brand_banner_image: string;
   // Hero Slides
+  hero_background: string;
   slides: SlideItem[];
   // Category Grid
   categories: CategoryItem[];

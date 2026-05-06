@@ -31,6 +31,7 @@ const HARDCODED_DEFAULTS: SiteSettings = {
   brand_banner_cta: 'Buy Inverters Built to Last',
   brand_banner_link: '/products/inverters',
   brand_banner_image: 'https://central.prag.global/wp-content/uploads/2026/04/f80b14a4d9e3fc153ae2e60c3d8d11a58ebe33fe.png',
+  hero_background: 'https://central.prag.global/wp-content/uploads/2026/04/421db5e8efbc14b105a33a6db7182652503c3fdd.png',
   socials: {
     facebook: 'https://www.facebook.com/pragpowersolutions',
     instagram: 'https://www.instagram.com/prag_ng/',
@@ -213,6 +214,41 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
       {/* ── Hero Slides ── */}
       {activeTab === 'Hero Slides' && (
         <div className="space-y-6">
+          {/* Background Image */}
+          <div className="border border-gray-200 rounded-xl p-4 space-y-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Hero Background Image</p>
+            <div className="space-y-2">
+              <label className={labelCls}>Image URL</label>
+              <div className="flex gap-2 items-start">
+                <input
+                  value={form.hero_background}
+                  onChange={e => setField('hero_background', e.target.value)}
+                  className={inputCls}
+                  placeholder="https://... or /images/hero-bg.jpg"
+                />
+                <label className="shrink-0 inline-flex items-center justify-center px-4 h-11 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 cursor-pointer transition-colors whitespace-nowrap">
+                  {uploadingField === 'hero-bg' ? 'Uploading...' : 'Upload Image'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={async (event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      const url = await uploadMedia(file, 'hero-bg');
+                      if (url) setField('hero_background', url);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+              {form.hero_background && (
+                <Image src={form.hero_background} alt="Hero background preview" width={400} height={120} unoptimized
+                  className="w-full h-28 object-cover rounded-xl border border-gray-100 mt-1" />
+              )}
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Slides ({form.slides.length})</p>
             <button type="button" onClick={addSlide}
