@@ -159,19 +159,69 @@ export async function getAllCustomers(limit = 500) {
 }
 
 export async function getReportsSales(params: { date_min?: string; date_max?: string }) {
-  const qs = new URLSearchParams({
-    ...(params.date_min ? { date_min: params.date_min } : {}),
-    ...(params.date_max ? { date_max: params.date_max } : {}),
+  const qsBase = new URLSearchParams({
+    per_page: '100',
+    status: 'any',
+    ...(params.date_min ? { after: `${params.date_min}T00:00:00` } : {}),
+    ...(params.date_max ? { before: `${params.date_max}T23:59:59` } : {}),
   });
-  return wcFetch<{ total_sales: string; net_sales: string; total_orders: number; total_items: number }[]>(`/reports/sales?${qs}`, []);
+
+  const first = await wcFetchWithTotal<WCOrder>(`/orders?${new URLSearchParams({ ...Object.fromEntries(qsBase.entries()), page: '1' }).toString()}`);
+  const totalPages = Math.ceil(first.total / 100);
+  const pageBatches = totalPages > 1
+    ? await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2).map((page) =>
+          wcFetch<WCOrder[]>(`/orders?${new URLSearchParams({ ...Object.fromEntries(qsBase.entries()), page: String(page) }).toString()}`, [])
+        )
+      )
+    : [];
+
+  const allOrders = [...first.data, ...pageBatches.flat()];
+  const salesEligible = allOrders.filter((o) => !['cancelled', 'failed', 'trash'].includes(o.status));
+  const netEligible = salesEligible.filter((o) => o.status !== 'refunded');
+
+  const totalSales = salesEligible.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  const netSales = netEligible.reduce((sum, o) => sum + Number(o.total || 0), 0);
+  const totalItems = salesEligible.reduce(
+    (sum, o) => sum + (Array.isArray(o.line_items) ? o.line_items.reduce((qty, li) => qty + Number(li.quantity || 0), 0) : 0),
+    0,
+  );
+
+  return [{
+    total_sales: totalSales.toFixed(2),
+    net_sales: netSales.toFixed(2),
+    total_orders: salesEligible.length,
+    total_items: totalItems,
+  }];
 }
 
 export async function getReportsCustomers(params: { date_min?: string; date_max?: string }) {
-  const qs = new URLSearchParams({
-    ...(params.date_min ? { date_min: params.date_min } : {}),
-    ...(params.date_max ? { date_max: params.date_max } : {}),
+  const perPage = 100;
+  const first = await wcFetchWithTotal<WCCustomer>(`/customers?per_page=${perPage}&page=1`);
+  if (first.data.length === 0) return [{ total: 0 }];
+
+  const totalPages = Math.ceil(first.total / perPage);
+  const pageBatches = totalPages > 1
+    ? await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2).map((page) =>
+          wcFetch<WCCustomer[]>(`/customers?per_page=${perPage}&page=${page}`, [])
+        )
+      )
+    : [];
+
+  const allCustomers = [...first.data, ...pageBatches.flat()];
+  const minMs = params.date_min ? new Date(`${params.date_min}T00:00:00`).getTime() : null;
+  const maxMs = params.date_max ? new Date(`${params.date_max}T23:59:59`).getTime() : null;
+
+  const filteredCustomers = allCustomers.filter((customer) => {
+    const created = new Date(customer.date_created).getTime();
+    if (Number.isNaN(created)) return false;
+    if (minMs !== null && created < minMs) return false;
+    if (maxMs !== null && created > maxMs) return false;
+    return true;
   });
-  return wcFetch<{ total: number }[]>(`/reports/customers/totals?${qs}`, []);
+
+  return [{ total: filteredCustomers.length }];
 }
 
 export async function getReportsTrend(params: { date_min?: string; date_max?: string }) {
