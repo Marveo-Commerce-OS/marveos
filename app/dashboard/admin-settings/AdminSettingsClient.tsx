@@ -115,6 +115,7 @@ export default function AdminSettingsClient() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [updatingUserIds, setUpdatingUserIds] = useState<number[]>([]);
   const [testEmail, setTestEmail] = useState('');
   const [testEmailStatus, setTestEmailStatus] = useState<TestEmailStatus>('idle');
   const [testEmailMessage, setTestEmailMessage] = useState('');
@@ -275,28 +276,33 @@ export default function AdminSettingsClient() {
   }
 
   async function updateUser(user: ManagedUser, updates: Partial<ManagedUser> & { role?: string }) {
-    const res = await fetch('/api/admin/users', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userId: user.id,
-        role: updates.role,
-        active: typeof updates.active === 'boolean' ? updates.active : user.active,
-        portals: updates.portals ?? user.portals,
-      }),
-    });
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      setUsers((prev) => prev.map((existing) => {
-        if (existing.id !== user.id) return existing;
-        return {
-          ...existing,
-          active: typeof updates.active === 'boolean' ? updates.active : existing.active,
-          portals: updates.portals ?? existing.portals,
-          roles: updates.role ? [updates.role] : existing.roles,
-        };
-      }));
+    setUpdatingUserIds((prev) => (prev.includes(user.id) ? prev : [...prev, user.id]));
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          role: updates.role,
+          active: typeof updates.active === 'boolean' ? updates.active : user.active,
+          portals: updates.portals ?? user.portals,
+        }),
+      });
+      setStatus(res.ok ? 'success' : 'error');
+      setTimeout(() => setStatus('idle'), 2200);
+      if (res.ok) {
+        setUsers((prev) => prev.map((existing) => {
+          if (existing.id !== user.id) return existing;
+          return {
+            ...existing,
+            active: typeof updates.active === 'boolean' ? updates.active : existing.active,
+            portals: updates.portals ?? existing.portals,
+            roles: updates.role ? [updates.role] : existing.roles,
+          };
+        }));
+      }
+    } finally {
+      setUpdatingUserIds((prev) => prev.filter((id) => id !== user.id));
     }
   }
 
@@ -594,12 +600,15 @@ export default function AdminSettingsClient() {
                             <button
                               type="button"
                               onClick={() => updateUser(u, { active: !u.active })}
+                              disabled={updatingUserIds.includes(u.id)}
                               className={`px-2.5 py-1 rounded text-xs font-medium ${u.active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}
                             >
                               {u.active ? 'Active' : 'Deactivated'}
                             </button>
                           </td>
-                          <td className="px-3 py-3 text-xs text-gray-500">WP privileges follow assigned role.</td>
+                          <td className="px-3 py-3 text-xs text-gray-500">
+                            {updatingUserIds.includes(u.id) ? 'Saving...' : 'WP privileges follow assigned role.'}
+                          </td>
                         </tr>
                       ))
                     )}
