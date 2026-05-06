@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import PDFDocument from 'pdfkit';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
 import { getAllCustomers } from '@/lib/api';
 import { appendAuditLog } from '@/lib/adminStore';
@@ -106,10 +106,23 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const worksheet = XLSX.utils.json_to_sheet(rows);
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, 'Customers');
-  const xlsx = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Customers');
+  worksheet.columns = [
+    { header: 'id', key: 'id', width: 10 },
+    { header: 'first_name', key: 'first_name', width: 18 },
+    { header: 'last_name', key: 'last_name', width: 18 },
+    { header: 'email', key: 'email', width: 30 },
+    { header: 'phone', key: 'phone', width: 18 },
+    { header: 'city', key: 'city', width: 16 },
+    { header: 'state', key: 'state', width: 16 },
+    { header: 'orders_count', key: 'orders_count', width: 14 },
+    { header: 'total_spent', key: 'total_spent', width: 14 },
+    { header: 'date_created', key: 'date_created', width: 24 },
+  ];
+  worksheet.getRow(1).font = { bold: true };
+  rows.forEach((row) => worksheet.addRow(row));
+  const xlsx = Buffer.from(await workbook.xlsx.writeBuffer() as ArrayBuffer);
 
   return new NextResponse(new Uint8Array(xlsx), {
     headers: {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
 const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
@@ -57,26 +57,36 @@ export async function GET(req: NextRequest) {
   const totalRevenue = orders.reduce((sum, o) => sum + parseFloat(o.total || '0'), 0);
 
   if (format === 'excel') {
-    const rows: (string | number)[][] = [
-      ['Order ID', 'Date', 'Customer', 'Email', 'Status', 'Total (₦)'],
-      ...orders.map(o => [
-        o.id,
-        o.date_created.split('T')[0],
-        `${o.billing.first_name} ${o.billing.last_name}`.trim(),
-        o.billing.email,
-        o.status,
-        parseFloat(o.total),
-      ]),
-      [],
-      ['', '', '', '', 'Total Revenue (₦)', totalRevenue],
-      ['', '', '', '', 'Total Orders', orders.length],
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Sales Report');
+
+    worksheet.columns = [
+      { header: 'Order ID', key: 'id', width: 10 },
+      { header: 'Date', key: 'date', width: 12 },
+      { header: 'Customer', key: 'customer', width: 22 },
+      { header: 'Email', key: 'email', width: 28 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Total (₦)', key: 'total', width: 14 },
     ];
 
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols'] = [{ wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 28 }, { wch: 14 }, { wch: 14 }];
-    XLSX.utils.book_append_sheet(wb, ws, 'Sales Report');
-    const buf = Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as ArrayBuffer);
+    worksheet.getRow(1).font = { bold: true };
+
+    for (const order of orders) {
+      worksheet.addRow({
+        id: order.id,
+        date: order.date_created.split('T')[0],
+        customer: `${order.billing.first_name} ${order.billing.last_name}`.trim(),
+        email: order.billing.email,
+        status: order.status,
+        total: parseFloat(order.total),
+      });
+    }
+
+    worksheet.addRow({});
+    worksheet.addRow({ status: 'Total Revenue (₦)', total: totalRevenue });
+    worksheet.addRow({ status: 'Total Orders', total: orders.length });
+
+    const buf = Buffer.from(await workbook.xlsx.writeBuffer() as ArrayBuffer);
 
     return new NextResponse(buf, {
       headers: {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import PDFDocument from 'pdfkit';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { getSession, isSuperAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 
@@ -70,10 +70,18 @@ export async function GET(req: NextRequest) {
   const rows = await toRows()();
 
   if (format === 'excel' || format === 'xlsx') {
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Audit');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Audit');
+    worksheet.columns = [
+      { header: 'Date', key: 'Date', width: 26 },
+      { header: 'Actor', key: 'Actor', width: 26 },
+      { header: 'Action', key: 'Action', width: 20 },
+      { header: 'Target', key: 'Target', width: 28 },
+      { header: 'Details', key: 'Details', width: 40 },
+    ];
+    worksheet.getRow(1).font = { bold: true };
+    rows.forEach((row) => worksheet.addRow(row));
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer() as ArrayBuffer);
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
