@@ -1,15 +1,43 @@
 import type { WCProduct, WCOrder, WCCustomer, SiteSettings, WPPost } from './types';
 
 const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const FETCH_TIMEOUT_MS = 8000;
 
 function wcBase() { return `${WP_API_URL}/wc/v3`; }
 function wpBase() { return `${WP_API_URL}/wp/v2`; }
 function auth() { return `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`; }
 
+async function fetchWithTimeout(url: string, init: RequestInit = {}, retries = 1): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const mergedHeaders: Record<string, string> = {
+        Connection: 'keep-alive',
+        ...(init.headers as Record<string, string> ?? {}),
+      };
+      const res = await fetch(url, {
+        ...init,
+        headers: mergedHeaders,
+        signal: controller.signal,
+        keepalive: true,
+      });
+      clearTimeout(timeout);
+      if (res.ok || attempt === retries) return res;
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (error) {
+      clearTimeout(timeout);
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Fetch failed');
+}
+
 async function wcFetch<T>(path: string, fallback: T): Promise<T> {
   try {
     const sep = path.includes('?') ? '&' : '?';
-    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } });
+    const res = await fetchWithTimeout(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } }, 1);
     if (!res.ok) return fallback;
     return await res.json();
   } catch { return fallback; }
@@ -18,7 +46,7 @@ async function wcFetch<T>(path: string, fallback: T): Promise<T> {
 async function wcFetchWithTotal<T>(path: string): Promise<{ data: T[]; total: number }> {
   try {
     const sep = path.includes('?') ? '&' : '?';
-    const res = await fetch(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } });
+    const res = await fetchWithTimeout(`${wcBase()}${path}${sep}${auth()}`, { next: { revalidate: 30 } }, 1);
     if (!res.ok) return { data: [], total: 0 };
     return { data: await res.json(), total: Number(res.headers.get('X-WP-Total') ?? 0) };
   } catch { return { data: [], total: 0 }; }
@@ -28,9 +56,9 @@ async function wcFetchWithTotal<T>(path: string): Promise<{ data: T[]; total: nu
 export async function getDashboardStats() {
   const [recentOrders, customersRes, revenueRes, ordersCountRes] = await Promise.all([
     wcFetch<WCOrder[]>('/orders?per_page=8&status=any', []),
-    fetch(`${wcBase()}/customers?per_page=1&${auth()}`, { next: { revalidate: 30 } }),
-    fetch(`${wcBase()}/reports/sales?${auth()}`, { next: { revalidate: 30 } }),
-    fetch(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { next: { revalidate: 30 } }),
+    fetchWithTimeout(`${wcBase()}/customers?per_page=1&${auth()}`, { next: { revalidate: 30 } }, 1),
+    fetchWithTimeout(`${wcBase()}/reports/sales?${auth()}`, { next: { revalidate: 30 } }, 1),
+    fetchWithTimeout(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { next: { revalidate: 30 } }, 1),
   ]);
 
   const totalCustomers = Number(customersRes.headers?.get('X-WP-Total') ?? 0);
@@ -111,15 +139,23 @@ export async function getCustomers(page = 1, search = '') {
 }
 
 export async function getAllCustomers(limit = 500) {
-  const pages = Math.ceil(limit / 100);
-  const results: WCCustomer[] = [];
-  for (let page = 1; page <= pages; page += 1) {
-    const batch = await wcFetch<WCCustomer[]>(`/customers?per_page=100&page=${page}`, []);
-    if (batch.length === 0) break;
-    results.push(...batch);
-    if (results.length >= limit) break;
-  }
-  return results.slice(0, limit);
+  const perPage = 100;
+  const first = await wcFetchWithTotal<WCCustomer>(`/customers?per_page=${perPage}&page=1`);
+  if (first.data.length === 0) return [];
+
+  const maxPagesByLimit = Math.ceil(limit / perPage);
+  const totalPages = Math.ceil(first.total / perPage);
+  const pagesToLoad = Math.min(totalPages, maxPagesByLimit);
+
+  if (pagesToLoad <= 1) return first.data.slice(0, limit);
+
+  const rest = await Promise.all(
+    Array.from({ length: pagesToLoad - 1 }, (_, idx) => idx + 2).map((page) =>
+      wcFetch<WCCustomer[]>(`/customers?per_page=${perPage}&page=${page}`, [])
+    )
+  );
+
+  return [...first.data, ...rest.flat()].slice(0, limit);
 }
 
 export async function getReportsSales(params: { date_min?: string; date_max?: string }) {
@@ -141,31 +177,30 @@ export async function getReportsCustomers(params: { date_min?: string; date_max?
 export async function getReportsTrend(params: { date_min?: string; date_max?: string }) {
   const results: Array<{ date: string; total: number; orders: number }> = [];
   const byDay = new Map<string, { total: number; orders: number }>();
-  let page = 1;
+  const qsBase = new URLSearchParams({
+    per_page: '100',
+    status: 'any',
+    ...(params.date_min ? { after: `${params.date_min}T00:00:00` } : {}),
+    ...(params.date_max ? { before: `${params.date_max}T23:59:59` } : {}),
+  });
 
-  while (true) {
-    const qs = new URLSearchParams({
-      per_page: '100',
-      page: String(page),
-      status: 'any',
-      ...(params.date_min ? { after: `${params.date_min}T00:00:00` } : {}),
-      ...(params.date_max ? { before: `${params.date_max}T23:59:59` } : {}),
+  const first = await wcFetchWithTotal<WCOrder>(`/orders?${new URLSearchParams({ ...Object.fromEntries(qsBase.entries()), page: '1' }).toString()}`);
+  const totalPages = Math.ceil(first.total / 100);
+  const pageBatches = totalPages > 1
+    ? await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, idx) => idx + 2).map((page) =>
+          wcFetch<WCOrder[]>(`/orders?${new URLSearchParams({ ...Object.fromEntries(qsBase.entries()), page: String(page) }).toString()}`, [])
+        )
+      )
+    : [];
+
+  for (const order of [...first.data, ...pageBatches.flat()]) {
+    const date = order.date_created.split('T')[0];
+    const current = byDay.get(date) ?? { total: 0, orders: 0 };
+    byDay.set(date, {
+      total: current.total + Number(order.total || 0),
+      orders: current.orders + 1,
     });
-
-    const batch = await wcFetch<WCOrder[]>(`/orders?${qs}`, []);
-    if (batch.length === 0) break;
-
-    for (const order of batch) {
-      const date = order.date_created.split('T')[0];
-      const current = byDay.get(date) ?? { total: 0, orders: 0 };
-      byDay.set(date, {
-        total: current.total + Number(order.total || 0),
-        orders: current.orders + 1,
-      });
-    }
-
-    if (batch.length < 100) break;
-    page += 1;
   }
 
   for (const [date, value] of Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b))) {
@@ -178,7 +213,7 @@ export async function getReportsTrend(params: { date_min?: string; date_max?: st
 // ── Site Settings ──────────────────────────────────────────
 export async function getSiteSettings(): Promise<SiteSettings | null> {
   try {
-    const res = await fetch(`${WP_API_URL}/prag-core/v1/settings`, { next: { revalidate: 30 } });
+    const res = await fetchWithTimeout(`${WP_API_URL}/prag-core/v1/settings`, { next: { revalidate: 60 } }, 1);
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -201,7 +236,7 @@ export async function getPosts(page = 1, search = '', token?: string): Promise<{
     const qs = new URLSearchParams({ per_page: '20', page: String(page), _embed: '1', context: 'edit', ...(search && { search }) });
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`${wpBase()}/posts?${qs}`, { headers, cache: 'no-store' });
+    const res = await fetchWithTimeout(`${wpBase()}/posts?${qs}`, { headers, cache: 'no-store' }, 1);
     if (!res.ok) return { data: [], total: 0 };
     return { data: await res.json(), total: Number(res.headers.get('X-WP-Total') ?? 0) };
   } catch { return { data: [], total: 0 }; }
