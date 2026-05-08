@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL ?? 'https://central.prag.global/wp-json'}/wp/v2`;
+import { getConfig } from '@/src/config/client';
+
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -11,6 +16,7 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file');
   if (!(file instanceof File)) return NextResponse.json({ error: 'Missing file' }, { status: 400 });
 
+  const WP = `${getWpApiUrl()}/wp/v2`;
   const wpFormData = new FormData();
   wpFormData.append('file', file, file.name);
 

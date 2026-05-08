@@ -6,13 +6,19 @@ import { ChevronLeft } from 'lucide-react';
 import BlogEditor from '../BlogEditor';
 import { getSession } from '@/lib/auth';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL ?? 'https://central.prag.global/wp-json'}/wp/v2`;
+import { getConfig } from '@/src/config/client';
+
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
 
 interface Props {
   params: Promise<{ id: string }>;
 }
 
 async function getPost(id: string, token: string) {
+  const WP = `${getWpApiUrl()}/wp/v2`;
   try {
     const res = await fetch(`${WP}/posts/${id}?context=edit`, {
       cache: 'no-store',
@@ -26,6 +32,7 @@ async function getPost(id: string, token: string) {
 }
 
 export default async function EditBlogPage({ params }: Props) {
+  const WP = `${getWpApiUrl()}/wp/v2`;
   const { id } = await params;
   const session = await getSession();
   const post = await getPost(id, session?.token ?? '');

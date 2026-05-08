@@ -1,7 +1,9 @@
 {
-  "name": "prag-admin",
+  "name": "marveos",
   "version": "0.1.0",
   "private": true,
+  "description": "Marvéo — Modern commerce operations built for businesses using WordPress, WooCommerce, and headless commerce stacks.",
+  "author": "Avario Digital Products",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

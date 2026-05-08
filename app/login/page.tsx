@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { getConfig } from '@/src/config/client';
 
 export default function LoginPage() {
   const router = useRouter();
+  const config = getConfig();
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -33,19 +35,27 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
           <div className="relative w-48 h-16 mb-2">
-            <Image 
-              src="https://central.prag.global/wp-content/uploads/2026/04/Prag-Logo.png" 
-              alt="PRAG" 
-              fill 
-              className="object-contain" 
-              priority 
-            />
+            {config.clientLogo ? (
+              <Image 
+                src={config.clientLogo} 
+                alt={config.clientName} 
+                fill 
+                className="object-contain" 
+                priority 
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <h1 className="text-2xl font-bold" style={{ color: config.clientPrimaryColor }}>
+                  {config.appName}
+                </h1>
+              </div>
+            )}
           </div>
-          <p className="text-gray-400/50 text-sm mt-1">Developed by Avario Digitals — Control Center</p>
+          <p className="text-gray-400/50 text-sm mt-1">{config.brandByline}</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Sign in to continue</h2>
+          <h2 className="text-xl font-bold text-gray-900 mb-6">Sign in to {config.clientName}</h2>
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">

@@ -1,11 +1,34 @@
 import type { WCProduct, WCOrder, WCCustomer, SiteSettings, WPPost } from './types';
+import { getConfig } from '@/src/config/client';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
 const FETCH_TIMEOUT_MS = 8000;
 
-function wcBase() { return `${WP_API_URL}/wc/v3`; }
-function wpBase() { return `${WP_API_URL}/wp/v2`; }
-function auth() { return `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`; }
+function getWpApiUrl(): string {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+}
+
+function getWcConsumerKey(): string {
+  const config = getConfig();
+  return config.woocommerceConsumerKey || '';
+}
+
+function getWcConsumerSecret(): string {
+  const config = getConfig();
+  return config.woocommerceConsumerSecret || '';
+}
+
+function wcBase() { 
+  return `${getWpApiUrl()}/wc/v3`; 
+}
+
+function wpBase() { 
+  return `${getWpApiUrl()}/wp/v2`; 
+}
+
+function auth() { 
+  return `consumer_key=${getWcConsumerKey()}&consumer_secret=${getWcConsumerSecret()}`; 
+}
 
 async function fetchWithTimeout(url: string, init: RequestInit = {}, retries = 1): Promise<Response> {
   let lastError: unknown;
@@ -273,7 +296,7 @@ export async function getReportsTrend(params: { date_min?: string; date_max?: st
 // ── Site Settings ──────────────────────────────────────────
 export async function getSiteSettings(): Promise<SiteSettings | null> {
   try {
-    const res = await fetchWithTimeout(`${WP_API_URL}/prag-core/v1/settings`, { next: { revalidate: 60 } }, 1);
+    const res = await fetchWithTimeout(`${wcBase()}/settings`, { next: { revalidate: 60 } }, 1);
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -281,7 +304,7 @@ export async function getSiteSettings(): Promise<SiteSettings | null> {
 
 export async function saveSiteSettings(settings: SiteSettings, token: string): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${WP_API_URL}/prag-core/v1/settings`, {
+    const res = await fetchWithTimeout(`${wcBase()}/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(settings),

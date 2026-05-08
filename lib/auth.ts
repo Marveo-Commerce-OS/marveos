@@ -1,7 +1,11 @@
 import { cookies } from 'next/headers';
 import { readAdminStore } from './adminStore';
+import { getConfig } from '@/src/config/client';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+function getWpApiUrl(): string {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+}
 
 async function getCookieUserInfo(): Promise<Record<string, unknown> | null> {
   try {
@@ -16,6 +20,7 @@ async function getCookieUserInfo(): Promise<Record<string, unknown> | null> {
 }
 
 export async function login(username: string, password: string) {
+  const WP_API_URL = getWpApiUrl();
   const res = await fetch(`${WP_API_URL}/jwt-auth/v1/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -51,6 +56,7 @@ export async function isAdmin(token: string): Promise<boolean> {
   }
 
   try {
+    const WP_API_URL = getWpApiUrl();
     const res = await fetch(`${WP_API_URL}/wp/v2/users/me?context=edit`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
@@ -70,6 +76,7 @@ export async function isAdmin(token: string): Promise<boolean> {
 }
 
 export async function getCurrentWpUser(token: string): Promise<{ id: number; email: string; roles: string[] } | null> {
+  const WP_API_URL = getWpApiUrl();
   try {
     const res = await fetch(`${WP_API_URL}/wp/v2/users/me?context=edit`, {
       headers: { Authorization: `Bearer ${token}` },

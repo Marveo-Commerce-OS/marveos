@@ -93,7 +93,14 @@ const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
 // When running on Vercel, adminStore reads/writes to WordPress via REST API
 // so all data survives deployments. Set WP_APP_USER and WP_APP_PASSWORD
 // (a WordPress Application Password) in your Vercel environment variables.
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+import { getConfig } from '@/src/config/client';
+
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
+
+export const WP_API_URL = getWpApiUrl();
 const WP_APP_USER = process.env.WP_APP_USER || '';
 const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD || '';
 

@@ -3,11 +3,20 @@ import { getSession } from '@/lib/auth';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
-const WC_BASE = `${WP_API_URL}/wc/v3`;
+import { getConfig } from '@/src/config/client';
+
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
+
+function getWcBase() { return `${getWpApiUrl()}/wc/v3`; }
 
 function auth() {
-  return `consumer_key=${process.env.WC_CONSUMER_KEY ?? ''}&consumer_secret=${process.env.WC_CONSUMER_SECRET ?? ''}`;
+  const config = getConfig();
+  const key = config.woocommerceConsumerKey ?? '';
+  const secret = config.woocommerceConsumerSecret ?? '';
+  return `consumer_key=${key}&consumer_secret=${secret}`;
 }
 
 interface Order {
@@ -31,7 +40,7 @@ async function fetchOrders(date_min: string, date_max: string): Promise<Order[]>
       ...(date_max && { before: `${date_max}T23:59:59` }),
     });
 
-    const res = await fetch(`${WC_BASE}/orders?${qs}&${auth()}`, { cache: 'no-store' });
+    const res = await fetch(`${getWcBase()}/orders?${qs}&${auth()}`, { cache: 'no-store' });
     if (!res.ok) break;
 
     const orders: Order[] = await res.json();

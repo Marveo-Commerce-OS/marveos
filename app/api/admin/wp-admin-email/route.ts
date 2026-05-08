@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getCurrentWpUser, getSession, isSuperAdmin } from '@/lib/auth';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+import { getConfig } from '@/src/config/client';
+
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
 
 export async function GET() {
+  const WP_API_URL = getWpApiUrl();
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 

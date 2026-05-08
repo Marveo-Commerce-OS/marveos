@@ -6,15 +6,20 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      { protocol: 'https', hostname: 'central.prag.global' },
-      { protocol: 'https', hostname: 'prag.global' },
+      // Gravatar for user avatars
       { protocol: 'https', hostname: 'secure.gravatar.com' },
+      // WordPress media from any domain
+      { protocol: 'https', hostname: '*.wordpress.com' },
       { protocol: 'https', hostname: '*.wp.com' },
+      // Allow client-specific domains
+      { protocol: 'https', hostname: '*.local' },
+      { protocol: 'http', hostname: 'localhost' },
+      { protocol: 'http', hostname: '127.0.0.1' },
+      // Generic wildcard for any WordPress/WooCommerce domain
+      { protocol: 'https', hostname: '*' },
     ],
-  },
-  env: {
-    NEXT_PUBLIC_STORE_URL: process.env.NEXT_PUBLIC_STORE_URL ?? 'https://prag.global',
   },
 };
 
 export default nextConfig;
+

@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { readAdminStore } from '@/lib/adminStore';
+import { getConfig } from '@/src/config/client';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const getWpApiUrl = () => {
+  const config = getConfig();
+  return config.wordpressApiUrl || 'https://localhost/wp-json';
+};
 
 export async function POST(req: NextRequest) {
   const { username, password } = await req.json();
-
+  const WP_API_URL = getWpApiUrl();
   const wpRes = await fetch(`${WP_API_URL}/jwt-auth/v1/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
