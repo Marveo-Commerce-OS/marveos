@@ -181,9 +181,11 @@ export async function initializeAdmin(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Marveo-Activation-Token': activationToken,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        activation_token: activationToken,
+      }),
     });
 
     const data = await response.json();
