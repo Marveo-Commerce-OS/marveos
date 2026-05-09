@@ -2,14 +2,14 @@ import { redirect } from 'next/navigation';
 import { getSession, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import Sidebar from '@/components/Sidebar';
-import { getCachedConfig } from '@/src/config/client';
+import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
 
-  const config = getCachedConfig();
-  if (!config.deploymentStatus.setup_completed || !config.deploymentStatus.validation_passed) {
+  const status = await getRuntimeDeploymentStatus();
+  if (!status.setup_completed || !status.validation_passed) {
     redirect('/setup');
   }
 
