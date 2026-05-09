@@ -7,6 +7,12 @@
 import { getDeploymentMode, getConfig } from './deployment';
 import type { DeploymentValidationResult } from './deployment';
 
+function fetchWithTimeout(url: string, options?: RequestInit, ms = 5000): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  return fetch(url, { ...options, signal: ac.signal }).finally(() => clearTimeout(timer));
+}
+
 interface ValidationCheckResult {
   passed: boolean;
   message: string;
@@ -14,7 +20,8 @@ interface ValidationCheckResult {
   code: string;
 }
 
-interface ComprehensiveValidationResult extends DeploymentValidationResult {
+interface ComprehensiveValidationResult extends Omit<DeploymentValidationResult, 'status'> {
+  status: Record<string, unknown>;
   checks: ValidationCheckResult[];
   totalChecks: number;
   passedChecks: number;
@@ -67,6 +74,7 @@ export async function validateFullDeployment(): Promise<ComprehensiveValidationR
   const canProceed = checks.every((c) => c.severity !== 'error' || c.passed);
 
   return {
+    setupCompleted: canProceed,
     validationPassed: canProceed,
     missingRequirements: checks.filter((c) => !c.passed && c.severity === 'error').map((c) => c.message),
     status: config.deploymentStatus,
@@ -173,7 +181,7 @@ async function validateApiConnectivity(config: any, mode: string): Promise<Valid
   const wpUrl = process.env.NEXT_PUBLIC_WP_API_URL || config.wordPressApiUrl || '';
   if (wpUrl) {
     try {
-      const response = await fetch(`${wpUrl}/wp/v2`, { method: 'HEAD', timeout: 5000 });
+      const response = await fetchWithTimeout(`${wpUrl}/wp/v2`, { method: 'HEAD' });
       checks.push({
         passed: response.ok || response.status === 405, // 405 is OK for HEAD request
         message: 'WordPress REST API reachable',
@@ -276,7 +284,7 @@ async function validatePluginEndpoint(config: any): Promise<ValidationCheckResul
   }
 
   try {
-    const response = await fetch(`${wpUrl}/marveo/v1/status`, { timeout: 5000 });
+    const response = await fetchWithTimeout(`${wpUrl}/marveo/v1/status`);
     return {
       passed: response.ok,
       message: response.ok ? 'Plugin endpoint reachable' : 'Plugin endpoint returned error',
@@ -342,7 +350,7 @@ async function validateContentMapping(config: any): Promise<ValidationCheckResul
   }
 
   try {
-    const response = await fetch(`${wpUrl}/marveo/v1/content-inventory`, { timeout: 5000 });
+    const response = await fetchWithTimeout(`${wpUrl}/marveo/v1/content-inventory`);
     if (!response.ok) {
       return {
         passed: false,

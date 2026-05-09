@@ -200,6 +200,20 @@ export function getDeploymentRequirements(mode: DeploymentMode): DeploymentRequi
   };
 }
 
+export function getConfig() {
+  return {
+    deploymentStatus: {
+      onboarding_path: (process.env.MARVEO_ONBOARDING_PATH || '').trim(),
+      deployment_architecture: (process.env.MARVEO_DEPLOYMENT_ARCHITECTURE || '').trim(),
+    },
+    wordPressApiUrl: (process.env.NEXT_PUBLIC_WP_API_URL || '').trim(),
+    woocommerceApiUrl: (process.env.NEXT_PUBLIC_WOOCOMMERCE_API_URL || '').trim(),
+    frontendUrl: (process.env.NEXT_PUBLIC_FRONTEND_URL || '').trim(),
+    activeModules: parseActiveModules((process.env.MARVEO_ACTIVE_MODULES || process.env.ACTIVE_MODULES || '').trim()),
+    licenseKey: (process.env.MARVEO_LICENSE_KEY || '').trim(),
+  };
+}
+
 export function validateDeploymentConfiguration(mode: DeploymentMode = getDeploymentMode()): DeploymentValidationResult {
   const clientProfile = getClientProfile();
   const activeModules = getActiveModules();

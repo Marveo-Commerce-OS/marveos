@@ -7,7 +7,7 @@
 
 import { cache } from 'react';
 
-interface MarveoSettings {
+export interface MarveoSettings {
   business_profile?: {
     business_name?: string;
     industry?: string;
@@ -15,6 +15,7 @@ interface MarveoSettings {
     contact_email?: string;
     contact_phone?: string;
     whatsapp_phone?: string;
+    business_address?: string;
   };
   brand_settings?: {
     logo?: string;
@@ -39,14 +40,14 @@ interface MarveoSettings {
   };
 }
 
-interface MarveoContent {
+export interface MarveoContent {
   pages?: Array<{ id: string; title: string; slug: string; content?: string }>;
   posts?: Array<{ id: string; title: string; slug: string; content?: string; date?: string }>;
   products?: Array<{ id: string; name: string; sku: string; price: number }>;
   menus?: Record<string, Array<{ label: string; url: string }>>;
 }
 
-interface MarveoClient {
+export interface MarveoClient {
   apiUrl: string;
   frontendUrl: string;
   getSettings(): Promise<MarveoSettings>;

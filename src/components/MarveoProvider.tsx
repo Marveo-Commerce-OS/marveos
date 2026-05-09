@@ -1,9 +1,9 @@
 'use client';
 
 import React, { ReactNode, useEffect, useState } from 'react';
-import { MarveoContext, type MarveoContextType } from './useMarveo';
-import type { MarveoClient, MarveoSettings } from './marveo';
-import { createMarveoClient, getMarveoConfig, getDefaultSettings } from './marveo';
+import { MarveoContext } from '../lib/hooks/useMarveo';
+import type { MarveoClient, MarveoSettings, MarveoContextType } from '../lib/marveo';
+import { createMarveoClient, getMarveoConfig, getDefaultSettings } from '../lib/marveo';
 
 interface MarveoProviderProps {
   children: ReactNode;
@@ -48,11 +48,11 @@ export function MarveoProvider({
     // Load settings on mount
     client
       .getSettings()
-      .then((fetchedSettings) => {
+      .then((fetchedSettings: MarveoSettings) => {
         setSettings(fetchedSettings);
         setError(null);
       })
-      .catch((err) => {
+      .catch((err: Error) => {
         console.error('Marveo: Failed to load settings', err);
         setError(err);
         // Keep default settings on error

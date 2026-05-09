@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
   const filename = `marveo-connector-${tag.replace(/^v/i, '')}.zip`;
 
-  return new NextResponse(normalizedZip, {
+  return new NextResponse(new Uint8Array(normalizedZip), {
     status: 200,
     headers: {
       'Content-Type': 'application/zip',

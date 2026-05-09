@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     version: '1.0.8',
     detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.8',
     changelog: 'Version 1.0.8 — Global deployment platform with three onboarding paths, content discovery, module system, and PRAG migration support.',
-    publishedAt: '',
+    publishedAt: '2026-05-09T00:00:00Z',
   };
 
   const packageUrl = new URL('/api/plugin-updates/marveo-connector/download', req.nextUrl.origin);
