@@ -4,10 +4,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const release = {
-    tag: 'v1.0.13',
-    version: '1.0.13',
-    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.13',
-    changelog: 'Version 1.0.13 — Update connector plugin with REST API improvements and migration class updates.',
+    tag: 'v1.0.14',
+    version: '1.0.14',
+    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.14',
+    changelog: 'Version 1.0.14 — Bypass stale update cache and force fresh plugin update checks on WordPress admin update screens.',
     publishedAt: '2026-05-09T00:00:00Z',
   };
 
