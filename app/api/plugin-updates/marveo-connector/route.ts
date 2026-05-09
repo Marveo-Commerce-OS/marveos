@@ -4,10 +4,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const release = {
-    tag: 'v1.0.7',
-    version: '1.0.7',
-    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.7',
-    changelog: 'Version 1.0.7',
+    tag: 'v1.0.8',
+    version: '1.0.8',
+    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.8',
+    changelog: 'Version 1.0.8 — Global deployment platform with three onboarding paths, content discovery, module system, and PRAG migration support.',
     publishedAt: '',
   };
 

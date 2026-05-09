@@ -11,6 +11,25 @@ interface ConnectorStatus {
   woocommerce_version: string | null;
   jwt_enabled: boolean;
   first_admin_created: boolean;
+  deployment_status?: {
+    mode: 'wordpress' | 'headless';
+    setup_completed: boolean;
+    validation_passed: boolean;
+    missing_requirements: string[];
+    active_modules: string[];
+    client_profile: {
+      business_name: string;
+      industry: string;
+      business_model: string;
+      country_currency: string;
+      contact_email: string;
+      whatsapp_phone: string;
+    };
+    last_validated_at: string | null;
+  };
+  deployment_profile?: Record<string, unknown>;
+  setup_completed?: boolean;
+  validation_passed?: boolean;
 }
 
 interface SiteInfo {

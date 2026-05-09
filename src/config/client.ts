@@ -4,7 +4,19 @@
  * This ensures consistency and makes it easy to adjust settings per deployment.
  */
 
-export type DeploymentMode = 'wordpress' | 'headless';
+import {
+  getActiveModules,
+  getBrandProfile,
+  getClientProfile,
+  getCommerceProfile,
+  getDeploymentMode,
+  getDeploymentRequirements,
+  getIntegrationProfile,
+  validateDeploymentConfiguration,
+  type DeploymentMode,
+  type DeploymentStatus,
+} from '@/src/config/deployment';
+
 export type Environment = 'development' | 'staging' | 'production';
 
 export interface MarveoConfig {
@@ -19,6 +31,14 @@ export interface MarveoConfig {
   // Deployment Configuration
   deploymentMode: DeploymentMode;
   environment: Environment;
+  deploymentStatus: DeploymentStatus;
+  deploymentRequirements: ReturnType<typeof getDeploymentRequirements>;
+
+  // Profiles
+  clientProfile: ReturnType<typeof getClientProfile>;
+  brandProfile: ReturnType<typeof getBrandProfile>;
+  commerceProfile: ReturnType<typeof getCommerceProfile>;
+  integrationProfile: ReturnType<typeof getIntegrationProfile>;
 
   // URLs
   frontendUrl: string | undefined;
@@ -40,28 +60,6 @@ export interface MarveoConfig {
 }
 
 /**
- * Parse comma-separated module list from environment variable
- */
-function parseActiveModules(modulesString: string | undefined): string[] {
-  if (!modulesString) return [];
-  return modulesString
-    .split(',')
-    .map((m) => m.trim())
-    .filter((m) => m.length > 0);
-}
-
-/**
- * Validate deployment mode
- */
-function validateDeploymentMode(mode: string | undefined): DeploymentMode {
-  const validModes: DeploymentMode[] = ['wordpress', 'headless'];
-  if (!mode || !validModes.includes(mode as DeploymentMode)) {
-    return 'wordpress'; // default
-  }
-  return mode as DeploymentMode;
-}
-
-/**
  * Validate environment
  */
 function validateEnvironment(env: string | undefined): Environment {
@@ -76,8 +74,14 @@ function validateEnvironment(env: string | undefined): Environment {
  * Get Marvéo configuration from environment variables
  */
 export function getConfig(): MarveoConfig {
-  const activeModulesString = process.env.ACTIVE_MODULES;
-  const activeModules = parseActiveModules(activeModulesString);
+  const deploymentMode = getDeploymentMode();
+  const deploymentRequirements = getDeploymentRequirements(deploymentMode);
+  const deploymentValidation = validateDeploymentConfiguration(deploymentMode);
+  const activeModules = getActiveModules();
+  const clientProfile = getClientProfile();
+  const brandProfile = getBrandProfile();
+  const commerceProfile = getCommerceProfile();
+  const integrationProfile = getIntegrationProfile();
 
   const config: MarveoConfig = {
     // Application Identity
@@ -89,8 +93,16 @@ export function getConfig(): MarveoConfig {
     brandByline: process.env.NEXT_PUBLIC_BRAND_BYLINE || 'A product by Avario Digital Products',
 
     // Deployment Configuration
-    deploymentMode: validateDeploymentMode(process.env.MARVEO_DEPLOYMENT_MODE),
+    deploymentMode,
     environment: validateEnvironment(process.env.NEXT_PUBLIC_ENVIRONMENT),
+    deploymentStatus: deploymentValidation.status,
+    deploymentRequirements,
+
+    // Profiles
+    clientProfile,
+    brandProfile,
+    commerceProfile,
+    integrationProfile,
 
     // URLs
     frontendUrl: process.env.NEXT_PUBLIC_FRONTEND_URL,
@@ -126,6 +138,10 @@ export function getCachedConfig(): MarveoConfig {
     configInstance = getConfig();
   }
   return configInstance;
+}
+
+export function clearCachedConfig(): void {
+  configInstance = null;
 }
 
 export default getConfig;
