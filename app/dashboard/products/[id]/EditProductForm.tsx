@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Save, CheckCircle2, AlertCircle, Plus, Trash2 } from 'lucide-react';
 import Image from 'next/image';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL ?? '';
 
 const inputCls = 'w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all';
 const labelCls = 'text-sm font-semibold text-gray-700';

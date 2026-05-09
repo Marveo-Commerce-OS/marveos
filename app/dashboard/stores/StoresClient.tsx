@@ -7,7 +7,7 @@ import { Plus, Trash2, Save, Pencil, X, CheckCircle2, AlertCircle, Database } fr
 const inputCls = 'w-full h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all';
 const labelCls = 'text-sm font-semibold text-gray-700';
 
-type StoreType = 'prag' | 'online' | 'chain';
+type StoreType = 'location' | 'online' | 'chain';
 
 interface Store {
   id?: number;
@@ -21,12 +21,12 @@ interface Store {
   logo_alt: string;
 }
 
-const EMPTY: Store = { name: '', city: '', address: '', phone: '', map_url: '', store_type: 'prag', logo_url: '', logo_alt: '' };
+const EMPTY: Store = { name: '', city: '', address: '', phone: '', map_url: '', store_type: 'location', logo_url: '', logo_alt: '' };
 
-const SECTION_ORDER: StoreType[] = ['prag', 'online', 'chain'];
-const TYPE_LABELS: Record<StoreType, string> = { prag: 'PRAG Stores', online: 'Online Stores', chain: 'Chain Stores' };
+const SECTION_ORDER: StoreType[] = ['location', 'online', 'chain'];
+const TYPE_LABELS: Record<StoreType, string> = { location: 'Locations', online: 'Online Stores', chain: 'Chain Stores' };
 const TYPE_HELP: Record<StoreType, string> = {
-  prag: 'Physical PRAG locations with address, phone, and map directions.',
+  location: 'Physical locations with address, phone, and map directions.',
   online: 'Backend-managed marketplace and partner online store logos.',
   chain: 'Backend-managed chain store logos and contact records.',
 };
@@ -46,7 +46,7 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
     setTimeout(() => setToast(null), 3000);
   }
 
-  function openNew(storeType: StoreType = 'prag') { setEditing({ ...EMPTY, store_type: storeType }); setIsNew(true); }
+  function openNew(storeType: StoreType = 'location') { setEditing({ ...EMPTY, store_type: storeType }); setIsNew(true); }
   function openEdit(s: Store) { setEditing({ ...s }); setIsNew(false); }
   function closeEdit() { setEditing(null); setIsNew(false); }
 
@@ -128,9 +128,9 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
   const storesByType = SECTION_ORDER.reduce<Record<StoreType, Store[]>>((acc, type) => {
     acc[type] = stores.filter((store) => store.store_type === type);
     return acc;
-  }, { prag: [], online: [], chain: [] });
+  }, { location: [], online: [], chain: [] });
 
-  const showLocationFields = editing?.store_type === 'prag';
+  const showLocationFields = editing?.store_type === 'location';
 
   return (
     <div className="space-y-4">
@@ -149,9 +149,9 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
         >
           <Database size={16} /> {importing ? 'Importing...' : 'Import Existing Data'}
         </button>
-        <button onClick={() => openNew('prag')}
+        <button onClick={() => openNew('location')}
           className="flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 transition-colors">
-          <Plus size={16} /> Add PRAG Store
+          <Plus size={16} /> Add Location
         </button>
       </div>
 
@@ -165,12 +165,12 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className={labelCls}>Store Name</label>
-              <input value={editing.name} onChange={e => updateEditing('name', e.target.value)} className={inputCls} placeholder="PRAG Lagos" />
+              <input value={editing.name} onChange={e => updateEditing('name', e.target.value)} className={inputCls} placeholder="Example Store Lagos" />
             </div>
             <div className="space-y-1.5">
               <label className={labelCls}>Store Type</label>
               <select value={editing.store_type} onChange={e => updateEditing('store_type', e.target.value as StoreType)} className={inputCls}>
-                <option value="prag">PRAG Store</option>
+                <option value="location">Location</option>
                 <option value="online">Online Store</option>
                 <option value="chain">Chain Store</option>
               </select>
@@ -198,7 +198,7 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
             {!showLocationFields && (
               <div className="space-y-1.5 md:col-span-2">
                 <label className={labelCls}>Store Link URL</label>
-                <input value={editing.map_url} onChange={e => updateEditing('map_url', e.target.value)} className={inputCls} placeholder="https://shop.prag.global" />
+                <input value={editing.map_url} onChange={e => updateEditing('map_url', e.target.value)} className={inputCls} placeholder="https://store.example.com" />
               </div>
             )}
             <div className="space-y-1.5 md:col-span-2">
@@ -279,7 +279,7 @@ export default function StoresClient({ initialStores }: { initialStores: Store[]
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 truncate">{store.name}</p>
                         <p className="text-sm text-gray-500 truncate">
-                          {type === 'prag'
+                          {type === 'location'
                             ? [store.city, store.phone].filter(Boolean).join(' • ') || 'No contact details yet'
                             : store.logo_alt || 'Logo-driven storefront section'}
                         </p>

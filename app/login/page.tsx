@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
 import { getConfig } from '@/src/config/client';
 
@@ -11,94 +12,139 @@ export default function LoginPage() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError('');
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || 'Invalid credentials');
+    
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Invalid credentials');
+        setLoading(false);
+        return;
+      }
+      router.push(data.redirect || '/portal');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Connection failed. Please check your internet and try again.');
       setLoading(false);
-      return;
     }
-    router.push(data.redirect || '/portal');
   }
 
+  if (!mounted) return null;
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="flex flex-col items-center mb-8">
-          <div className="relative w-48 h-16 mb-2">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Animated background elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-20 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-20 right-10 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
+      </div>
+
+      <div className="w-full max-w-md relative z-10">
+        {/* Logo Section */}
+        <div className="flex flex-col items-center mb-12">
+          <div className="relative w-16 h-16 mb-6 rounded-2xl backdrop-blur-xl bg-white/10 border border-white/20 flex items-center justify-center shadow-2xl">
             {config.clientLogo ? (
               <Image 
                 src={config.clientLogo} 
                 alt={config.clientName} 
-                fill 
+                width={48}
+                height={48}
                 className="object-contain" 
                 priority 
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <h1 className="text-2xl font-bold" style={{ color: config.clientPrimaryColor }}>
-                  {config.appName}
-                </h1>
-              </div>
+              <h1 className="text-2xl font-bold" style={{ color: config.clientPrimaryColor }}>
+                {config.appName[0]}
+              </h1>
             )}
           </div>
-          <p className="text-gray-400/50 text-sm mt-1">{config.brandByline}</p>
+          <h1 className="text-3xl font-bold text-white text-center mb-2">{config.clientName}</h1>
+          <p className="text-gray-400 text-sm text-center">{config.brandByline}</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Sign in to {config.clientName}</h2>
+        {/* Login Card - Glassmorphism */}
+        <div className="backdrop-blur-2xl bg-white/10 rounded-3xl shadow-2xl border border-white/20 p-8 hover:bg-white/[0.15] transition-all duration-300">
+          <h2 className="text-2xl font-bold text-white mb-2">Operations Portal</h2>
+          <p className="text-gray-300 text-sm mb-8">Secure access for authorized managers</p>
 
           {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">
-              {error}
+            <div className="mb-6 p-4 bg-red-500/20 backdrop-blur-xl border border-red-400/30 rounded-2xl text-red-200 text-sm font-medium animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <span className="text-lg mt-0.5">⚠️</span>
+                <span>{error}</span>
+              </div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+              <label className="block text-sm font-semibold text-white/90 mb-2">Username or Email</label>
               <input
                 type="text"
                 required
                 value={form.username}
                 onChange={(e) => setForm(p => ({ ...p, username: e.target.value }))}
-                className="w-full h-12 px-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all text-sm"
-                placeholder="WordPress username"
+                disabled={loading}
+                className="w-full h-12 px-4 rounded-xl backdrop-blur-xl bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all text-white placeholder-gray-400/60 disabled:opacity-50"
+                placeholder="your username"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <label className="block text-sm font-semibold text-white/90 mb-2">Password</label>
               <input
                 type="password"
                 required
                 value={form.password}
                 onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))}
-                className="w-full h-12 px-4 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all text-sm"
+                disabled={loading}
+                className="w-full h-12 px-4 rounded-xl backdrop-blur-xl bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all text-white placeholder-gray-400/60 disabled:opacity-50"
                 placeholder="••••••••"
               />
+              <div className="flex justify-end mt-2">
+                <Link href="/login/forgot-password" className="text-xs text-gray-400 hover:text-gray-300 transition-colors">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-12 bg-sky-700 text-white rounded-xl font-semibold hover:bg-sky-800 transition-colors disabled:opacity-60 mt-2"
+              style={{ 
+                backgroundColor: config.clientPrimaryColor,
+              }}
+              className="w-full h-12 text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed mt-6 transform hover:scale-[1.02] active:scale-95"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Verifying...
+                </span>
+              ) : (
+                'Sign In to Portal'
+              )}
             </button>
           </form>
-        </div>
 
-        <p className="text-center text-xs text-gray-400 mt-6">
-          Only administrators and shop managers can access this panel.
-        </p>
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <p className="text-xs text-gray-400 text-center">
+              Need help? Contact your administrator
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

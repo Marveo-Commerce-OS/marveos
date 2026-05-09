@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { appendAuditLog } from '@/lib/adminStore';
+import { getWooCommerceRestBase } from '@/src/lib/endpoints';
 
-const WC = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wc/v3') ?? 'https://central.prag.global/wp-json/wc/v3'}`;
-const AUTH = `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`;
+const WC = getWooCommerceRestBase();
+const AUTH = `consumer_key=${process.env.WOOCOMMERCE_CONSUMER_KEY ?? ''}&consumer_secret=${process.env.WOOCOMMERCE_CONSUMER_SECRET ?? ''}`;
 
 export async function PUT(req: NextRequest) {
   const session = await getSession();

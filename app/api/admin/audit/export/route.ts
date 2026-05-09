@@ -36,7 +36,7 @@ async function renderPdf(rows: ExportRow[]) {
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(16).text('PRAG Admin Audit Backup');
+    doc.fontSize(16).text('Marvéo Admin Audit Backup');
     doc.moveDown(0.5);
     doc.fontSize(9).fillColor('#555').text(`Generated: ${new Date().toISOString()}`);
     doc.moveDown(1);

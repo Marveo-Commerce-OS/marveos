@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const DOC_POST_TYPE = process.env.MARVEO_DOCUMENT_POST_TYPE;
 
 interface DocumentPayload {
   id?: number;
@@ -30,9 +32,10 @@ function docBody(data: DocumentPayload) {
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const data = (await req.json()) as DocumentPayload;
-  const res = await fetch(`${WP}/prag_document`, {
+  const res = await fetch(`${WP}/${DOC_POST_TYPE}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
     body: JSON.stringify(docBody(data)),
@@ -45,9 +48,10 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const data = (await req.json()) as DocumentPayload;
-  const res = await fetch(`${WP}/prag_document/${data.id}`, {
+  const res = await fetch(`${WP}/${DOC_POST_TYPE}/${data.id}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
     body: JSON.stringify(docBody(data)),
@@ -59,11 +63,12 @@ export async function PUT(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  const res = await fetch(`${WP}/prag_document/${id}?force=true`, {
+  const res = await fetch(`${WP}/${DOC_POST_TYPE}/${id}?force=true`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${session.token}` },
   });

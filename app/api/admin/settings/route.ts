@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
 import { ADMIN_MODULE_KEYS, appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { getWordPressApiBase } from '@/src/lib/endpoints';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const WP_API_URL = getWordPressApiBase();
 
 interface FormPayload {
   formKey?: unknown;
