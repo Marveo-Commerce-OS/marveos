@@ -8,6 +8,15 @@ const getWpApiUrl = () => {
   return config.wordpressApiUrl || 'https://localhost/wp-json';
 };
 
+const isDemoAuthEnabled = () =>
+  process.env.NODE_ENV !== 'production' &&
+  (process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true');
+
+const getDemoCredentials = () => ({
+  username: process.env.MARVEO_DEMO_USERNAME || 'demo-admin',
+  password: process.env.MARVEO_DEMO_PASSWORD || 'demo-pass-2026',
+});
+
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 10000) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -32,6 +41,28 @@ export async function POST(req: NextRequest) {
     if (!username || !password) {
       return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
     }
+
+    if (isDemoAuthEnabled()) {
+      const demo = getDemoCredentials();
+      if (username !== demo.username || password !== demo.password) {
+        return NextResponse.json({ error: 'Invalid demo credentials' }, { status: 401 });
+      }
+
+      const cookieStore = await cookies();
+      const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
+      cookieStore.set('admin_token', `demo-token-${Date.now()}`, opts);
+      cookieStore.set('admin_user', JSON.stringify({
+        id: 1,
+        user_display_name: 'Demo Admin',
+        user_email: 'demo@marveo.local',
+        isAdmin: true,
+        roles: ['administrator'],
+        portals: ['b2c'],
+      }), opts);
+
+      return NextResponse.json({ success: true, redirect: '/portal' });
+    }
+
     let wpRes;
     try {
       wpRes = await fetchWithTimeout(`${WP_API_URL}/jwt-auth/v1/token`, {

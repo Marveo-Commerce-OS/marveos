@@ -32,7 +32,7 @@ export default async function BlogPage({ searchParams }: Props) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Blog Posts</h1>
-        <p className="text-gray-500 text-sm mt-1">{total} posts in Knowledge Center</p>
+        <p className="text-gray-500 text-sm mt-1">{total} posts in blog</p>
         <div className="mt-3">
           <Link href="/dashboard/blog/new" className="px-3 py-1.5 rounded-lg text-xs font-medium bg-sky-700 text-white hover:bg-sky-800 transition-colors">Create Post</Link>
         </div>

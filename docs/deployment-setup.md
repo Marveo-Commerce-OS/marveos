@@ -77,9 +77,9 @@ These are system-level settings and should not be shown as secrets in the plugin
 
 The GitHub update token must only live in Vercel as `GITHUB_PLUGIN_UPDATES_TOKEN`.
 
-## Migration Notes for PRAG
+## Migration Notes for Legacy Deployments
 
-PRAG remains a valid client profile/example, but it is no longer hardcoded into the runtime.
+Legacy client profiles remain supported, but no client is hardcoded into the runtime.
 
 Migration steps:
 1. Set the deployment mode explicitly to `wordpress` or `headless`.
@@ -87,7 +87,7 @@ Migration steps:
 3. Save the deployment profile in the WordPress plugin.
 4. Validate the deployment profile until `validation_passed` becomes `true`.
 5. Confirm the plugin update feed and package download are reachable.
-6. Move any remaining PRAG-specific values into client configuration or environment variables.
+6. Move any remaining client-specific values into client configuration or environment variables.
 
 ## Deployment Rule
 

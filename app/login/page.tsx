@@ -9,6 +9,8 @@ import { getConfig } from '@/src/config/client';
 export default function LoginPage() {
   const router = useRouter();
   const config = getConfig();
+  const demoMode = process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true';
+  const demoUsername = process.env.NEXT_PUBLIC_MARVEO_DEMO_USERNAME || 'demo-admin';
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -80,6 +82,13 @@ export default function LoginPage() {
         <div className="backdrop-blur-2xl bg-white/10 rounded-3xl shadow-2xl border border-white/20 p-8 hover:bg-white/[0.15] transition-all duration-300">
           <h2 className="text-2xl font-bold text-white mb-2">Operations Portal</h2>
           <p className="text-gray-300 text-sm mb-8">Secure access for authorized managers</p>
+
+          {demoMode && (
+            <div className="mb-6 p-4 bg-emerald-500/15 backdrop-blur-xl border border-emerald-300/30 rounded-2xl text-emerald-100 text-sm">
+              <p className="font-semibold">Demo mode enabled</p>
+              <p className="mt-1 text-xs">Username: {demoUsername}</p>
+            </div>
+          )}
 
           {error && (
             <div className="mb-6 p-4 bg-red-500/20 backdrop-blur-xl border border-red-400/30 rounded-2xl text-red-200 text-sm font-medium animate-in fade-in">
