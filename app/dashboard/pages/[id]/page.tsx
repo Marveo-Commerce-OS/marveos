@@ -26,7 +26,12 @@ export default function PageEditorPage() {
   const params = useParams();
   const router = useRouter();
   const pageId = params?.id as string;
-  const page = PAGES[pageId as unknown as keyof typeof PAGES] || PAGES[1];
+  const maybePage = PAGES[Number(pageId) as keyof typeof PAGES];
+  const page = maybePage ?? {
+    title: `Page ${pageId}`,
+    slug: `page-${pageId}`,
+    type: 'custom',
+  };
 
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
