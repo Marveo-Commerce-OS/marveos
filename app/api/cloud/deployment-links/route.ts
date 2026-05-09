@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
-import { appendAuditLog, readAdminStore, updateAdminStore, PLAN_WORKSPACE_LIMITS } from '@/lib/adminStore';
+import { getSession, isSuperAdmin } from '@/lib/auth';
+import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { PLAN_WORKSPACE_LIMITS } from '@/lib/adminStore';
+import type { AccountPlan, DeploymentLink } from '@/lib/adminStore';
 import { createWorkspace } from '@/lib/cloudOrchestration';
+import { v4 as uuid } from 'uuid';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -21,6 +24,7 @@ async function ensureAdminSession() {
   return { session };
 }
 
+// GET /api/cloud/deployment-links - List all deployment links
 export async function GET() {
   const auth = await ensureAdminSession();
   if ('error' in auth) {
@@ -28,20 +32,17 @@ export async function GET() {
   }
 
   const store = await readAdminStore();
-  const workspaces = Object.values(store.cloud.workspaces).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const workspaceCount = workspaces.length;
-  const workspaceLimit = PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan];
-  const remainingWorkspaces = Math.max(0, workspaceLimit - workspaceCount);
+  const links = Object.values(store.cloud.deploymentLinks).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return NextResponse.json({
-    workspaces,
-    plan: store.cloud.accountPlan,
-    workspaceCount,
-    workspaceLimit,
-    remainingWorkspaces,
+    accountPlan: store.cloud.accountPlan,
+    workspaceCount: Object.keys(store.cloud.workspaces).length,
+    workspaceLimit: PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan],
+    links,
   });
 }
 
+// POST /api/cloud/deployment-links - Generate a new deployment link
 export async function POST(req: NextRequest) {
   const auth = await ensureAdminSession();
   if ('error' in auth) {
@@ -64,17 +65,16 @@ export async function POST(req: NextRequest) {
     return badRequest('contentSource must be either wordpress or nextjs');
   }
 
-  // Check plan-based workspace limits
   const store = await readAdminStore();
   const currentPlan = store.cloud.accountPlan;
   const workspaceCount = Object.keys(store.cloud.workspaces).length;
   const workspaceLimit = PLAN_WORKSPACE_LIMITS[currentPlan];
 
+  // Check if workspace limit exceeded
   if (workspaceCount >= workspaceLimit) {
     return NextResponse.json(
       {
         error: `Workspace limit reached (${currentPlan}: ${workspaceLimit} workspace${workspaceLimit === 1 ? '' : 's'} max)`,
-        hint: 'Use the deployment link flow to provision new workspaces, or upgrade your plan',
         currentPlan,
         workspaceCount,
         workspaceLimit,
@@ -83,15 +83,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Create workspace immediately during deployment link generation
   const workspace = createWorkspace({
     name,
     businessType,
     country,
     businessModel,
-    contentSource,
+    contentSource: contentSource as 'wordpress' | 'nextjs',
     contentBaseUrl,
   });
 
+  // Create deployment link
+  const linkId = uuid();
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7); // Link valid for 7 days
+
+  const deploymentLink: DeploymentLink = {
+    id: linkId,
+    plan: currentPlan,
+    createdAt: new Date().toISOString(),
+    expiresAt: expiresAt.toISOString(),
+    used: false,
+    workspaceId: workspace.id,
+    provisioning: {
+      status: 'pending',
+      currentStep: 0,
+      totalSteps: 5,
+    },
+  };
+
+  // Update store with both workspace and deployment link
   await updateAdminStore((current) => ({
     ...current,
     cloud: {
@@ -100,16 +121,23 @@ export async function POST(req: NextRequest) {
         ...current.cloud.workspaces,
         [workspace.id]: workspace,
       },
+      deploymentLinks: {
+        ...current.cloud.deploymentLinks,
+        [linkId]: deploymentLink,
+      },
     },
   }));
 
-  const actor = await getCurrentWpUser(auth.session.token);
-  await appendAuditLog({
-    actorEmail: actor?.email ?? auth.session.user?.user_email ?? 'unknown',
-    action: 'cloud.workspace.created',
-    target: workspace.id,
-    details: `Workspace created with onboarding step machine initialized (${workspace.name}).`,
-  });
+  // Generate provisioning URL
+  const baseUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3000';
+  const provisioningUrl = `${baseUrl}/deploy/${linkId}`;
 
-  return NextResponse.json({ workspace }, { status: 201 });
+  return NextResponse.json({
+    success: true,
+    linkId,
+    workspaceId: workspace.id,
+    provisioningUrl,
+    deploymentLink,
+    workspace,
+  });
 }

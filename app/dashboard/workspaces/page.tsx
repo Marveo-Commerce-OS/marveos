@@ -160,6 +160,10 @@ function useWorkspaces() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [plan, setPlan] = useState('starter');
+  const [workspaceCount, setWorkspaceCount] = useState(0);
+  const [workspaceLimit, setWorkspaceLimit] = useState(1);
+  const [remainingWorkspaces, setRemainingWorkspaces] = useState(1);
 
   const load = async () => {
     setLoading(true);
@@ -172,6 +176,10 @@ function useWorkspaces() {
       }
 
       setWorkspaces(Array.isArray(data.workspaces) ? data.workspaces : []);
+      setPlan(data.plan || 'starter');
+      setWorkspaceCount(data.workspaceCount || 0);
+      setWorkspaceLimit(data.workspaceLimit || 1);
+      setRemainingWorkspaces(data.remainingWorkspaces || 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -183,11 +191,22 @@ function useWorkspaces() {
     void load();
   }, []);
 
-  return { workspaces, setWorkspaces, loading, error, reload: load };
+  return {
+    workspaces,
+    setWorkspaces,
+    loading,
+    error,
+    reload: load,
+    plan,
+    workspaceCount,
+    workspaceLimit,
+    remainingWorkspaces,
+  };
 }
 
 export default function WorkspacesPage() {
-  const { workspaces, setWorkspaces, loading, error, reload } = useWorkspaces();
+  const { workspaces, setWorkspaces, loading, error, reload, plan, workspaceCount, workspaceLimit, remainingWorkspaces } =
+    useWorkspaces();
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('');
 
   const [createForm, setCreateForm] = useState({
@@ -499,11 +518,46 @@ export default function WorkspacesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Cloud Workspaces</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          End-to-end orchestration for onboarding, connector commands, schema rollout, and launch guard.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Cloud Workspaces</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            End-to-end orchestration for onboarding, connector commands, schema rollout, and launch guard.
+          </p>
+        </div>
+        <a
+          href="/dashboard/deployment"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+        >
+          Generate Deployment Link
+        </a>
+      </div>
+
+      {/* Plan Info Banner */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-100">
+        <div className="flex items-center justify-between">
+          <div className="flex gap-6">
+            <div>
+              <p className="text-sm text-gray-600">Current Plan</p>
+              <p className="text-lg font-bold capitalize text-blue-900">{plan}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Workspaces</p>
+              <p className="text-lg font-bold text-blue-900">
+                {workspaceCount}/{workspaceLimit}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Remaining</p>
+              <p className={`text-lg font-bold ${remainingWorkspaces > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {remainingWorkspaces}
+              </p>
+            </div>
+          </div>
+          {remainingWorkspaces === 0 && (
+            <p className="text-sm text-red-600 font-medium">Workspace limit reached. Use deployment links or upgrade your plan.</p>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -513,6 +567,19 @@ export default function WorkspacesPage() {
             A workspace is one client deployment track. It stores source type (WordPress or Next.js), onboarding progress,
             schema rollout versions, and launch readiness.
           </p>
+
+          {remainingWorkspaces === 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm text-red-700 font-medium">
+                Workspace limit reached ({plan}: {workspaceLimit} max)
+              </p>
+              <p className="text-xs text-red-600 mt-1">
+                Use the <a href="/dashboard/deployment" className="underline font-semibold">deployment link flow</a> to create new workspaces,
+                or upgrade your plan.
+              </p>
+            </div>
+          )}
+
           <div className="space-y-3">
             <input
               value={createForm.name}
@@ -574,10 +641,10 @@ export default function WorkspacesPage() {
             />
             <button
               onClick={createWorkspace}
-              disabled={busyAction === 'create-workspace'}
-              className="w-full h-10 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-50"
+              disabled={busyAction === 'create-workspace' || remainingWorkspaces === 0}
+              className="w-full h-10 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {busyAction === 'create-workspace' ? 'Creating...' : 'Create Workspace'}
+              {busyAction === 'create-workspace' ? 'Creating...' : remainingWorkspaces === 0 ? 'Workspace Limit Reached' : 'Create Workspace'}
             </button>
           </div>
 

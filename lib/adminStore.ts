@@ -154,6 +154,24 @@ export interface WorkspaceOrchestration {
   updatedAt: string;
 }
 
+export type AccountPlan = 'starter' | 'business' | 'enterprise';
+
+export interface DeploymentLink {
+  id: string;
+  plan: AccountPlan;
+  createdAt: string;
+  expiresAt: string;
+  used: boolean;
+  usedAt?: string;
+  workspaceId?: string;
+  provisioning: {
+    status: 'pending' | 'in_progress' | 'completed' | 'failed';
+    currentStep: number;
+    totalSteps: number;
+    lastError?: string;
+  };
+}
+
 export interface CloudOrchestrationStore {
   workspaces: Record<string, WorkspaceOrchestration>;
   pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
@@ -170,12 +188,21 @@ export interface CloudOrchestrationStore {
       updatedAt: string;
     }
   >;
+  deploymentLinks: Record<string, DeploymentLink>;
+  accountPlan: AccountPlan;
+  accountPlanUpdatedAt: string;
   lookups: {
     businessTypes: string[];
     businessModels: string[];
     countries: Array<{ code: string; name: string }>;
   };
 }
+
+export const PLAN_WORKSPACE_LIMITS: Record<AccountPlan, number> = {
+  starter: 1,
+  business: 3,
+  enterprise: 999, // Effectively unlimited
+};
 
 export const ADMIN_MODULE_KEYS = [
   'dashboard',
@@ -336,6 +363,9 @@ const DEFAULT_STORE: AdminConfigStore = {
     componentSchemas: {},
     commands: [],
     pagePublications: {},
+    deploymentLinks: {},
+    accountPlan: 'starter',
+    accountPlanUpdatedAt: new Date().toISOString(),
     lookups: {
       businessTypes: ['Retail', 'Wholesale', 'Manufacturing', 'Services', 'Healthcare', 'Education', 'Hospitality', 'Technology'],
       businessModels: ['B2C', 'B2B', 'B2B2C', 'Marketplace', 'Subscription', 'Hybrid'],
@@ -413,6 +443,11 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       componentSchemas: parsed.cloud?.componentSchemas ?? {},
       commands: Array.isArray(parsed.cloud?.commands) ? parsed.cloud?.commands : [],
       pagePublications: mergedPublications,
+      deploymentLinks: parsed.cloud?.deploymentLinks ?? {},
+      accountPlan: (['starter', 'business', 'enterprise'].includes(parsed.cloud?.accountPlan ?? '')
+        ? (parsed.cloud?.accountPlan as AccountPlan)
+        : 'starter'),
+      accountPlanUpdatedAt: parsed.cloud?.accountPlanUpdatedAt ?? DEFAULT_STORE.cloud.accountPlanUpdatedAt,
       lookups: {
         businessTypes: Array.isArray(parsed.cloud?.lookups?.businessTypes)
           ? parsed.cloud.lookups.businessTypes.map((item) => String(item)).filter(Boolean)

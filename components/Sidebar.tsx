@@ -11,6 +11,7 @@ import { shouldShowInNavigation } from '@/src/lib/modules';
 const NAV = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true, moduleKey: 'dashboard' },
   { href: '/dashboard/workspaces', label: 'Cloud Workspaces', icon: CloudCog, moduleKey: 'dashboard' },
+  { href: '/dashboard/deployment', label: 'Deployment Links', icon: ExternalLink, moduleKey: 'dashboard' },
   { href: '/dashboard/pages', label: 'Pages', icon: FileStack, moduleKey: 'dashboard' },
   { href: '/dashboard/blog', label: 'Blog', icon: BookOpen, moduleKey: 'blog' },
   { href: '/dashboard/products', label: 'Products', icon: ShoppingBag, moduleKey: 'products' },
