@@ -47,6 +47,7 @@ export default function PageEditorPage() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [page, setPage] = useState<PagePayload | null>(null);
 
   useEffect(() => {
@@ -110,6 +111,7 @@ export default function PageEditorPage() {
     setSaving(true);
     setStatus('idle');
     setError('');
+    setInfo('');
 
     try {
       const res = await fetch(`/api/pages/${encodeURIComponent(page.id)}`, {
@@ -130,8 +132,8 @@ export default function PageEditorPage() {
       }
 
       setStatus('success');
-      if (data?.mode === 'draft_saved') {
-        setError(data?.message || 'Saved as managed draft.');
+      if (data?.message) {
+        setInfo(data.message);
       }
       setTimeout(() => setStatus('idle'), 3500);
     } catch (err) {
@@ -164,7 +166,7 @@ export default function PageEditorPage() {
           className="flex items-center gap-2 px-5 py-2 bg-sky-700 text-white rounded-lg text-sm font-semibold hover:bg-sky-800 transition-colors disabled:opacity-60"
         >
           <Save size={16} />
-          {saving ? 'Saving...' : sourceType === 'wordpress' ? 'Save to WordPress' : 'Save Draft'}
+          {saving ? 'Saving...' : sourceType === 'wordpress' ? 'Publish to WordPress' : 'Publish Content'}
         </button>
       </div>
 
@@ -181,9 +183,15 @@ export default function PageEditorPage() {
         </div>
       )}
 
+      {info && (
+        <div className="p-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm">
+          {info}
+        </div>
+      )}
+
       {sourceType === 'nextjs' && (
         <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm">
-          Next.js source mode discovers live frontend content and stores edited sections as managed drafts in Marveo. Publish through your frontend deployment pipeline to apply live changes.
+          Next.js source mode publishes edited sections into Marveo managed content immediately. If a publish webhook is configured, deployment is triggered automatically.
         </div>
       )}
 

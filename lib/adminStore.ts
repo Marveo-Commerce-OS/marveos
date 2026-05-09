@@ -159,7 +159,7 @@ export interface CloudOrchestrationStore {
   pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
   componentSchemas: Record<string, VersionedSchema<ComponentSchemaData>[]>;
   commands: ConnectorCommandRecord[];
-  pageDrafts: Record<
+  pagePublications: Record<
     string,
     {
       sourceType: 'wordpress' | 'nextjs';
@@ -335,7 +335,7 @@ const DEFAULT_STORE: AdminConfigStore = {
     pageSchemas: {},
     componentSchemas: {},
     commands: [],
-    pageDrafts: {},
+    pagePublications: {},
     lookups: {
       businessTypes: ['Retail', 'Wholesale', 'Manufacturing', 'Services', 'Healthcare', 'Education', 'Hospitality', 'Technology'],
       businessModels: ['B2C', 'B2B', 'B2B2C', 'Marketplace', 'Subscription', 'Hybrid'],
@@ -354,6 +354,44 @@ const DEFAULT_STORE: AdminConfigStore = {
 };
 
 function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore {
+  const rawCloud = (parsed.cloud as unknown as Record<string, unknown> | undefined) ?? undefined;
+  const legacyPageDrafts = rawCloud?.pageDrafts as Record<string, unknown> | undefined;
+  const pagePublicationsRaw = parsed.cloud?.pagePublications as Record<string, unknown> | undefined;
+
+  const sanitizePublications = (input: Record<string, unknown> | undefined) => {
+    if (!input) return {} as CloudOrchestrationStore['pagePublications'];
+
+    const output: CloudOrchestrationStore['pagePublications'] = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (!value || typeof value !== 'object') continue;
+      const row = value as Record<string, unknown>;
+      const sourceType = String(row.sourceType || '').toLowerCase() === 'nextjs' ? 'nextjs' : 'wordpress';
+      const baseUrl = String(row.baseUrl || '').trim();
+      const pageId = String(row.pageId || '').trim();
+      const title = String(row.title || '').trim();
+      const sections = Array.isArray(row.sections)
+        ? row.sections.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+        : [];
+
+      if (!baseUrl || !pageId) continue;
+
+      output[key] = {
+        sourceType,
+        baseUrl,
+        pageId,
+        title: title || pageId,
+        sections,
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }
+
+    return output;
+  };
+
+  const mergedPublications = Object.keys(pagePublicationsRaw || {}).length > 0
+    ? sanitizePublications(pagePublicationsRaw)
+    : sanitizePublications(legacyPageDrafts);
+
   return {
     ...DEFAULT_STORE,
     ...parsed,
@@ -374,9 +412,7 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       pageSchemas: parsed.cloud?.pageSchemas ?? {},
       componentSchemas: parsed.cloud?.componentSchemas ?? {},
       commands: Array.isArray(parsed.cloud?.commands) ? parsed.cloud?.commands : [],
-      pageDrafts: parsed.cloud?.pageDrafts && typeof parsed.cloud.pageDrafts === 'object'
-        ? parsed.cloud.pageDrafts
-        : {},
+      pagePublications: mergedPublications,
       lookups: {
         businessTypes: Array.isArray(parsed.cloud?.lookups?.businessTypes)
           ? parsed.cloud.lookups.businessTypes.map((item) => String(item)).filter(Boolean)

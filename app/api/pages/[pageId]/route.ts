@@ -43,6 +43,38 @@ function draftKey(sourceType: ContentSource, baseUrl: string, pageId: string): s
   return `${sourceType}::${normalizeBase(baseUrl)}::${pageId}`;
 }
 
+async function triggerNextJsPublishWebhook(payload: Record<string, unknown>): Promise<{ triggered: boolean; status?: number; error?: string }> {
+  const webhookUrl = (process.env.MARVEO_NEXTJS_PUBLISH_WEBHOOK_URL || '').trim();
+  if (!webhookUrl) {
+    return { triggered: false };
+  }
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return {
+        triggered: true,
+        status: res.status,
+        error: text || `Webhook request failed (${res.status})`,
+      };
+    }
+
+    return { triggered: true, status: res.status };
+  } catch (error) {
+    return {
+      triggered: true,
+      error: error instanceof Error ? error.message : 'Webhook request failed',
+    };
+  }
+}
+
 function toWpPageEndpoint(base: string, pageId: string): string {
   const normalized = normalizeBase(base);
   const root = normalized.includes('/wp-json') ? normalized : `${normalized}/wp-json`;
@@ -302,7 +334,7 @@ export async function GET(
       const sections = parseSectionsFromHtml(contentValue);
 
       const store = await readAdminStore();
-      const draft = store.cloud.pageDrafts[draftKey(sourceType, baseUrl, String(page.id ?? pageId))];
+      const draft = store.cloud.pagePublications[draftKey(sourceType, baseUrl, String(page.id ?? pageId))];
       const draftSections = sanitizeDraftSections(draft?.sections);
       const mergedSections = draftSections.length > 0 ? draftSections : sections;
 
@@ -324,7 +356,7 @@ export async function GET(
     const contentHtml = String(mainMatch?.[1] || bodyMatch?.[1] || html);
     const sections = parseSectionsFromHtml(contentHtml);
     const store = await readAdminStore();
-    const draft = store.cloud.pageDrafts[draftKey(sourceType, baseUrl, pageId)];
+    const draft = store.cloud.pagePublications[draftKey(sourceType, baseUrl, pageId)];
     const draftSections = sanitizeDraftSections(draft?.sections);
     const mergedSections = draftSections.length > 0 ? draftSections : sections;
 
@@ -373,8 +405,8 @@ export async function PUT(
         ...current,
         cloud: {
           ...current.cloud,
-          pageDrafts: {
-            ...current.cloud.pageDrafts,
+          pagePublications: {
+            ...current.cloud.pagePublications,
             [draftKey(sourceType, baseUrl, pageId)]: {
               sourceType,
               baseUrl,
@@ -387,10 +419,24 @@ export async function PUT(
         },
       }));
 
+      const publishResult = await triggerNextJsPublishWebhook({
+        sourceType,
+        baseUrl,
+        pageId,
+        title: String(body?.title || pageId),
+        sections,
+        publishedAt: new Date().toISOString(),
+      });
+
       return NextResponse.json({
         success: true,
-        mode: 'draft_saved',
-        message: 'Next.js page sections saved as managed draft. Publish through your frontend deployment pipeline to apply on the live site.',
+        mode: 'published_managed_content',
+        message: publishResult.triggered
+          ? publishResult.error
+            ? `Content published in Marveo, but deploy webhook returned an issue: ${publishResult.error}`
+            : 'Content published in Marveo and deploy webhook triggered.'
+          : 'Content published in Marveo managed content store.',
+        deployWebhook: publishResult,
       });
     }
 
@@ -429,8 +475,8 @@ export async function PUT(
       ...current,
       cloud: {
         ...current.cloud,
-        pageDrafts: {
-          ...current.cloud.pageDrafts,
+        pagePublications: {
+          ...current.cloud.pagePublications,
           [draftKey(sourceType, baseUrl, pageId)]: {
             sourceType,
             baseUrl,
