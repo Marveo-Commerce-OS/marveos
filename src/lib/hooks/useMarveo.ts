@@ -2,7 +2,7 @@
 
 import { useContext, useEffect, useState, useCallback } from 'react';
 import { createContext } from 'react';
-import type { MarveoClient, MarveoSettings, MarveoContent, MarveoContextType } from './marveo';
+import type { MarveoClient, MarveoSettings, MarveoContent, MarveoContextType } from '../marveo';
 
 /**
  * Marveo React Context
