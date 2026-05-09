@@ -11,6 +11,8 @@ interface Workspace {
   businessType: string;
   country: string;
   businessModel: string;
+  contentSource: 'wordpress' | 'nextjs';
+  contentBaseUrl: string;
   status: 'draft' | 'onboarding' | 'ready_for_launch' | 'launched' | 'blocked';
   onboardingSteps: Array<{
     step: number;
@@ -25,6 +27,12 @@ interface Workspace {
     componentSchemaVersion: number;
     channel: RolloutChannel;
   };
+}
+
+interface WorkspaceLookups {
+  businessTypes: string[];
+  businessModels: string[];
+  countries: Array<{ code: string; name: string }>;
 }
 
 interface LaunchGuardResult {
@@ -187,6 +195,13 @@ export default function WorkspacesPage() {
     businessType: '',
     country: '',
     businessModel: '',
+    contentSource: 'wordpress' as 'wordpress' | 'nextjs',
+    contentBaseUrl: '',
+  });
+  const [lookups, setLookups] = useState<WorkspaceLookups>({
+    businessTypes: [],
+    businessModels: [],
+    countries: [],
   });
   const [busyAction, setBusyAction] = useState('');
   const [formError, setFormError] = useState('');
@@ -210,6 +225,31 @@ export default function WorkspacesPage() {
       setSelectedWorkspaceId(workspaces[0].id);
     }
   }, [workspaces, selectedWorkspaceId]);
+
+  useEffect(() => {
+    const loadLookups = async () => {
+      try {
+        const res = await fetch('/api/cloud/workspaces/lookups', { cache: 'no-store' });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || 'Failed to load workspace setup options');
+        }
+
+        const lookupData = data?.lookups as WorkspaceLookups | undefined;
+        if (!lookupData) return;
+
+        setLookups({
+          businessTypes: Array.isArray(lookupData.businessTypes) ? lookupData.businessTypes : [],
+          businessModels: Array.isArray(lookupData.businessModels) ? lookupData.businessModels : [],
+          countries: Array.isArray(lookupData.countries) ? lookupData.countries : [],
+        });
+      } catch (err) {
+        setFormError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    };
+
+    void loadLookups();
+  }, []);
 
   useEffect(() => {
     if (!selectedWorkspace) {
@@ -279,7 +319,14 @@ export default function WorkspacesPage() {
         throw new Error(data?.error || 'Workspace creation failed');
       }
 
-      setCreateForm({ name: '', businessType: '', country: '', businessModel: '' });
+      setCreateForm((prev) => ({
+        ...prev,
+        name: '',
+        businessType: '',
+        country: '',
+        businessModel: '',
+        contentBaseUrl: '',
+      }));
       await reload();
       if (data.workspace?.id) {
         setSelectedWorkspaceId(data.workspace.id);
@@ -462,6 +509,10 @@ export default function WorkspacesPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <section className="bg-white border border-gray-100 rounded-2xl shadow-sm p-5 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900">Create Workspace</h2>
+          <p className="text-xs text-gray-500">
+            A workspace is one client deployment track. It stores source type (WordPress or Next.js), onboarding progress,
+            schema rollout versions, and launch readiness.
+          </p>
           <div className="space-y-3">
             <input
               value={createForm.name}
@@ -469,22 +520,56 @@ export default function WorkspacesPage() {
               placeholder="Workspace name"
               className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
             />
-            <input
+
+            <select
               value={createForm.businessType}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, businessType: event.target.value }))}
-              placeholder="Business type"
               className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
-            />
-            <input
+            >
+              <option value="">Select business type</option>
+              {lookups.businessTypes.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+
+            <select
               value={createForm.country}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, country: event.target.value }))}
-              placeholder="Country"
               className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
-            />
-            <input
+            >
+              <option value="">Select country</option>
+              {lookups.countries.map((item) => (
+                <option key={item.code} value={item.name}>{item.name}</option>
+              ))}
+            </select>
+
+            <select
               value={createForm.businessModel}
               onChange={(event) => setCreateForm((prev) => ({ ...prev, businessModel: event.target.value }))}
-              placeholder="Business model"
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
+            >
+              <option value="">Select business model</option>
+              {lookups.businessModels.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+
+            <select
+              value={createForm.contentSource}
+              onChange={(event) => setCreateForm((prev) => ({
+                ...prev,
+                contentSource: event.target.value === 'nextjs' ? 'nextjs' : 'wordpress',
+              }))}
+              className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
+            >
+              <option value="wordpress">WordPress (plugin-driven)</option>
+              <option value="nextjs">Next.js frontend</option>
+            </select>
+
+            <input
+              value={createForm.contentBaseUrl}
+              onChange={(event) => setCreateForm((prev) => ({ ...prev, contentBaseUrl: event.target.value }))}
+              placeholder={createForm.contentSource === 'wordpress' ? 'WordPress URL (e.g. https://site.com/wp-json)' : 'Next.js site URL (e.g. https://site.com)'}
               className="w-full h-10 px-3 rounded-xl border border-gray-200 text-sm"
             />
             <button
@@ -534,7 +619,7 @@ export default function WorkspacesPage() {
               </h2>
               {selectedWorkspace ? (
                 <p className="text-xs text-gray-500 mt-1">
-                  {selectedWorkspace.businessType} · {selectedWorkspace.country} · {selectedWorkspace.businessModel}
+                  {selectedWorkspace.businessType} · {selectedWorkspace.country} · {selectedWorkspace.businessModel} · {selectedWorkspace.contentSource}
                 </p>
               ) : null}
             </div>

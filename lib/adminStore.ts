@@ -124,6 +124,8 @@ export interface WorkspaceOrchestration {
   businessType: string;
   country: string;
   businessModel: string;
+  contentSource: 'wordpress' | 'nextjs';
+  contentBaseUrl: string;
   onboardingPath?: string;
   architecture?: string;
   selectedModules: string[];
@@ -157,6 +159,22 @@ export interface CloudOrchestrationStore {
   pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
   componentSchemas: Record<string, VersionedSchema<ComponentSchemaData>[]>;
   commands: ConnectorCommandRecord[];
+  pageDrafts: Record<
+    string,
+    {
+      sourceType: 'wordpress' | 'nextjs';
+      baseUrl: string;
+      pageId: string;
+      title: string;
+      sections: Array<Record<string, unknown>>;
+      updatedAt: string;
+    }
+  >;
+  lookups: {
+    businessTypes: string[];
+    businessModels: string[];
+    countries: Array<{ code: string; name: string }>;
+  };
 }
 
 export const ADMIN_MODULE_KEYS = [
@@ -317,6 +335,21 @@ const DEFAULT_STORE: AdminConfigStore = {
     pageSchemas: {},
     componentSchemas: {},
     commands: [],
+    pageDrafts: {},
+    lookups: {
+      businessTypes: ['Retail', 'Wholesale', 'Manufacturing', 'Services', 'Healthcare', 'Education', 'Hospitality', 'Technology'],
+      businessModels: ['B2C', 'B2B', 'B2B2C', 'Marketplace', 'Subscription', 'Hybrid'],
+      countries: [
+        { code: 'US', name: 'United States' },
+        { code: 'GB', name: 'United Kingdom' },
+        { code: 'CA', name: 'Canada' },
+        { code: 'NG', name: 'Nigeria' },
+        { code: 'KE', name: 'Kenya' },
+        { code: 'ZA', name: 'South Africa' },
+        { code: 'AE', name: 'United Arab Emirates' },
+        { code: 'IN', name: 'India' },
+      ],
+    },
   },
 };
 
@@ -341,6 +374,25 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       pageSchemas: parsed.cloud?.pageSchemas ?? {},
       componentSchemas: parsed.cloud?.componentSchemas ?? {},
       commands: Array.isArray(parsed.cloud?.commands) ? parsed.cloud?.commands : [],
+      pageDrafts: parsed.cloud?.pageDrafts && typeof parsed.cloud.pageDrafts === 'object'
+        ? parsed.cloud.pageDrafts
+        : {},
+      lookups: {
+        businessTypes: Array.isArray(parsed.cloud?.lookups?.businessTypes)
+          ? parsed.cloud.lookups.businessTypes.map((item) => String(item)).filter(Boolean)
+          : DEFAULT_STORE.cloud.lookups.businessTypes,
+        businessModels: Array.isArray(parsed.cloud?.lookups?.businessModels)
+          ? parsed.cloud.lookups.businessModels.map((item) => String(item)).filter(Boolean)
+          : DEFAULT_STORE.cloud.lookups.businessModels,
+        countries: Array.isArray(parsed.cloud?.lookups?.countries)
+          ? parsed.cloud.lookups.countries
+              .map((item) => ({
+                code: String(item?.code ?? '').trim().toUpperCase(),
+                name: String(item?.name ?? '').trim(),
+              }))
+              .filter((item) => item.code && item.name)
+          : DEFAULT_STORE.cloud.lookups.countries,
+      },
     },
   };
 }

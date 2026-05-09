@@ -44,9 +44,15 @@ export async function POST(req: NextRequest) {
   const businessType = String(body?.businessType || '').trim();
   const country = String(body?.country || '').trim();
   const businessModel = String(body?.businessModel || '').trim();
+  const contentSource = String(body?.contentSource || '').trim().toLowerCase();
+  const contentBaseUrl = String(body?.contentBaseUrl || '').trim();
 
-  if (!name || !businessType || !country || !businessModel) {
-    return badRequest('name, businessType, country, and businessModel are required');
+  if (!name || !businessType || !country || !businessModel || !contentBaseUrl) {
+    return badRequest('name, businessType, country, businessModel, and contentBaseUrl are required');
+  }
+
+  if (contentSource !== 'wordpress' && contentSource !== 'nextjs') {
+    return badRequest('contentSource must be either wordpress or nextjs');
   }
 
   const workspace = createWorkspace({
@@ -54,6 +60,8 @@ export async function POST(req: NextRequest) {
     businessType,
     country,
     businessModel,
+    contentSource,
+    contentBaseUrl,
   });
 
   await updateAdminStore((current) => ({

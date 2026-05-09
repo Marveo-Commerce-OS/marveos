@@ -49,6 +49,8 @@ export function createWorkspace(payload: {
   businessType: string;
   country: string;
   businessModel: string;
+  contentSource: 'wordpress' | 'nextjs';
+  contentBaseUrl: string;
 }): WorkspaceOrchestration {
   const now = NOW();
   return {
@@ -57,6 +59,8 @@ export function createWorkspace(payload: {
     businessType: payload.businessType,
     country: payload.country,
     businessModel: payload.businessModel,
+    contentSource: payload.contentSource,
+    contentBaseUrl: payload.contentBaseUrl,
     selectedModules: [],
     brandSetup: {},
     onboardingSteps: createDefaultOnboardingSteps(),
