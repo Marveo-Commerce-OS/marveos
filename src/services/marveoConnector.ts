@@ -181,7 +181,7 @@ export async function initializeAdmin(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${activationToken}`,
+        'X-Marveo-Activation-Token': activationToken,
       },
       body: JSON.stringify(payload),
     });
