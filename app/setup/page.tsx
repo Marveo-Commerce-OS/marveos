@@ -1,9 +1,8 @@
 import { redirect } from 'next/navigation';
-import { getCachedConfig } from '@/src/config/client';
+import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 
-export default function SetupStatusPage() {
-  const config = getCachedConfig();
-  const status = config.deploymentStatus;
+export default async function SetupStatusPage() {
+  const status = await getRuntimeDeploymentStatus();
 
   if (status.setup_completed && status.validation_passed) {
     redirect('/dashboard');
