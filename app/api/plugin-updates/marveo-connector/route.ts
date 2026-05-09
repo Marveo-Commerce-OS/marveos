@@ -4,10 +4,10 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   const release = {
-    tag: 'v1.0.15',
-    version: '1.0.15',
-    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.15',
-    changelog: 'Version 1.0.15 — Adds one-click Force Refresh Updates in the connector admin to bypass stale plugin update caches instantly.',
+    tag: 'v1.0.16',
+    version: '1.0.16',
+    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.16',
+    changelog: 'Version 1.0.16 — Adds unified site_settings schema support so Settings tabs in Marveo dashboard save correctly through one payload.',
     publishedAt: '2026-05-09T00:00:00Z',
   };
 
