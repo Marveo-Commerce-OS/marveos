@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { appendAuditLog } from '@/lib/adminStore';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL ?? 'https://central.prag.global/wp-json'}/wp/v2`;
+const WP = getWordPressRestBase();
 
 export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const payload = await req.json();
   const { id } = payload;
@@ -45,6 +47,7 @@ export async function PUT(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const payload = await req.json();
   const postBody: Record<string, unknown> = {

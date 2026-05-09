@@ -3,12 +3,14 @@ export const dynamic = 'force-dynamic';
 import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import EditProductForm from '../[id]/EditProductForm';
+import { getWooCommerceRestBase } from '@/src/lib/endpoints';
 
-const WC = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wc/v3') ?? 'https://central.prag.global/wp-json/wc/v3'}`;
+const WC = getWooCommerceRestBase();
 const AUTH = `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`;
 
 async function getCategories() {
   try {
+    if (!WC) return [];
     const res = await fetch(`${WC}/products/categories?per_page=100&${AUTH}`, { cache: 'no-store' });
     if (!res.ok) return [];
     return await res.json();

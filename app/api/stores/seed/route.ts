@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const STORE_POST_TYPE = process.env.MARVEO_STORE_POST_TYPE;
 
-type StoreType = 'prag' | 'online' | 'chain';
+type StoreType = 'location' | 'online' | 'chain';
 
 interface StorePayload {
   id?: number;
@@ -19,92 +21,87 @@ interface StorePayload {
 
 const DEFAULT_STORES: StorePayload[] = [
   {
-    name: 'PRAG (Obanikoro)',
-    city: 'Obanikoro',
-    address: '4, Obanikoro Street, Via Falemi House, Off Ikorodu Road, Lagos',
-    phone: '0703 646 3977',
-    map_url: 'https://maps.google.com/?q=4+Obanikoro+Street+Lagos',
-    store_type: 'prag',
+    name: 'Main Store',
+    city: 'Downtown',
+    address: '123 Main Street, City Center',
+    phone: '+1-555-0101',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'PRAG (Port Harcourt)',
-    city: 'Portharcourt',
-    address: '18, Ezimgbu Link Road, GRA Phase IV, Mopol 19 Mummy-B Bypass, Port Harcourt',
-    phone: '0703 549 2994',
-    map_url: 'https://maps.google.com/?q=18+Ezimgbu+Link+Road+Port+Harcourt',
-    store_type: 'prag',
+    name: 'North Location',
+    city: 'North District',
+    address: '456 North Avenue, North Side',
+    phone: '+1-555-0102',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'PRAG Abuja (Durumi)',
-    city: 'Abuja',
-    address: 'A.A IBRAHIM PLAZA, Block A, Suite 08, 12 David Ejoor, Durumi, Abuja, FCT',
-    phone: '0808 101 0747',
-    map_url: 'https://maps.google.com/?q=12+David+Ejoor+Durumi+Abuja',
-    store_type: 'prag',
+    name: 'South Location',
+    city: 'South District',
+    address: '789 South Boulevard, South Side',
+    phone: '+1-555-0103',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'Partner Abuja',
-    city: 'Abuja',
-    address: 'Shop 205, Block GH, Kaura Market, Durumi District, Abuja',
-    phone: '07064847951',
-    map_url: 'https://maps.google.com/?q=Kaura+Market+Durumi+Abuja',
-    store_type: 'prag',
+    name: 'East Location',
+    city: 'East District',
+    address: '321 East Road, East Side',
+    phone: '+1-555-0104',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'PRAG (Lagos Island)',
-    city: 'Lagos Island',
-    address: 'G12, City Mall, Opposite Muson Centre, Onikan, Lagos',
-    phone: '0810 400 0715',
-    map_url: 'https://maps.google.com/?q=City+Mall+Onikan+Lagos',
-    store_type: 'prag',
+    name: 'West Location',
+    city: 'West District',
+    address: '654 West Street, West Side',
+    phone: '+1-555-0105',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'PRAG (Alaba)',
-    city: 'Alaba',
-    address: 'Ichida Mall, Sunny Bus stop, Opposite Diamond Bank, Alaba International Market, Ojo, Alaba',
-    phone: '0802 690 2296',
-    map_url: 'https://maps.google.com/?q=Alaba+International+Market+Lagos',
-    store_type: 'prag',
+    name: 'Partner Location',
+    city: 'Business Park',
+    address: '987 Commercial Drive, Business District',
+    phone: '+1-555-0106',
+    map_url: 'https://maps.google.com/',
+    store_type: 'location',
   },
   {
-    name: 'Online Store 1',
+    name: 'Online Marketplace',
     store_type: 'online',
-    map_url: 'https://shop.prag.global',
-    logo_url: 'https://central.prag.global/wp-content/uploads/2026/04/5ff0e6849b09a1a4eb3bdeda8471ff7fc2fd8ce3.png',
-    logo_alt: 'Online Store 1',
+    map_url: 'https://store.example.com',
+    logo_alt: 'Online Marketplace',
   },
   {
-    name: 'Online Store 2',
+    name: 'Partner Shop',
     store_type: 'online',
-    map_url: 'https://shop.prag.global',
-    logo_url: 'https://central.prag.global/wp-content/uploads/2026/04/bee5d02c8cf83b603f5e20ea9d3ea9af4c73da4e.png',
-    logo_alt: 'Online Store 2',
+    map_url: 'https://shop.example.com',
+    logo_alt: 'Partner Shop',
   },
   {
-    name: 'Chain Store 1',
+    name: 'Regional Chain A',
     store_type: 'chain',
-    map_url: 'https://shop.prag.global',
-    logo_url: 'https://central.prag.global/wp-content/uploads/2026/04/10b7be4d65865dc31d780030e9229855815dc832.png',
-    logo_alt: 'Chain Store 1',
+    map_url: 'https://chain-a.example.com',
+    logo_alt: 'Regional Chain A',
   },
   {
-    name: 'Chain Store 2',
+    name: 'Regional Chain B',
     store_type: 'chain',
-    map_url: 'https://shop.prag.global',
-    logo_url: 'https://central.prag.global/wp-content/uploads/2026/04/34ad001c624cbf2245020be3a1641a3b6e2869c1.png',
-    logo_alt: 'Chain Store 2',
+    map_url: 'https://chain-b.example.com',
+    logo_alt: 'Regional Chain B',
   },
   {
-    name: 'Chain Store 3',
+    name: 'Regional Chain C',
     store_type: 'chain',
-    map_url: 'https://shop.prag.global',
-    logo_url: 'https://central.prag.global/wp-content/uploads/2026/04/80fc1fd5ec7a69f5a983d6a7bd47f293daf297b9.png',
-    logo_alt: 'Chain Store 3',
+    map_url: 'https://chain-c.example.com',
+    logo_alt: 'Regional Chain C',
   },
 ];
 
 function normalizeStoreType(value: string | undefined): StoreType {
-  return value === 'online' || value === 'chain' ? value : 'prag';
+  return value === 'online' || value === 'chain' ? value : 'location';
 }
 
 function toKey(name: string, type: StoreType) {
@@ -120,7 +117,7 @@ function storeBody(data: StorePayload) {
       address: data.address ?? '',
       phone: data.phone ?? '',
       map_url: data.map_url ?? '',
-      store_type: data.store_type ?? 'prag',
+      store_type: data.store_type ?? 'location',
       logo_url: data.logo_url ?? '',
       logo_alt: data.logo_alt ?? '',
     },
@@ -128,7 +125,8 @@ function storeBody(data: StorePayload) {
 }
 
 async function fetchStores() {
-  const res = await fetch(`${WP}/prag_store?per_page=100&_fields=id,title,meta`, { cache: 'no-store' });
+  if (!WP || !STORE_POST_TYPE) return [];
+  const res = await fetch(`${WP}/${STORE_POST_TYPE}?per_page=100&_fields=id,title,meta`, { cache: 'no-store' });
   if (!res.ok) return [] as Array<{ id: number; title?: { rendered?: string }; meta?: Record<string, string> }>;
   return await res.json() as Array<{ id: number; title?: { rendered?: string }; meta?: Record<string, string> }>;
 }
@@ -158,10 +156,10 @@ export async function POST() {
 
   let created = 0;
   for (const store of DEFAULT_STORES) {
-    const key = toKey(store.name ?? '', store.store_type ?? 'prag');
+    const key = toKey(store.name ?? '', store.store_type ?? 'location');
     if (existingKeys.has(key)) continue;
 
-    const res = await fetch(`${WP}/prag_store`, {
+    const res = await fetch(`${WP}/${STORE_POST_TYPE}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

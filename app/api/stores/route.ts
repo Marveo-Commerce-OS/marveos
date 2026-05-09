@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const STORE_POST_TYPE = process.env.MARVEO_STORE_POST_TYPE;
 
 interface StorePayload {
   id?: number;
@@ -10,7 +12,7 @@ interface StorePayload {
   address?: string;
   phone?: string;
   map_url?: string;
-  store_type?: 'prag' | 'online' | 'chain';
+  store_type?: 'location' | 'online' | 'chain';
   logo_url?: string;
   logo_alt?: string;
 }
@@ -24,7 +26,7 @@ function storeBody(data: StorePayload) {
       address: data.address ?? '',
       phone: data.phone ?? '',
       map_url: data.map_url ?? '',
-      store_type: data.store_type ?? 'prag',
+      store_type: data.store_type ?? 'location',
       logo_url: data.logo_url ?? '',
       logo_alt: data.logo_alt ?? '',
     },
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const data = await req.json() as StorePayload;
-  const res = await fetch(`${WP}/prag_store`, {
+  const res = await fetch(`${WP}/${STORE_POST_TYPE}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
     body: JSON.stringify(storeBody(data)),
@@ -54,7 +56,7 @@ export async function PUT(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const data = await req.json() as StorePayload;
-  const res = await fetch(`${WP}/prag_store/${data.id}`, {
+  const res = await fetch(`${WP}/${STORE_POST_TYPE}/${data.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
     body: JSON.stringify(storeBody(data)),
@@ -70,7 +72,7 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get('id');
   if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
 
-  const res = await fetch(`${WP}/prag_store/${id}?force=true`, {
+  const res = await fetch(`${WP}/${STORE_POST_TYPE}/${id}?force=true`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${session.token}` },
   });

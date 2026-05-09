@@ -2,10 +2,16 @@ import { redirect } from 'next/navigation';
 import { getSession, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import Sidebar from '@/components/Sidebar';
+import { getCachedConfig } from '@/src/config/client';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
+
+  const config = getCachedConfig();
+  if (!config.deploymentStatus.setup_completed || !config.deploymentStatus.validation_passed) {
+    redirect('/setup');
+  }
 
   const admin = await isAdmin(session.token);
   if (!admin) redirect('/login?error=unauthorized');

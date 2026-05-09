@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { appendAuditLog } from '@/lib/adminStore';
+import { getWooCommerceRestBase } from '@/src/lib/endpoints';
 
-const WC = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wc/v3') ?? 'https://central.prag.global/wp-json/wc/v3'}`;
-const AUTH = `consumer_key=${process.env.WC_CONSUMER_KEY}&consumer_secret=${process.env.WC_CONSUMER_SECRET}`;
+const WC = getWooCommerceRestBase();
+const AUTH = `consumer_key=${process.env.WOOCOMMERCE_CONSUMER_KEY ?? ''}&consumer_secret=${process.env.WOOCOMMERCE_CONSUMER_SECRET ?? ''}`;
 
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WC) return NextResponse.json({ error: 'WooCommerce API URL is not configured' }, { status: 503 });
 
   const res = await fetch(`${WC}/products/categories?per_page=100&${AUTH}`, { cache: 'no-store' });
   if (!res.ok) return NextResponse.json({ error: 'Failed to load categories' }, { status: res.status });
@@ -17,6 +19,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WC) return NextResponse.json({ error: 'WooCommerce API URL is not configured' }, { status: 503 });
 
   const body = await req.json();
   const res = await fetch(`${WC}/products/categories?${AUTH}`, {

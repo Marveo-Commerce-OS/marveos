@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { getWordPressApiBase } from '@/src/lib/endpoints';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const WP_API_URL = getWordPressApiBase();
 const WC_BASE = `${WP_API_URL}/wc/v3`;
 
 function auth() {
@@ -11,6 +12,7 @@ function auth() {
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!WP_API_URL) return NextResponse.json({ error: 'WordPress API URL is not configured' }, { status: 503 });
 
   const { searchParams } = new URL(req.url);
   const date_min = searchParams.get('date_min') ?? '';
