@@ -4,7 +4,7 @@
 
 **Tagline:** Operate Smarter. Scale Faster.
 
-**By:** Avario Digital Products
+**By:** Avario Digitals
 
 ---
 
