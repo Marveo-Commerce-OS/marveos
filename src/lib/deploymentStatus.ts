@@ -10,6 +10,16 @@ function getWordPressApiBase(): string {
   return base.replace(/\/$/, '');
 }
 
+function buildStatusUrl(apiBase: string): string {
+  const normalized = apiBase.replace(/\/$/, '');
+
+  if (normalized.endsWith('/wp-json')) {
+    return `${normalized}/marveo/v1/status`;
+  }
+
+  return `${normalized}/wp-json/marveo/v1/status`;
+}
+
 export async function getRuntimeDeploymentStatus(): Promise<DeploymentStatus> {
   const localStatus = getCachedConfig().deploymentStatus;
   const wpBase = getWordPressApiBase();
@@ -19,7 +29,7 @@ export async function getRuntimeDeploymentStatus(): Promise<DeploymentStatus> {
   }
 
   try {
-    const response = await fetch(`${wpBase}/wp-json/marveo/v1/status`, {
+    const response = await fetch(buildStatusUrl(wpBase), {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
