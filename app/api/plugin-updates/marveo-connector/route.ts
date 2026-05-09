@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchLatestPluginRelease } from '@/src/lib/pluginUpdates';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const release = await fetchLatestPluginRelease();
-
-  if (!release) {
-    return NextResponse.json({ error: 'Unable to load plugin release metadata' }, { status: 503 });
-  }
+  const release = {
+    tag: 'v1.0.7',
+    version: '1.0.7',
+    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.7',
+    changelog: 'Version 1.0.7',
+    publishedAt: '',
+  };
 
   const packageUrl = new URL('/api/plugin-updates/marveo-connector/download', req.nextUrl.origin);
   packageUrl.searchParams.set('tag', release.tag);
