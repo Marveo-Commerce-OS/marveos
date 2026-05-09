@@ -39,7 +39,30 @@ function normalizeVersion(tag: string): string {
   return tag.replace(/^v/i, '');
 }
 
+function compareVersions(left: string, right: string): number {
+  const leftParts = normalizeVersion(left).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeVersion(right).split('.').map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = leftParts[index] ?? 0;
+    const rightPart = rightParts[index] ?? 0;
+
+    if (leftPart > rightPart) {
+      return 1;
+    }
+
+    if (leftPart < rightPart) {
+      return -1;
+    }
+  }
+
+  return 0;
+}
+
 export async function fetchLatestPluginRelease(): Promise<PluginReleaseInfo | null> {
+  let latestRelease: PluginReleaseInfo | null = null;
+
   const releaseRes = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(repoOwner())}/${encodeURIComponent(repoName())}/releases/latest`,
     {
@@ -51,7 +74,7 @@ export async function fetchLatestPluginRelease(): Promise<PluginReleaseInfo | nu
   if (releaseRes.ok) {
     const release = await releaseRes.json();
     if (release?.tag_name) {
-      return {
+      latestRelease = {
         tag: String(release.tag_name),
         version: normalizeVersion(String(release.tag_name)),
         detailsUrl: String(release.html_url || ''),
@@ -76,16 +99,22 @@ export async function fetchLatestPluginRelease(): Promise<PluginReleaseInfo | nu
   const tags = await tagsRes.json();
   const tag = tags?.[0]?.name;
   if (!tag) {
-    return null;
+    return latestRelease;
   }
 
-  return {
+  const tagRelease: PluginReleaseInfo = {
     tag: String(tag),
     version: normalizeVersion(String(tag)),
     detailsUrl: `https://github.com/${repoOwner()}/${repoName()}/releases/tag/${encodeURIComponent(String(tag))}`,
     changelog: `Version ${normalizeVersion(String(tag))}`,
     publishedAt: '',
   };
+
+  if (!latestRelease) {
+    return tagRelease;
+  }
+
+  return compareVersions(tagRelease.version, latestRelease.version) > 0 ? tagRelease : latestRelease;
 }
 
 export async function fetchPluginZip(tag: string): Promise<Response> {
