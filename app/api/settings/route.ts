@@ -28,11 +28,14 @@ export async function POST(req: NextRequest) {
   const mergedSettings: SiteSettings = {
     ...(current || {}),
     ...incomingSettings,
-    site_under_construction: current?.site_under_construction ?? false,
-    under_construction_title: current?.under_construction_title ?? 'We are coming back soon',
-    under_construction_message:
-      current?.under_construction_message ??
-      'We are currently making improvements to serve you better. Please check back shortly.',
+    maintenance: {
+      site_under_construction: current?.maintenance?.site_under_construction ?? false,
+      under_construction_title: current?.maintenance?.under_construction_title ?? 'We are coming back soon',
+      under_construction_message:
+        current?.maintenance?.under_construction_message ??
+        'We are currently making improvements to serve you better. Please check back shortly.',
+      ...(incomingSettings.maintenance ?? {}),
+    },
   } as SiteSettings;
 
   const ok = await saveSiteSettings(mergedSettings, session.token);

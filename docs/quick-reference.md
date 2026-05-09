@@ -242,18 +242,14 @@ if (mode === 'headless') {
 }
 ```
 
-### Migrate PRAG Site
+### Migrate Legacy Site
 
 ```php
 // In WordPress
-require_once 'marveo-connector/includes/class-prag-migration.php';
-
-if (Marveo_PRAG_Migration::has_prag_config()) {
-    Marveo_PRAG_Migration::create_rollback_point();
-    Marveo_PRAG_Migration::migrate_configuration();
-    Marveo_PRAG_Migration::migrate_settings();
-    Marveo_PRAG_Migration::complete_migration();
-}
+// 1) Detect legacy configuration
+// 2) Create a rollback point
+// 3) Run migration conversion
+// 4) Verify migrated settings and content
 ```
 
 ### Validate Deployment
@@ -293,7 +289,7 @@ marveo-connector/
 │   ├── class-content-discovery.php    # WordPress content scan
 │   ├── class-settings-schema.php      # Settings structure
 │   ├── class-rest-api-extended.php    # New REST endpoints
-│   ├── class-prag-migration.php       # PRAG migration
+│   ├── class-marveo-migration.php       # Legacy compatibility migration
 │   ├── class-rest-api.php             # (existing)
 │   ├── class-admin-page.php           # (existing)
 │   ├── helpers.php                    # (existing)

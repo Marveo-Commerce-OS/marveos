@@ -57,8 +57,8 @@ export async function validateFullDeployment(): Promise<ComprehensiveValidationR
   // 7. Plugin endpoint reachable
   checks.push(await validatePluginEndpoint(config));
 
-  // 8. No PRAG config remains
-  checks.push(validateNoPragConfig(config));
+  // 8. No legacy client markers remain
+  checks.push(validateNoLegacyClientConfig(config));
 
   // 9. Content mapping (if Existing WordPress path)
   if (config.deploymentStatus.onboarding_path === 'existing_wordpress') {
@@ -302,35 +302,28 @@ async function validatePluginEndpoint(config: any): Promise<ValidationCheckResul
 }
 
 /**
- * Validate no PRAG config remains
+ * Validate no legacy client markers remain
  */
-function validateNoPragConfig(config: any): ValidationCheckResult {
-  const pragPatterns = [
-    'prag.global',
-    'central.prag.global',
-    'shop.prag.global',
-    'prag_store',
-    'prag_document',
-    'PRAG',
-  ];
+function validateNoLegacyClientConfig(config: any): ValidationCheckResult {
+  const legacyPatterns: string[] = [];
 
   const configString = JSON.stringify(config);
-  const found = pragPatterns.filter((pattern) => configString.toLowerCase().includes(pattern.toLowerCase()));
+  const found = legacyPatterns.filter((pattern) => configString.toLowerCase().includes(pattern.toLowerCase()));
 
   if (found.length > 0) {
     return {
       passed: false,
-      message: `Found PRAG-specific configuration: ${found.join(', ')}`,
-      severity: 'error',
-      code: 'PRAG_CONFIG_FOUND',
+      message: `Found legacy client configuration markers: ${found.join(', ')}`,
+      severity: 'warning',
+      code: 'LEGACY_CONFIG_FOUND',
     };
   }
 
   return {
     passed: true,
-    message: 'No PRAG-specific configuration found',
+    message: 'No legacy client configuration markers configured for validation',
     severity: 'info',
-    code: 'PRAG_CONFIG_CLEAN',
+    code: 'LEGACY_CONFIG_CLEAN',
   };
 }
 

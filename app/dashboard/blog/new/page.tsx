@@ -13,7 +13,7 @@ export default function NewBlogPage() {
         </Link>
         <div>
           <h1 className="text-xl font-bold text-gray-900">Create Blog Post</h1>
-          <p className="text-xs text-gray-500 mt-0.5">Knowledge Center content</p>
+          <p className="text-xs text-gray-500 mt-0.5">blog content</p>
         </div>
       </div>
       <BlogEditor mode="create" />

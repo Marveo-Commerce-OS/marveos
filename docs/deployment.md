@@ -10,7 +10,7 @@ One codebase can serve unlimited clients with different configurations:
 
 ```
 marveos (repository)
-├── vercel.com/client-1 (PRAG)
+├── vercel.com/client-1 (Example Commerce)
 ├── vercel.com/client-2 (Example Store)
 └── vercel.com/client-n (Your Store)
 ```
@@ -90,7 +90,7 @@ All variables from [.env.example](../.env.example) should be set:
 
 ```
 NEXT_PUBLIC_APP_NAME=Marvéo
-NEXT_PUBLIC_CLIENT_NAME=PRAG
+NEXT_PUBLIC_CLIENT_NAME=Example Commerce
 NEXT_PUBLIC_CLIENT_LOGO=https://...
 NEXT_PUBLIC_CLIENT_PRIMARY_COLOR=#14B8A6
 NEXT_PUBLIC_CLIENT_SECONDARY_COLOR=#A3E635
@@ -107,11 +107,11 @@ MARVEO_DEPLOYMENT_MODE=headless
 #### API Endpoints
 
 ```
-NEXT_PUBLIC_FRONTEND_URL=https://prag.global
-WORDPRESS_API_URL=https://cms.prag.global/wp-json
-WOOCOMMERCE_API_URL=https://cms.prag.global/wp-json
-WORDPRESS_ADMIN_URL=https://cms.prag.global/wp-admin
-WORDPRESS_MEDIA_URL=https://cms.prag.global/wp-content/uploads
+NEXT_PUBLIC_FRONTEND_URL=https://example.com
+WORDPRESS_API_URL=https://cms.example.com/wp-json
+WOOCOMMERCE_API_URL=https://cms.example.com/wp-json
+WORDPRESS_ADMIN_URL=https://cms.example.com/wp-admin
+WORDPRESS_MEDIA_URL=https://cms.example.com/wp-content/uploads
 ```
 
 #### API Credentials
@@ -139,16 +139,16 @@ NEXT_PUBLIC_BRAND_BYLINE=A product by Avario Digital Products
 
 ## Client Configuration Examples
 
-### Example 1: WordPress Store (PRAG)
+### Example 1: WordPress Store (Example Commerce)
 
 ```bash
-NEXT_PUBLIC_CLIENT_NAME=PRAG
+NEXT_PUBLIC_CLIENT_NAME=Example Commerce
 MARVEO_DEPLOYMENT_MODE=wordpress
-WORDPRESS_API_URL=https://central.prag.global/wp-json
-WOOCOMMERCE_API_URL=https://central.prag.global/wp-json
-WORDPRESS_ADMIN_URL=https://central.prag.global/wp-admin
-WORDPRESS_MEDIA_URL=https://central.prag.global/wp-content/uploads
-NEXT_PUBLIC_FRONTEND_URL=https://prag.global
+WORDPRESS_API_URL=https://central.example.com/wp-json
+WOOCOMMERCE_API_URL=https://central.example.com/wp-json
+WORDPRESS_ADMIN_URL=https://central.example.com/wp-admin
+WORDPRESS_MEDIA_URL=https://central.example.com/wp-content/uploads
+NEXT_PUBLIC_FRONTEND_URL=https://example.com
 WOOCOMMERCE_CONSUMER_KEY=ck_1234...
 WOOCOMMERCE_CONSUMER_SECRET=cs_5678...
 ACTIVE_MODULES=inventory,crm,analytics

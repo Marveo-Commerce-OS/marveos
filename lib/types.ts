@@ -77,37 +77,105 @@ export interface SocialLinks {
   whatsapp: string;
 }
 
-export interface SiteSettings {
-  // Contact
-  contact_phone: string;
-  contact_email: string;
-  whatsapp: string;
-  address: string;
-  business_hours_weekday: string;
-  business_hours_saturday: string;
-  // Socials
-  socials: SocialLinks;
-  // Announcement
-  announcement_bar: string;
-  // Under Construction
+export interface MenuItem {
+  label: string;
+  href: string;
+}
+
+export interface TeamMember {
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+}
+
+export interface ModulePreference {
+  key: string;
+  label: string;
+  enabled: boolean;
+  requiresPayment?: boolean;
+}
+
+export interface PaymentGateway {
+  key: string;
+  name: string;
+  enabled: boolean;
+  publicKey?: string;
+  secretKey?: string;
+  testMode?: boolean;
+  requiredFields?: Record<string, string>;
+}
+
+export interface Integration {
+  key: string;
+  name: string;
+  enabled: boolean;
+  config?: Record<string, unknown>;
+  requiresModules?: string[];
+}
+
+export interface PageContent {
+  id: number;
+  title: string;
+  slug: string;
+  type: 'home' | 'about' | 'contact' | 'services' | 'blog' | 'shop' | 'custom';
+  heroSlides?: SlideItem[];
+  footerContent?: string;
+  contactInfo?: { email: string; phone: string; address: string };
+  seoTitle?: string;
+  seoDescription?: string;
+  lastSynced?: string;
+}
+
+export interface MaintenanceSettings {
   site_under_construction: boolean;
   under_construction_title: string;
   under_construction_message: string;
-  // Footer
-  footer_description: string;
-  // Brand Banner
-  brand_banner_title: string;
-  brand_banner_description: string;
-  brand_banner_cta: string;
-  brand_banner_link: string;
-  brand_banner_image: string;
-  // Hero Slides
-  hero_background: string;
-  slides: SlideItem[];
-  // Category Grid
-  categories: CategoryItem[];
-  // Payments
-  paystack_public_key: string;
+}
+
+export interface WordPressUser {
+  username: string;
+  display_name: string;
+  email: string;
+  role: string;
+  active: boolean;
+}
+
+export interface SiteSettings {
+  // Branding (client upload)
+  logo_url: string;
+  favicon_url: string;
+  primary_color: string;
+  secondary_color: string;
+  typography: string;
+  
+  // Socials
+  socials: SocialLinks;
+  
+  // Payments (multiple gateways, synced with WordPress)
+  payment_gateways: PaymentGateway[];
+  
+  // Integrations (module-gated, default set)
+  integrations: Integration[];
+  
+  // SEO & Scripts (global)
+  seo_site_title: string;
+  seo_meta_description: string;
+  seo_keywords: string;
+  custom_head_scripts: string;
+  custom_body_scripts: string;
+  google_analytics_id: string;
+  google_search_console_id: string;
+  
+  // Team & Users
+  team_members: TeamMember[];
+  wordpress_users?: WordPressUser[];
+  
+  // Modules
+  module_preferences: ModulePreference[];
+  
+  // Maintenance & Launch
+  maintenance: MaintenanceSettings;
 }
 
 export interface WPPost {

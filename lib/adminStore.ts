@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { cookies } from 'next/headers';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
+import type { MaintenanceSettings } from '@/lib/types';
 
 export type PortalAccess = 'b2c' | 'b2b';
 
@@ -54,6 +55,110 @@ export interface AuditRecord {
   details?: string;
 }
 
+export type OnboardingStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
+
+export interface OnboardingStepState {
+  step: number;
+  key: string;
+  status: OnboardingStepStatus;
+  retryCount: number;
+  maxRetries: number;
+  startedAt?: string;
+  completedAt?: string;
+  lastError?: string;
+  recoveryActions: string[];
+}
+
+export interface VersionedSchema<T> {
+  version: number;
+  status: 'draft' | 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  data: T;
+}
+
+export interface PageSchemaData {
+  pages: Array<{
+    id: string;
+    title: string;
+    slug: string;
+    page_type: string;
+    source: string;
+    seo: Record<string, unknown>;
+    components: Array<{ key: string; props?: Record<string, unknown> }>;
+    navigation_visibility: boolean;
+    frontend_visibility: boolean;
+    template: string;
+    status: string;
+  }>;
+}
+
+export interface ComponentSchemaData {
+  components: Array<{
+    key: string;
+    name: string;
+    category: string;
+    fields: string[];
+    allowed_page_types: string[];
+    data_source: string;
+    visibility: string;
+  }>;
+}
+
+export interface ConnectorCommandRecord {
+  id: string;
+  workspaceId: string;
+  auditId: string;
+  type: 'content_mapping_sync' | 'module_activation';
+  payload: Record<string, unknown>;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'rolled_back';
+  createdAt: string;
+  updatedAt: string;
+  attempts: number;
+  lastError?: string;
+}
+
+export interface WorkspaceOrchestration {
+  id: string;
+  name: string;
+  businessType: string;
+  country: string;
+  businessModel: string;
+  onboardingPath?: string;
+  architecture?: string;
+  selectedModules: string[];
+  brandSetup: Record<string, unknown>;
+  onboardingSteps: OnboardingStepState[];
+  currentStep: number;
+  status: 'draft' | 'onboarding' | 'ready_for_launch' | 'launched' | 'blocked';
+  deploymentReadiness: {
+    onboardingComplete: boolean;
+    architectureValidated: boolean;
+    apisReachable: boolean;
+    modulesValid: boolean;
+    frontendValidated: boolean;
+    contentMapped: boolean;
+    integrationsConfigured: boolean;
+  };
+  missingRequirements: string[];
+  recoverySuggestions: string[];
+  rollout: {
+    pageSchemaVersion: number;
+    componentSchemaVersion: number;
+    channel: 'stable' | 'beta';
+    promotedAt?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CloudOrchestrationStore {
+  workspaces: Record<string, WorkspaceOrchestration>;
+  pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
+  componentSchemas: Record<string, VersionedSchema<ComponentSchemaData>[]>;
+  commands: ConnectorCommandRecord[];
+}
+
 export const ADMIN_MODULE_KEYS = [
   'dashboard',
   'products',
@@ -75,7 +180,9 @@ export interface AdminConfigStore {
   smtp: SmtpConfig;
   forms: FormRoutingRule[];
   roleModuleVisibility: RoleModuleVisibility;
+  maintenance: MaintenanceSettings;
   audit: AuditRecord[];
+  cloud: CloudOrchestrationStore;
 }
 
 const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
@@ -199,7 +306,18 @@ const DEFAULT_STORE: AdminConfigStore = {
       adminSettings: false,
     },
   },
+  maintenance: {
+    site_under_construction: false,
+    under_construction_title: 'We are coming back soon',
+    under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
+  },
   audit: [],
+  cloud: {
+    workspaces: {},
+    pageSchemas: {},
+    componentSchemas: {},
+    commands: [],
+  },
 };
 
 function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore {
@@ -214,7 +332,16 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       ...DEFAULT_STORE.roleModuleVisibility,
       ...(parsed.roleModuleVisibility ?? {}),
     },
+    maintenance: { ...DEFAULT_STORE.maintenance, ...(parsed.maintenance ?? {}) },
     audit: Array.isArray(parsed.audit) ? parsed.audit : [],
+    cloud: {
+      ...DEFAULT_STORE.cloud,
+      ...(parsed.cloud ?? {}),
+      workspaces: parsed.cloud?.workspaces ?? {},
+      pageSchemas: parsed.cloud?.pageSchemas ?? {},
+      componentSchemas: parsed.cloud?.componentSchemas ?? {},
+      commands: Array.isArray(parsed.cloud?.commands) ? parsed.cloud?.commands : [],
+    },
   };
 }
 
