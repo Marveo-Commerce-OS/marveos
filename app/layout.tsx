@@ -8,6 +8,11 @@ const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space
 export const metadata: Metadata = {
   title: 'Marvéo',
   description: 'Marvéo — Modern commerce operations built for businesses using WordPress, WooCommerce, and headless commerce stacks.',
+  icons: {
+    icon: '/icon',
+    shortcut: '/icon',
+    apple: '/icon',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
