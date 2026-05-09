@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { cookies } from 'next/headers';
+import { getWordPressApiBase } from '@/src/lib/endpoints';
 
 export type PortalAccess = 'b2c' | 'b2b';
 
@@ -97,7 +98,7 @@ import { getConfig } from '@/src/config/client';
 
 const getWpApiUrl = () => {
   const config = getConfig();
-  return config.wordpressApiUrl || 'https://localhost/wp-json';
+  return config.wordpressApiUrl || getWordPressApiBase();
 };
 
 export const WP_API_URL = getWpApiUrl();
@@ -126,7 +127,7 @@ const STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-conf
 const DEFAULT_STORE: AdminConfigStore = {
   users: {},
   tracking: {
-    ecommerceDomain: 'shop.prag.global',
+    ecommerceDomain: '',
     googleAnalyticsId: '',
     googleTagManagerId: '',
     googleSearchConsoleVerification: '',
@@ -148,7 +149,7 @@ const DEFAULT_STORE: AdminConfigStore = {
     username: '',
     password: '',
     fromEmail: '',
-    fromName: 'PRAG Store',
+    fromName: 'Marvéo Store',
   },
   forms: [
     {
@@ -220,7 +221,8 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
 // ─── WordPress-backed read/write ──────────────────────────────────────────────
 
 async function readFromWordPress(): Promise<AdminConfigStore> {
-  const res = await fetch(`${WP_API_URL}/prag-core/v1/admin-config`, {
+  const endpoint = process.env.MARVEO_ADMIN_CONFIG_ENDPOINT || '/wp-json/marveo-core/v1/admin-config';
+  const res = await fetch(`${WP_API_URL}${endpoint}`, {
     headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
     cache: 'no-store',
   });
@@ -231,7 +233,8 @@ async function readFromWordPress(): Promise<AdminConfigStore> {
 }
 
 async function writeToWordPress(data: AdminConfigStore): Promise<void> {
-  const res = await fetch(`${WP_API_URL}/prag-core/v1/admin-config`, {
+  const endpoint = process.env.MARVEO_ADMIN_CONFIG_ENDPOINT || '/wp-json/marveo-core/v1/admin-config';
+  const res = await fetch(`${WP_API_URL}${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
     body: JSON.stringify(data),

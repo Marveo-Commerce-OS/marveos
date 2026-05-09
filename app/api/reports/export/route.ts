@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
       );
     });
 
-    doc.fontSize(18).font('Helvetica-Bold').text('PRAG Sales Report', { align: 'center' });
+    doc.fontSize(18).font('Helvetica-Bold').text('Marvéo Sales Report', { align: 'center' });
     doc.moveDown(0.4);
     doc.fontSize(11).font('Helvetica').text(`Period: ${date_min} to ${date_max}`, { align: 'center' });
     doc.moveDown(1);

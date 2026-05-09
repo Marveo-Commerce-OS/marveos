@@ -51,9 +51,9 @@ export async function POST(req: NextRequest) {
     await transporter.sendMail({
       from: smtp.fromName ? `${smtp.fromName} <${smtp.fromEmail}>` : smtp.fromEmail,
       to,
-      subject: 'PRAG SMTP test email',
-      text: `This is a test email from the PRAG admin portal.\n\nSent at: ${new Date().toISOString()}`,
-      html: `<p>This is a test email from the PRAG admin portal.</p><p>Sent at: ${new Date().toISOString()}</p>`,
+      subject: 'Marvéo SMTP test email',
+      text: `This is a test email from the Marvéo admin portal.\n\nSent at: ${new Date().toISOString()}`,
+      html: `<p>This is a test email from the Marvéo admin portal.</p><p>Sent at: ${new Date().toISOString()}</p>`,
     });
 
     const actor = await getCurrentWpUser(session.token);

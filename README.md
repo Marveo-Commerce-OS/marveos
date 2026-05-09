@@ -4,7 +4,7 @@
 
 **Tagline:** Operate Smarter. Scale Faster.
 
-**By:** Avario Digital Products
+**By:** Avario Digitals
 
 ---
 
@@ -278,16 +278,22 @@ Marvéo uses a single codebase deployed to multiple Vercel projects:
 3. Set environment variables for your client
 4. Deploy
 
-Each client deployment uses the same codebase but different environment variables:
+Each client deployment uses the same codebase but different environment variables and a saved deployment profile. A deployment is not complete until the profile is selected, validated, and saved.
+
+See [Deployment Setup](docs/deployment-setup.md) for the mode matrix and migration notes.
+
+Example client configuration:
 
 ```bash
-# Client 1
-NEXT_PUBLIC_CLIENT_NAME=PRAG
-WORDPRESS_API_URL=https://cms.prag.global
-
-# Client 2
 NEXT_PUBLIC_CLIENT_NAME=Example Store
-WORDPRESS_API_URL=https://examplestore.com
+MARVEO_DEPLOYMENT_MODE=headless
+NEXT_PUBLIC_FRONTEND_URL=https://store.example.com
+WORDPRESS_API_URL=https://cms.example.com/wp-json
+WOOCOMMERCE_API_URL=https://cms.example.com/wp-json
+
+# WordPress-only example
+MARVEO_DEPLOYMENT_MODE=wordpress
+WORDPRESS_API_URL=https://example.com/wp-json
 ```
 
 ### Branch Flow

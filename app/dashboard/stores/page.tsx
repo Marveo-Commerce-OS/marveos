@@ -1,18 +1,21 @@
 export const dynamic = 'force-dynamic';
 
 import StoresClient from './StoresClient';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const STORE_POST_TYPE = process.env.MARVEO_STORE_POST_TYPE;
 
-type StoreType = 'prag' | 'online' | 'chain';
+type StoreType = 'location' | 'online' | 'chain';
 
 function normalizeStoreType(value: string | undefined): StoreType {
-  return value === 'online' || value === 'chain' ? value : 'prag';
+  return value === 'online' || value === 'chain' ? value : 'location';
 }
 
 async function getStores() {
   try {
-    const res = await fetch(`${WP}/prag_store?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
+    if (!WP) return [];
+    const res = await fetch(`${WP}/${STORE_POST_TYPE}?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
     if (!res.ok) return [];
     const data = await res.json() as Array<{ id: number; title?: { rendered?: string }; meta?: Record<string, string> }>;
     return data.map((s) => ({
@@ -35,7 +38,7 @@ export default async function StoresPage() {
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Stores</h1>
-        <p className="text-gray-500 text-sm mt-1">Manage PRAG store locations shown on the website.</p>
+        <p className="text-gray-500 text-sm mt-1">Manage store locations shown on the website.</p>
       </div>
       <StoresClient initialStores={stores} />
     </div>

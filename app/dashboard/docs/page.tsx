@@ -1,8 +1,10 @@
 export const dynamic = 'force-dynamic';
 
 import DocsClient from './DocsClient';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const DOC_POST_TYPE = process.env.MARVEO_DOCUMENT_POST_TYPE;
 
 interface RawDoc {
   id: number;
@@ -18,7 +20,8 @@ interface RawDoc {
 
 async function getDocs() {
   try {
-    const res = await fetch(`${WP}/prag_document?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
+    if (!WP || !DOC_POST_TYPE) return [];
+    const res = await fetch(`${WP}/${DOC_POST_TYPE}?per_page=50&_fields=id,title,meta`, { cache: 'no-store' });
     if (!res.ok) return [];
     const data = (await res.json()) as RawDoc[];
     return data.map((d) => ({

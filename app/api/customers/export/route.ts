@@ -47,7 +47,7 @@ function toPdfBuffer(rows: ReturnType<typeof customerRows>) {
     doc.on('data', (chunk) => buffers.push(Buffer.from(chunk)));
     doc.on('end', () => resolve(Buffer.concat(buffers)));
 
-    doc.fontSize(16).text('PRAG Customers Export', { align: 'left' });
+    doc.fontSize(16).text('Marvéo Customers Export', { align: 'left' });
     doc.moveDown(0.5);
     doc.fontSize(10).fillColor('#666').text(`Generated: ${new Date().toLocaleString('en-GB')}`);
     doc.fillColor('#000');

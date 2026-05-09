@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { getWordPressApiBase } from '@/src/lib/endpoints';
 
-const WP_API_URL = process.env.NEXT_PUBLIC_WP_API_URL || 'https://central.prag.global/wp-json';
+const WP_API_URL = getWordPressApiBase();
 
 const ROLE_OPTIONS = [
   'administrator',
@@ -23,6 +24,10 @@ interface WpUserRecord {
 }
 
 async function fetchAllWpUsers(token: string): Promise<WpUserRecord[]> {
+  if (!WP_API_URL) {
+    throw new Error('WordPress API URL is not configured');
+  }
+
   const users: WpUserRecord[] = [];
   let page = 1;
   let totalPages = 1;

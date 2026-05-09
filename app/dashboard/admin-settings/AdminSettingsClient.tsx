@@ -228,7 +228,7 @@ export default function AdminSettingsClient() {
         // Trigger frontend cache revalidation immediately
         try {
           await fetch(
-            `https://prag.global/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
+            `${process.env.NEXT_PUBLIC_FRONTEND_URL || ''}/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -282,7 +282,7 @@ export default function AdminSettingsClient() {
         // Trigger frontend cache revalidation immediately
         try {
           await fetch(
-            `https://prag.global/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
+            `${process.env.NEXT_PUBLIC_FRONTEND_URL || ''}/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -814,9 +814,9 @@ export default function AdminSettingsClient() {
         {activeTab === 'tracking' && (
           <div className="space-y-4">
             <h2 className="text-base font-semibold text-gray-900">Ecommerce Domain Script Settings</h2>
-            <p className="text-xs text-gray-500">These values are for ecommerce domain integration only (e.g. shop.prag.global), not the admin domain.</p>
+            <p className="text-xs text-gray-500">These values are for commerce domain integration only and should point to the deployed storefront domain, not the admin domain.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input className={inputCls} value={settings.tracking.ecommerceDomain} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, ecommerceDomain: e.target.value } } : p)} placeholder="shop.prag.global" />
+              <input className={inputCls} value={settings.tracking.ecommerceDomain} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, ecommerceDomain: e.target.value } } : p)} placeholder="store.example.com" />
               <input className={inputCls} value={settings.tracking.googleAnalyticsId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleAnalyticsId: e.target.value } } : p)} placeholder="GA4 Measurement ID" />
               <input className={inputCls} value={settings.tracking.googleTagManagerId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleTagManagerId: e.target.value } } : p)} placeholder="Google Tag Manager ID" />
               <input className={inputCls} value={settings.tracking.googleSearchConsoleVerification} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleSearchConsoleVerification: e.target.value } } : p)} placeholder="Search Console verification token" />

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { appendAuditLog } from '@/lib/adminStore';
+import { getWordPressRestBase } from '@/src/lib/endpoints';
 
-const WP = `${process.env.NEXT_PUBLIC_WP_API_URL?.replace('/wp-json', '/wp-json/wp/v2') ?? 'https://central.prag.global/wp-json/wp/v2'}`;
+const WP = getWordPressRestBase();
+const DOC_POST_TYPE = process.env.MARVEO_DOCUMENT_POST_TYPE;
 
 interface RawDoc {
   id: number;
@@ -35,7 +37,7 @@ export async function GET(_: NextRequest, context: { params: Promise<{ id: strin
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await context.params;
-  const res = await fetch(`${WP}/prag_document?per_page=100&_fields=id,title,meta`, {
+  const res = await fetch(`${WP}/${DOC_POST_TYPE}?per_page=100&_fields=id,title,meta`, {
     headers: { Authorization: `Bearer ${session.token}` },
     cache: 'no-store',
   });
@@ -90,9 +92,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     },
   };
 
-  // Some WordPress setups don't expose custom meta keys like media_id for prag_document.
+  // Some WordPress setups don't expose custom meta keys like media_id for the document type.
   // Try with media_id first, then retry without it to keep uploads working consistently.
-  let docRes = await fetch(`${WP}/prag_document`, {
+  let docRes = await fetch(`${WP}/${DOC_POST_TYPE}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${session.token}`,
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   });
 
   if (!docRes.ok) {
-    docRes = await fetch(`${WP}/prag_document`, {
+    docRes = await fetch(`${WP}/${DOC_POST_TYPE}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.token}`,
@@ -147,7 +149,7 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
 
   if (!docId) return NextResponse.json({ error: 'Missing docId' }, { status: 400 });
 
-  const docRes = await fetch(`${WP}/prag_document/${docId}?force=true`, {
+  const docRes = await fetch(`${WP}/${DOC_POST_TYPE}/${docId}?force=true`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${session.token}` },
   });
