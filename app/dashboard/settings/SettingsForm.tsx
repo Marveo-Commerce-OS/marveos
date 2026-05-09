@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SiteSettings, TeamMember, ModulePreference, PaymentGateway, Integration } from '@/lib/types';
 import { Save, CheckCircle2, AlertCircle, Plus, Trash2 } from 'lucide-react';
 import { WORDPRESS_ROLE_OPTIONS } from '@/src/config/wordpressRoles';
@@ -91,6 +91,37 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [uploadingField, setUploadingField] = useState<string | null>(null);
 
+  useEffect(() => {
+    const loadWordPressUsers = async () => {
+      try {
+        const res = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (!res.ok) {
+          return;
+        }
+
+        const data = await res.json();
+        const users = Array.isArray(data?.users)
+          ? data.users.map((user: Record<string, unknown>) => ({
+              username: String(user.username ?? ''),
+              display_name: String(user.name ?? ''),
+              email: String(user.email ?? ''),
+              role: Array.isArray(user.roles) && user.roles.length > 0 ? String(user.roles[0]) : 'customer',
+              active: Boolean(user.active ?? true),
+            }))
+          : [];
+
+        setForm((prev) => ({
+          ...prev,
+          wordpress_users: users,
+        }));
+      } catch {
+        // Keep form interactive even if user import fails.
+      }
+    };
+
+    void loadWordPressUsers();
+  }, []);
+
   function setField(field: keyof SiteSettings, value: unknown) {
     setForm(p => ({ ...p, [field]: value }));
   }
@@ -129,6 +160,13 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
     const modules = [...form.module_preferences];
     modules[index] = { ...modules[index], enabled: !modules[index].enabled };
     setField('module_preferences', modules);
+  }
+
+  function setWordPressUserRole(index: number, role: string) {
+    const users = Array.isArray(form.wordpress_users) ? [...form.wordpress_users] : [];
+    if (!users[index]) return;
+    users[index] = { ...users[index], role };
+    setField('wordpress_users', users);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -453,7 +491,12 @@ export default function SettingsForm({ initialSettings }: { initialSettings: Sit
                         </td>
                         <td className="px-5 py-4 text-gray-600">{user.email}</td>
                         <td className="px-5 py-4">
-                          <select value={user.role} className="h-9 rounded-lg border border-gray-200 bg-white px-2.5 text-sm disabled:bg-gray-100" disabled={user.role === 'owner'}>
+                          <select
+                            value={user.role}
+                            onChange={(event) => setWordPressUserRole(i, event.target.value)}
+                            className="h-9 rounded-lg border border-gray-200 bg-white px-2.5 text-sm disabled:bg-gray-100"
+                            disabled={user.role === 'owner'}
+                          >
                                 {WORDPRESS_ROLE_OPTIONS.map((option) => (
                                   <option key={option.value} value={option.value} disabled={option.locked}>
                                     {option.label}

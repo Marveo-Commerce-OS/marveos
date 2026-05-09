@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, isSuperAdmin } from '@/lib/auth';
+import { getSession, isAdmin } from '@/lib/auth';
 import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { PLAN_WORKSPACE_LIMITS } from '@/lib/adminStore';
 import type { AccountPlan, DeploymentLink } from '@/lib/adminStore';
@@ -16,8 +16,8 @@ async function ensureAdminSession() {
     return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
   }
 
-  const superAdmin = await isSuperAdmin(session.token);
-  if (!superAdmin) {
+  const admin = await isAdmin(session.token);
+  if (!admin) {
     return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
   }
 
