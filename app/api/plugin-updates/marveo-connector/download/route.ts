@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import AdmZip from 'adm-zip';
 import { fetchPluginZip } from '@/src/lib/pluginUpdates';
 
@@ -44,15 +46,34 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  if (!upstream.ok) {
-    return NextResponse.json(
-      { error: `Unable to download plugin package for ${tag}. Upstream responded ${upstream.status}.` },
-      { status: 502 },
+  let normalizedZip: Buffer | null = null;
+
+  if (upstream.ok) {
+    const upstreamBuffer = Buffer.from(await upstream.arrayBuffer());
+    normalizedZip = normalizePluginZip(upstreamBuffer);
+  } else {
+    const localVersion = tag.replace(/^v/i, '');
+    const localPackagePath = path.join(
+      process.cwd(),
+      'public',
+      'plugin-packages',
+      `marveo-connector-${localVersion}.zip`,
     );
+
+    try {
+      const localZip = await readFile(localPackagePath);
+      normalizedZip = Buffer.from(localZip);
+    } catch {
+      return NextResponse.json(
+        { error: `Unable to download plugin package for ${tag}. Upstream responded ${upstream.status} and local package fallback was not found.` },
+        { status: 502 },
+      );
+    }
   }
 
-  const upstreamBuffer = Buffer.from(await upstream.arrayBuffer());
-  const normalizedZip = normalizePluginZip(upstreamBuffer);
+  if (!normalizedZip) {
+    return NextResponse.json({ error: 'Plugin package was empty' }, { status: 502 });
+  }
 
   const filename = `marveo-connector-${tag.replace(/^v/i, '')}.zip`;
 
