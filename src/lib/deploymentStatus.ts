@@ -6,12 +6,24 @@ interface WordPressStatusResponse {
 }
 
 function getWordPressApiBase(): string {
-  const base = process.env.WORDPRESS_API_URL || process.env.NEXT_PUBLIC_WP_API_URL || '';
+  const base =
+    process.env.WORDPRESS_API_URL ||
+    process.env.NEXT_PUBLIC_WP_API_URL ||
+    process.env.NEXT_PUBLIC_MARVEO_API_URL ||
+    '';
   return base.replace(/\/$/, '');
 }
 
 function buildStatusUrl(apiBase: string): string {
   const normalized = apiBase.replace(/\/$/, '');
+
+  if (normalized.endsWith('/wp-json/marveo/v1')) {
+    return `${normalized}/status`;
+  }
+
+  if (normalized.endsWith('/marveo/v1')) {
+    return `${normalized}/status`;
+  }
 
   if (normalized.endsWith('/wp-json')) {
     return `${normalized}/marveo/v1/status`;
