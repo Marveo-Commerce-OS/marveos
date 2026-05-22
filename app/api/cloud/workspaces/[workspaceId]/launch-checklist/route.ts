@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, isAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
+import type { WorkspaceOrchestration } from '@/lib/adminStore';
 import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
 
 async function ensureAdminSession() {
@@ -21,7 +22,7 @@ function toBool(value: unknown): boolean {
   return Boolean(value);
 }
 
-function hasBusinessDetails(workspace: Record<string, unknown>): boolean {
+function hasBusinessDetails(workspace: WorkspaceOrchestration): boolean {
   const profile = workspace.businessProfile;
   if (profile && typeof profile === 'object') {
     return Object.keys(profile as Record<string, unknown>).length > 0;
@@ -35,7 +36,7 @@ function hasBusinessDetails(workspace: Record<string, unknown>): boolean {
   return false;
 }
 
-function hasConnectorOrTemplate(workspace: Record<string, unknown>): boolean {
+function hasConnectorOrTemplate(workspace: WorkspaceOrchestration): boolean {
   const template = String(workspace.selectedTemplateId || '').trim();
   if (template) return true;
 
@@ -49,7 +50,7 @@ function hasConnectorOrTemplate(workspace: Record<string, unknown>): boolean {
   return Boolean(String(data.connectorToken || '').trim() || String(data.apiDetails || '').trim());
 }
 
-function hasDomain(workspace: Record<string, unknown>): boolean {
+function hasDomain(workspace: WorkspaceOrchestration): boolean {
   const profile = workspace.businessProfile;
   if (profile && typeof profile === 'object') {
     const domain = String((profile as Record<string, unknown>).domain || '').trim();
@@ -65,13 +66,13 @@ function hasDomain(workspace: Record<string, unknown>): boolean {
   return Boolean(String(workspace.contentBaseUrl || '').trim());
 }
 
-function hasNewWebsiteFrontendDomain(workspace: Record<string, unknown>): boolean {
+function hasNewWebsiteFrontendDomain(workspace: WorkspaceOrchestration): boolean {
   const collected = workspace.collectedBusinessData;
   if (!collected || typeof collected !== 'object') return false;
   return Boolean(String((collected as Record<string, unknown>).frontendDomain || '').trim());
 }
 
-function hasNewWebsiteBackendSubdomain(workspace: Record<string, unknown>): boolean {
+function hasNewWebsiteBackendSubdomain(workspace: WorkspaceOrchestration): boolean {
   const collected = workspace.collectedBusinessData;
   if (!collected || typeof collected !== 'object') return false;
   return Boolean(String((collected as Record<string, unknown>).backendCmsSubdomain || '').trim());
@@ -88,13 +89,13 @@ export async function GET(
 
   const { workspaceId } = await context.params;
   const store = await readAdminStore();
-  const workspace = store.cloud.workspaces[workspaceId] as Record<string, unknown> | undefined;
+  const workspace: WorkspaceOrchestration | undefined = store.cloud.workspaces[workspaceId];
 
   if (!workspace) {
     return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
   }
 
-  const deploymentReadiness = (workspace.deploymentReadiness as Record<string, unknown>) || {};
+  const deploymentReadiness = workspace.deploymentReadiness || {};
   const onboardingStepKey = String(workspace.onboardingStepKey || '') || mapLegacyStepToMvpStepKey(Number(workspace.currentStep || 0));
   const onboardingStatus = String(workspace.onboardingStatus || '');
   const supportAssignment = (workspace.supportAssignment as Record<string, unknown>) || null;

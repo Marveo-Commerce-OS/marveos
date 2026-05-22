@@ -136,8 +136,6 @@ export async function PUT(
     return NextResponse.json({ error: 'invalid onboarding action' }, { status: 400 });
   }
 
-  let nextWorkspace = null;
-
   await updateAdminStore((current) => {
     const workspace = current.cloud.workspaces[workspaceId];
     if (!workspace) {
@@ -147,7 +145,7 @@ export async function PUT(
     const updated = updateStepStatus(workspace, step, action, errorMessage);
     const derivedStepKey = mapLegacyStepToMvpStepKey(updated.currentStep);
 
-    nextWorkspace = {
+    const nextWorkspace = {
       ...updated,
       websiteType: websiteType ?? updated.websiteType,
       onboardingStepKey: onboardingStepKey ?? derivedStepKey ?? updated.onboardingStepKey,
@@ -167,6 +165,9 @@ export async function PUT(
       },
     };
   });
+
+  const nextStore = await readAdminStore();
+  const nextWorkspace = nextStore.cloud.workspaces[workspaceId];
 
   if (!nextWorkspace) {
     return NextResponse.json({ error: 'Workspace not found' }, { status: 404 });
