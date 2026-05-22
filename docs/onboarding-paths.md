@@ -113,7 +113,7 @@ MARVEO_ACTIVE_MODULES=products,blog,pages,newsletter,analytics,seo
 
 ## 2. Existing WordPress Site
 
-**Best for:** Migrating from an existing WordPress installation (including PRAG) to Marveo.
+**Best for:** Migrating from an existing WordPress installation to Marveo.
 
 ### Overview
 
@@ -210,14 +210,14 @@ SEO:
   ✓ Meta descriptions and focus keywords
 ```
 
-### PRAG Migration
+### Legacy Deployment Migration
 
-If you're currently on PRAG:
+If you're currently on a legacy deployment:
 
-1. Marveo automatically detects PRAG configuration
+1. Marveo automatically detects legacy configuration
 2. Creates migration plan preserving all data
-3. Maps PRAG store type → Marveo location
-4. Converts PRAG URLs → your WordPress URLs
+3. Maps legacy store types to Marveo location records
+4. Converts legacy URLs to your current WordPress URLs
 5. Preserves all content and products
 6. Optional rollback if needed
 

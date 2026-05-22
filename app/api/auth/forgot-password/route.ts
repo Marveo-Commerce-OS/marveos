@@ -51,17 +51,22 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Use WordPress lost password endpoint
-    const lostPasswordRes = await fetch(`${WP_API_URL}/wp/v2/users/${user.id}/password-reset`, {
+    // Use WordPress native lost-password form action (works on all WP installs)
+    const siteUrl = WP_API_URL.replace(/\/wp-json\/?$/, '');
+    const formData = new URLSearchParams();
+    formData.set('user_login', user.email);
+    formData.set('redirect_to', '');
+    formData.set('wp-submit', 'Get New Password');
+
+    const lostPasswordRes = await fetch(`${siteUrl}/wp-login.php?action=lostpassword`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: formData.toString(),
+      redirect: 'manual', // WP redirects on success; treat any non-5xx as OK
     }).catch(() => null);
 
-    if (!lostPasswordRes?.ok) {
-      // WordPress doesn't have native lost password endpoint in REST API
-      // Instead, we use /wp-login.php?action=lostpassword on the WordPress site
-      // For now, we log that the user should use WordPress's native flow
-      console.log(`Password reset requested for user: ${user.id} (${user.email})`);
+    if (lostPasswordRes && lostPasswordRes.status >= 500) {
+      console.error(`Lost password request failed with status ${lostPasswordRes.status} for user ${user.id}`);
     }
 
     return NextResponse.json({ 

@@ -32,8 +32,26 @@ function buildStatusUrl(apiBase: string): string {
   return `${normalized}/wp-json/marveo/v1/status`;
 }
 
+function isDemoMode(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true')
+  );
+}
+
 export async function getRuntimeDeploymentStatus(): Promise<DeploymentStatus> {
   const localStatus = getCachedConfig().deploymentStatus;
+
+  if (isDemoMode()) {
+    return {
+      ...localStatus,
+      setup_completed: true,
+      validation_passed: true,
+      missing_requirements: [],
+      last_validated_at: new Date().toISOString(),
+    };
+  }
+
   const wpBase = getWordPressApiBase();
 
   if (!wpBase) {

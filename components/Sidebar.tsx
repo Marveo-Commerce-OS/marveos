@@ -4,18 +4,21 @@ import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X, BarChart3, Shield, BookOpen, Image as ImageIcon } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X, BarChart3, Shield, BookOpen, Image as ImageIcon, CloudCog, FileStack } from 'lucide-react';
 import { getConfig } from '@/src/config/client';
 import { shouldShowInNavigation } from '@/src/lib/modules';
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true, moduleKey: 'dashboard' },
-  { href: '/dashboard/blog', label: 'Blog', icon: BookOpen, moduleKey: 'blog' },
-  { href: '/dashboard/products', label: 'Products', icon: ShoppingBag, moduleKey: 'products' },
-  { href: '/dashboard/orders', label: 'Orders', icon: ShoppingCart, moduleKey: 'orders' },
-  { href: '/dashboard/customers', label: 'Customers', icon: Users, moduleKey: 'customers' },
-  { href: '/dashboard/reports', label: 'Reports', icon: BarChart3, moduleKey: 'reports' },
-  { href: '/dashboard/settings', label: 'Settings', icon: Settings, moduleKey: 'settings' },
+  { path: '', label: 'Dashboard', icon: LayoutDashboard, exact: true, moduleKey: 'dashboard' },
+  { path: '/workspaces', label: 'Cloud Workspaces', icon: CloudCog, moduleKey: 'dashboard' },
+  { path: '/deployment', label: 'Deployment Links', icon: ExternalLink, moduleKey: 'dashboard' },
+  { path: '/pages', label: 'Pages', icon: FileStack, moduleKey: 'dashboard' },
+  { path: '/blog', label: 'Blog', icon: BookOpen, moduleKey: 'blog' },
+  { path: '/products', label: 'Products', icon: ShoppingBag, moduleKey: 'products' },
+  { path: '/orders', label: 'Orders', icon: ShoppingCart, moduleKey: 'orders' },
+  { path: '/customers', label: 'Customers', icon: Users, moduleKey: 'customers' },
+  { path: '/reports', label: 'Reports', icon: BarChart3, moduleKey: 'reports' },
+  { path: '/settings', label: 'Settings', icon: Settings, moduleKey: 'settings' },
 ];
 
 export default function Sidebar({
@@ -23,11 +26,13 @@ export default function Sidebar({
   email,
   canManageAccess,
   allowedModules,
+  basePath = '/dashboard',
 }: {
   displayName: string;
   email: string;
   canManageAccess: boolean;
   allowedModules?: string[];
+  basePath?: '/dashboard' | '/master';
 }) {
   const config = getConfig();
   const pathname = usePathname();
@@ -35,13 +40,17 @@ export default function Sidebar({
   const [isOpen, setIsOpen] = useState(false);
   
   const allowed = new Set(allowedModules ?? []);
-  const baseItems = NAV.filter((item) => 
-    (allowed.size === 0 || allowed.has(item.moduleKey)) && shouldShowInNavigation(item.moduleKey)
+  const navWithHrefs = NAV.map((item) => ({
+    ...item,
+    href: `${basePath}${item.path}`,
+  }));
+  const baseItemsWithHrefs = navWithHrefs.filter((item) =>
+    (allowed.size === 0 || allowed.has(item.moduleKey)) && shouldShowInNavigation(item.moduleKey),
   );
   
   const navItems = canManageAccess && (allowed.size === 0 || allowed.has('adminSettings'))
-    ? [...baseItems, { href: '/dashboard/admin-settings', label: 'Admin Settings', icon: Shield, moduleKey: 'adminSettings' }]
-    : baseItems;
+    ? [...baseItemsWithHrefs, { href: `${basePath}/admin-settings`, label: 'Advanced Settings', icon: Shield, moduleKey: 'adminSettings' }]
+    : baseItemsWithHrefs;
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });

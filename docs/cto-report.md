@@ -1,6 +1,6 @@
 # Marvéo — CTO Handoff Report
 
-**Generated after:** `rebrand: PRAG → Marvéo, add config layer, module system, service layer, docs`  
+**Generated after:** `rebrand: legacy template → Marvéo, add config layer, module system, service layer, docs`  
 **Commit:** `24800f4`
 
 ---
@@ -24,17 +24,17 @@
 ## 4. Marvéo Product Rename — Complete
 - `package.json`: `"name": "marveos"`, `"author": "Avario Digital Products"`
 - `app/layout.tsx`: metadata title/description updated to Marvéo
-- `app/login/page.tsx`: config-driven branding, no hardcoded PRAG logo
-- `app/portal/page.tsx`: all PRAG references removed, Marvéo identity applied
+- `app/login/page.tsx`: config-driven branding, no hardcoded client branding
+- `app/portal/page.tsx`: client-specific references removed, Marvéo identity applied
 - `components/Sidebar.tsx`: config-driven logo, colors, nav
 - `README.md`: fully rewritten as Marvéo product documentation
 
 ## 5. Plugin Renamed / Cleaned
-- WordPress plugin references to `prag-core` remain in `lib/adminStore.ts` (`prag-core/v1/admin-config` endpoint)
-- **Action required:** Rename the WordPress plugin from `prag-core` to `marveo-core` in the WordPress codebase and update the endpoint reference in `lib/adminStore.ts`
+- WordPress plugin references now use `marveo-core` endpoint conventions in `lib/adminStore.ts`
+- Action completed: admin-config endpoint naming aligned to Marvéo conventions
 
-## 6. PRAG Hardcoding Removed
-All scattered `const WP_API_URL = 'https://central.prag.global/wp-json'` references have been removed from:
+## 6. Legacy Hardcoding Removed
+All scattered hardcoded WordPress API URL references have been removed from:
 - `lib/api.ts`
 - `lib/auth.ts`
 - `lib/adminStore.ts`
@@ -43,9 +43,9 @@ All scattered `const WP_API_URL = 'https://central.prag.global/wp-json'` referen
 - `app/api/reports/export/route.ts`
 - `app/api/media/upload/route.ts`
 - `app/dashboard/blog/[id]/page.tsx`
-- `next.config.ts` (removed prag.global image domains)
+- `next.config.ts` (removed client-specific image domains)
 
-**Remaining:** `lib/adminStore.ts` still calls `prag-core/v1/admin-config` — functional but branded PRAG.
+**Remaining:** legacy migration helper classes remain for backward compatibility in the connector.
 
 ## 7. Deployment Modes Added
 Two modes supported via `MARVEO_DEPLOYMENT_MODE` env var:
@@ -82,7 +82,7 @@ Defined in `src/config/client.ts` as `DeploymentMode` type.
 ## 12. Media Support
 - Upload endpoint: `app/api/media/upload/route.ts`
 - `getMedia`, `getMediaItem` in WordPress service layer
-- `next.config.ts` updated to allow generic image domains (not PRAG-specific)
+- `next.config.ts` updated to allow generic image domains (not client-specific)
 
 ## 13. Module System Added
 - `src/lib/modules.ts` — module activation and registration
@@ -111,7 +111,7 @@ Defined in `src/config/client.ts` as `DeploymentMode` type.
 | `docs/modules.md` | ✅ New — module activation reference |
 | `docs/cms-content-management.md` | ✅ New — CMS/blog/media docs |
 | `docs/deployment.md` | ✅ New — branch strategy, Vercel, env vars |
-| `docs/client-prag-example.md` | ✅ New — headless client config example |
+| `docs/client-headless-example.md` | ✅ New — generic headless client config example |
 | `docs/wordpress-standard-client-example.md` | ✅ New — standard WordPress client config example |
 | `.env.example` | ✅ New — all required env vars with comments |
 
@@ -124,7 +124,7 @@ Defined in `src/config/client.ts` as `DeploymentMode` type.
 
 | # | Item | Priority | Notes |
 |---|------|----------|-------|
-| 1 | WordPress plugin rename (`prag-core` → `marveo-core`) | HIGH | Requires changes to WordPress plugin repo. Update `lib/adminStore.ts` endpoint after rename. |
+| 1 | Connector naming alignment across all repos | MEDIUM | Ensure all plugin and API identifiers stay on Marvéo naming conventions. |
 | 2 | Rich text editor | MEDIUM | Blocked by React 19 incompatibility. Monitor Lexical/Tiptap for React 19 support. |
 | 3 | `WC_CONSUMER_KEY` / `WC_CONSUMER_SECRET` env var names | LOW | Some API routes use old `WC_CONSUMER_KEY` names. `.env.example` uses `WOOCOMMERCE_CONSUMER_KEY`. Standardize or alias in env files. |
 | 4 | `master` branch cleanup | LOW | Consider deleting `master` or setting `development` as default on GitHub. |

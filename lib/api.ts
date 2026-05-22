@@ -3,6 +3,13 @@ import { getConfig } from '@/src/config/client';
 
 const FETCH_TIMEOUT_MS = 8000;
 
+function isDemoMode(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    (process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true')
+  );
+}
+
 function getWpApiUrl(): string {
   const config = getConfig();
   return config.wordpressApiUrl || 'https://localhost/wp-json';
@@ -28,6 +35,11 @@ function wpBase() {
 
 function auth() { 
   return `consumer_key=${getWcConsumerKey()}&consumer_secret=${getWcConsumerSecret()}`; 
+}
+
+function canCallCommerceApis(): boolean {
+  if (isDemoMode()) return false;
+  return Boolean(getConfig().wordpressApiUrl && getWcConsumerKey() && getWcConsumerSecret());
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit = {}, retries = 1): Promise<Response> {
@@ -80,20 +92,40 @@ async function wcFetchWithTotal<T>(
 
 // ── Dashboard ──────────────────────────────────────────────
 export async function getDashboardStats() {
-  const [recentOrders, customersRes, revenueRes, ordersCountRes] = await Promise.all([
-    wcFetch<WCOrder[]>('/orders?per_page=8&status=any', []),
-    fetchWithTimeout(`${wcBase()}/customers?per_page=1&${auth()}`, { next: { revalidate: 30 } }, 1),
-    fetchWithTimeout(`${wcBase()}/reports/sales?${auth()}`, { next: { revalidate: 30 } }, 1),
-    fetchWithTimeout(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { next: { revalidate: 30 } }, 1),
-  ]);
+  if (!canCallCommerceApis()) {
+    return {
+      totalRevenue: 0,
+      totalOrders: 0,
+      totalCustomers: 0,
+      pendingOrders: 0,
+      recentOrders: [],
+    };
+  }
 
-  const totalCustomers = Number(customersRes.headers?.get('X-WP-Total') ?? 0);
-  const totalOrders = Number(ordersCountRes.headers?.get('X-WP-Total') ?? 0);
-  const revenueData = revenueRes.ok ? await revenueRes.json() : null;
-  const totalRevenue = Number(revenueData?.total_sales ?? 0);
-  const pendingOrders = recentOrders.filter(o => ['pending', 'processing'].includes(o.status)).length;
+  try {
+    const [recentOrders, customersRes, revenueRes, ordersCountRes] = await Promise.all([
+      wcFetch<WCOrder[]>('/orders?per_page=8&status=any', []),
+      fetchWithTimeout(`${wcBase()}/customers?per_page=1&${auth()}`, { next: { revalidate: 30 } }, 1),
+      fetchWithTimeout(`${wcBase()}/reports/sales?${auth()}`, { next: { revalidate: 30 } }, 1),
+      fetchWithTimeout(`${wcBase()}/orders?per_page=1&status=any&${auth()}`, { next: { revalidate: 30 } }, 1),
+    ]);
 
-  return { totalRevenue, totalOrders, totalCustomers, pendingOrders, recentOrders };
+    const totalCustomers = Number(customersRes.headers?.get('X-WP-Total') ?? 0);
+    const totalOrders = Number(ordersCountRes.headers?.get('X-WP-Total') ?? 0);
+    const revenueData = revenueRes.ok ? await revenueRes.json() : null;
+    const totalRevenue = Number(revenueData?.total_sales ?? 0);
+    const pendingOrders = recentOrders.filter(o => ['pending', 'processing'].includes(o.status)).length;
+
+    return { totalRevenue, totalOrders, totalCustomers, pendingOrders, recentOrders };
+  } catch {
+    return {
+      totalRevenue: 0,
+      totalOrders: 0,
+      totalCustomers: 0,
+      pendingOrders: 0,
+      recentOrders: [],
+    };
+  }
 }
 
 // ── Products ───────────────────────────────────────────────
@@ -296,15 +328,19 @@ export async function getReportsTrend(params: { date_min?: string; date_max?: st
 // ── Site Settings ──────────────────────────────────────────
 export async function getSiteSettings(): Promise<SiteSettings | null> {
   try {
-    const res = await fetchWithTimeout(`${wcBase()}/settings`, { next: { revalidate: 60 } }, 1);
+    const base = getWpApiUrl();
+    const res = await fetchWithTimeout(`${base}/marveo/v1/settings/site_settings`, { next: { revalidate: 60 } }, 1);
     if (!res.ok) return null;
-    return await res.json();
+    const json = await res.json();
+    // Connector returns { group, schema, settings } — extract settings
+    return (json?.settings ?? json) as SiteSettings;
   } catch { return null; }
 }
 
 export async function saveSiteSettings(settings: SiteSettings, token: string): Promise<boolean> {
   try {
-    const res = await fetchWithTimeout(`${wcBase()}/settings`, {
+    const base = getWpApiUrl();
+    const res = await fetchWithTimeout(`${base}/marveo/v1/settings/site_settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(settings),

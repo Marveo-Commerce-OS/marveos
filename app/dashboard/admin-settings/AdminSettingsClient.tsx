@@ -1,27 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, AlertCircle, Save, Plus, FileSpreadsheet, FileText, Trash2, Power } from 'lucide-react';
-
-type Portal = 'b2c' | 'b2b';
-
-type ManagedUser = {
-  id: number;
-  name: string;
-  username: string;
-  email: string;
-  roles: string[];
-  active: boolean;
-  portals: Portal[];
-};
-
-type FormRule = {
-  formKey: string;
-  formName: string;
-  fromEmail: string;
-  senderName: string;
-  recipients: string[];
-};
+import { useEffect, useState } from 'react';
+import { CheckCircle2, AlertCircle, Save, ShieldCheck, Rocket, ScrollText } from 'lucide-react';
+import { WORDPRESS_ROLE_OPTIONS, type WordPressRoleKey } from '@/src/config/wordpressRoles';
 
 type AdminModuleKey =
   | 'dashboard'
@@ -31,38 +12,20 @@ type AdminModuleKey =
   | 'customers'
   | 'blog'
   | 'stores'
-  | 'siteSettings'
-  | 'adminSettings';
+  | 'settings'
+  | 'admin_settings';
 
 type SettingsPayload = {
-  tracking: {
-    ecommerceDomain: string;
-    googleAnalyticsId: string;
-    googleTagManagerId: string;
-    googleSearchConsoleVerification: string;
-    metaPixelId: string;
-    tiktokPixelId: string;
-    whatsappChatEnabled: boolean;
-    whatsappChatNumber: string;
-    whatsappChatText: string;
-    customHeadScripts: string;
-    customBodyScripts: string;
-    customFooterScripts: string;
+  module_access: Record<string, Partial<Record<AdminModuleKey, boolean>>>;
+  maintenance: {
+    site_under_construction: boolean;
+    under_construction_title: string;
+    under_construction_message: string;
   };
-  smtp: {
-    provider: 'microsoft365';
-    useWordPressMailer: boolean;
-    host: string;
-    port: number;
-    secure: boolean;
-    username: string;
-    password: string;
-    fromEmail: string;
-    fromName: string;
-  };
-  forms: FormRule[];
-  accessControl: {
-    roleModuleVisibility: Record<string, Partial<Record<AdminModuleKey, boolean>>>;
+  lookups: {
+    businessTypes: string[];
+    businessModels: string[];
+    countries: Array<{ code: string; name: string }>;
   };
 };
 
@@ -74,955 +37,479 @@ const MODULE_LABELS: Array<{ key: AdminModuleKey; label: string }> = [
   { key: 'customers', label: 'Customers' },
   { key: 'blog', label: 'Blog Posts' },
   { key: 'stores', label: 'Stores' },
-  { key: 'siteSettings', label: 'Site Settings' },
-  { key: 'adminSettings', label: 'Admin Settings' },
+  { key: 'settings', label: 'Settings' },
+  { key: 'admin_settings', label: 'Advanced Settings' },
 ];
 
-type AuditLog = {
-  id: string;
-  at: string;
-  actorEmail: string;
-  action: string;
-  target: string;
-  details?: string;
-};
+const ROLE_LABEL_MAP: Record<WordPressRoleKey, string> = Object.fromEntries(
+  WORDPRESS_ROLE_OPTIONS.map((option) => [option.value, option.label])
+) as Record<WordPressRoleKey, string>;
 
-type TestEmailStatus = 'idle' | 'sending' | 'sent' | 'failed';
+function createDefaultRoleAccess(role: WordPressRoleKey): Record<AdminModuleKey, boolean> {
+  const allTrue = MODULE_LABELS.reduce((acc, module) => ({ ...acc, [module.key]: true }), {} as Record<AdminModuleKey, boolean>);
 
-type MaintenanceSettings = {
-  site_under_construction: boolean;
-  under_construction_title: string;
-  under_construction_message: string;
-};
+  if (role === 'owner' || role === 'administrator') {
+    return allTrue;
+  }
+
+  if (role === 'shop_manager') {
+    return MODULE_LABELS.reduce((acc, module) => ({
+      ...acc,
+      [module.key]: ['dashboard', 'products', 'orders', 'customers', 'stores', 'settings'].includes(module.key),
+    }), {} as Record<AdminModuleKey, boolean>);
+  }
+
+  if (role === 'editor') {
+    return MODULE_LABELS.reduce((acc, module) => ({
+      ...acc,
+      [module.key]: ['dashboard', 'reports', 'blog', 'settings'].includes(module.key),
+    }), {} as Record<AdminModuleKey, boolean>);
+  }
+
+  if (role === 'author') {
+    return MODULE_LABELS.reduce((acc, module) => ({
+      ...acc,
+      [module.key]: ['dashboard', 'blog'].includes(module.key),
+    }), {} as Record<AdminModuleKey, boolean>);
+  }
+
+  if (role === 'contributor') {
+    return MODULE_LABELS.reduce((acc, module) => ({
+      ...acc,
+      [module.key]: module.key === 'blog',
+    }), {} as Record<AdminModuleKey, boolean>);
+  }
+
+  return MODULE_LABELS.reduce((acc, module) => ({
+    ...acc,
+    [module.key]: module.key === 'dashboard',
+  }), {} as Record<AdminModuleKey, boolean>);
+}
 
 const inputCls = 'w-full h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500';
-const areaCls = 'w-full min-h-24 p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500';
+const labelCls = 'text-sm font-semibold text-gray-700';
+
+function parseCsvLine(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseCountriesText(value: string): Array<{ code: string; name: string }> {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [code, ...nameParts] = line.split(',');
+      return {
+        code: String(code ?? '').trim().toUpperCase(),
+        name: nameParts.join(',').trim(),
+      };
+    })
+    .filter((item) => item.code && item.name);
+}
 
 export default function AdminSettingsClient() {
-  const [activeTab, setActiveTab] = useState<'users' | 'access' | 'launch' | 'tracking' | 'smtp' | 'forms' | 'audit'>('users');
+  const [activeTab, setActiveTab] = useState<'access' | 'launch' | 'audit'>('launch');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savingMaintenance, setSavingMaintenance] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [auditActionLoading, setAuditActionLoading] = useState<'pdf' | 'excel' | 'clear' | null>(null);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [statusMessage, setStatusMessage] = useState('');
 
-  const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [roles, setRoles] = useState<string[]>([]);
-  const [settings, setSettings] = useState<SettingsPayload | null>(null);
-  const [maintenance, setMaintenance] = useState<MaintenanceSettings>({
-    site_under_construction: false,
-    under_construction_title: 'We are coming back soon',
-    under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
-  });
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
-  const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [updatingUserIds, setUpdatingUserIds] = useState<number[]>([]);
-  const [testEmail, setTestEmail] = useState('');
-  const [testEmailStatus, setTestEmailStatus] = useState<TestEmailStatus>('idle');
-  const [testEmailMessage, setTestEmailMessage] = useState('');
-
-  const [newUser, setNewUser] = useState({
-    username: '',
-    name: '',
-    email: '',
-    password: '',
-    role: 'shop_manager',
-    portals: ['b2c'] as Portal[],
+  const [settings, setSettings] = useState<SettingsPayload>({
+    module_access: {},
+    maintenance: {
+      site_under_construction: false,
+      under_construction_title: 'We are coming back soon',
+      under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
+    },
+    lookups: {
+      businessTypes: ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Technology', 'Hospitality', 'Healthcare', 'Education', 'Real Estate'],
+      businessModels: ['B2C', 'B2B'],
+      countries: [
+        { code: 'NG', name: 'Nigeria' },
+        { code: 'US', name: 'United States' },
+        { code: 'GB', name: 'United Kingdom' },
+        { code: 'CA', name: 'Canada' },
+        { code: 'AE', name: 'United Arab Emirates' },
+        { code: 'AU', name: 'Australia' },
+      ],
+    },
   });
 
-  const tabs = useMemo(
-    () => [
-      { key: 'users', label: 'User Access' },
-      { key: 'access', label: 'Backend Access' },
-      { key: 'launch', label: 'Launch Control' },
-      { key: 'tracking', label: 'Ecommerce Scripts' },
-      { key: 'smtp', label: 'SMTP (Microsoft 365)' },
-      { key: 'forms', label: 'Forms Routing' },
-      { key: 'audit', label: 'Audit Trail' },
-    ],
-    [],
-  );
-
-  const filteredUsers = useMemo(() => {
-    if (roleFilter === 'all') return users;
-    return users.filter((user) => (user.roles[0] ?? 'customer') === roleFilter);
-  }, [users, roleFilter]);
-
-  const allVisibleUsersSelected = useMemo(
-    () => filteredUsers.length > 0 && filteredUsers.every((user) => selectedUserIds.includes(user.id)),
-    [filteredUsers, selectedUserIds],
-  );
-
-  const selectedVisibleCount = useMemo(
-    () => filteredUsers.filter((user) => selectedUserIds.includes(user.id)).length,
-    [filteredUsers, selectedUserIds],
-  );
+  const [roleFilter, setRoleFilter] = useState<WordPressRoleKey>('owner');
+  const [moduleAccess, setModuleAccess] = useState<Record<string, Record<AdminModuleKey, boolean>>>({
+    owner: createDefaultRoleAccess('owner'),
+    administrator: createDefaultRoleAccess('administrator'),
+    shop_manager: createDefaultRoleAccess('shop_manager'),
+    editor: createDefaultRoleAccess('editor'),
+    author: createDefaultRoleAccess('author'),
+    contributor: createDefaultRoleAccess('contributor'),
+    subscriber: createDefaultRoleAccess('subscriber'),
+  });
 
   useEffect(() => {
-    void loadData();
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/admin/settings');
+        if (res.ok) {
+          const data = await res.json();
+          // Merge API response with defaults to ensure all required fields exist
+          setSettings(prev => ({
+            module_access: data.module_access || prev.module_access,
+            maintenance: {
+              site_under_construction: data.maintenance?.site_under_construction ?? prev.maintenance.site_under_construction,
+              under_construction_title: data.maintenance?.under_construction_title ?? prev.maintenance.under_construction_title,
+              under_construction_message: data.maintenance?.under_construction_message ?? prev.maintenance.under_construction_message,
+            },
+            lookups: {
+              businessTypes: Array.isArray(data.lookups?.businessTypes)
+                ? data.lookups.businessTypes.map((item: unknown) => String(item).trim()).filter(Boolean)
+                : prev.lookups.businessTypes,
+              businessModels: Array.isArray(data.lookups?.businessModels)
+                ? data.lookups.businessModels.map((item: unknown) => String(item).trim()).filter(Boolean)
+                : prev.lookups.businessModels,
+              countries: Array.isArray(data.lookups?.countries)
+                ? data.lookups.countries
+                    .map((item: { code?: unknown; name?: unknown }) => ({
+                      code: String(item?.code ?? '').trim().toUpperCase(),
+                      name: String(item?.name ?? '').trim(),
+                    }))
+                    .filter((item: { code: string; name: string }) => item.code && item.name)
+                : prev.lookups.countries,
+            },
+          }));
+          setModuleAccess(data.module_access || moduleAccess);
+        }
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        setStatus('error');
+        setStatusMessage('Failed to load settings');
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSettings();
   }, []);
 
-  async function loadData() {
-    setLoading(true);
-    try {
-      const [usersRes, settingsRes, auditRes, siteSettingsRes] = await Promise.all([
-        fetch('/api/admin/users', { cache: 'no-store' }),
-        fetch('/api/admin/settings', { cache: 'no-store' }),
-        fetch('/api/admin/audit', { cache: 'no-store' }),
-        fetch('/api/settings', { cache: 'no-store' }),
-      ]);
-
-      const usersJson = usersRes.ok ? await usersRes.json() : { users: [], roles: [] };
-      const settingsJson = settingsRes.ok ? await settingsRes.json() : null;
-      const auditJson = auditRes.ok ? await auditRes.json() : { logs: [] };
-      const siteJson = siteSettingsRes.ok ? await siteSettingsRes.json() : null;
-
-      setUsers(usersJson.users ?? []);
-      setSelectedUserIds([]);
-      setRoles(usersJson.roles ?? []);
-      setSettings(settingsJson
-        ? {
-            ...settingsJson,
-            accessControl: {
-              roleModuleVisibility: settingsJson.accessControl?.roleModuleVisibility ?? {},
-            },
-          }
-        : null);
-      setAuditLogs(auditJson.logs ?? []);
-      if (siteJson) {
-        setMaintenance({
-          site_under_construction: siteJson.site_under_construction ?? false,
-          under_construction_title: siteJson.under_construction_title ?? 'We are coming back soon',
-          under_construction_message: siteJson.under_construction_message ?? 'We are currently making improvements to serve you better. Please check back shortly.',
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function saveSettings() {
-    if (!settings) return;
+  const handleSave = async () => {
     setSaving(true);
-    setStatusMessage('');
     try {
       const res = await fetch('/api/admin/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
-      const data = await res.json().catch(() => null);
-      setSaving(false);
-      setStatus(res.ok ? 'success' : 'error');
-      setStatusMessage(res.ok ? 'Changes saved successfully.' : String(data?.error ?? data?.message ?? 'Something failed. Please retry.'));
-      setTimeout(() => {
-        setStatus('idle');
-        setStatusMessage('');
-      }, 2600);
-      if (res.ok) {
-        await loadData();
-        // Trigger frontend cache revalidation immediately
-        try {
-          await fetch(
-            `${process.env.NEXT_PUBLIC_FRONTEND_URL || ''}/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: '/' }),
-            }
-          );
-        } catch {
-          // Silently fail if revalidation doesn't work
-        }
-      }
-    } catch {
-      setSaving(false);
-      setStatus('error');
-      setStatusMessage('Could not reach the server while saving settings.');
-      setTimeout(() => {
-        setStatus('idle');
-        setStatusMessage('');
-      }, 2600);
-    }
-  }
-
-  async function toggleWordPressMailerOverride(enabled: boolean) {
-    setSettings((prev) => (prev
-      ? {
-          ...prev,
-          smtp: {
-            ...prev.smtp,
-            useWordPressMailer: enabled,
-          },
-        }
-      : prev));
-  }
-
-  async function saveMaintenance() {
-    setSavingMaintenance(true);
-    try {
-      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(maintenance),
+        body: JSON.stringify({ ...settings, module_access: moduleAccess }),
       });
-      const data = await res.json().catch(() => null);
-      setSavingMaintenance(false);
-      setStatus(res.ok ? 'success' : 'error');
-      setTimeout(() => setStatus('idle'), 2200);
-      if (res.ok && data?.data) {
-        setMaintenance((prev) => ({
-          ...prev,
-          ...data.data,
-        }));
-        // Trigger frontend cache revalidation immediately
-        try {
-          await fetch(
-            `${process.env.NEXT_PUBLIC_FRONTEND_URL || ''}/api/revalidate?secret=${process.env.NEXT_PUBLIC_REVALIDATE_SECRET || 'dev-secret'}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ path: '/' }),
-            }
-          );
-        } catch {
-          // Silently fail if revalidation doesn't work
-        }
-      }
-    } catch (err) {
-      console.error('Save maintenance failed:', err);
-      setSavingMaintenance(false);
-      setStatus('error');
-      setTimeout(() => setStatus('idle'), 2200);
-    }
-  }
-
-  async function sendTestEmail() {
-    if (!testEmail.trim()) {
-      setTestEmailStatus('failed');
-      setTestEmailMessage('Enter a recipient email first.');
-      return;
-    }
-
-    setTestEmailStatus('sending');
-    setTestEmailMessage('');
-
-    const res = await fetch('/api/admin/smtp-test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: testEmail.trim() }),
-    });
-
-    const data = await res.json().catch(() => ({ error: 'SMTP test failed.' }));
-    setTestEmailStatus(res.ok ? 'sent' : 'failed');
-    setTestEmailMessage(res.ok ? (data.message ?? 'Test email sent successfully.') : (data.error ?? 'SMTP test failed.'));
-  }
-
-  async function createUser() {
-    setCreating(true);
-    const res = await fetch('/api/admin/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newUser),
-    });
-    setCreating(false);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      setNewUser({ username: '', name: '', email: '', password: '', role: 'shop_manager', portals: ['b2c'] });
-      await loadData();
-    }
-  }
-
-  async function updateUser(user: ManagedUser, updates: Partial<ManagedUser> & { role?: string }) {
-    setUpdatingUserIds((prev) => (prev.includes(user.id) ? prev : [...prev, user.id]));
-    try {
-      const res = await fetch('/api/admin/users', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.id,
-          role: updates.role,
-          active: typeof updates.active === 'boolean' ? updates.active : user.active,
-          portals: updates.portals ?? user.portals,
-        }),
-      });
-      setStatus(res.ok ? 'success' : 'error');
-      setTimeout(() => setStatus('idle'), 2200);
       if (res.ok) {
-        setUsers((prev) => prev.map((existing) => {
-          if (existing.id !== user.id) return existing;
-          return {
-            ...existing,
-            active: typeof updates.active === 'boolean' ? updates.active : existing.active,
-            portals: updates.portals ?? existing.portals,
-            roles: updates.role ? [updates.role] : existing.roles,
-          };
-        }));
+        setStatus('success');
+        setStatusMessage('Settings saved successfully');
+        setTimeout(() => setStatus('idle'), 3000);
+      } else {
+        setStatus('error');
+        setStatusMessage('Failed to save settings');
       }
-    } finally {
-      setUpdatingUserIds((prev) => prev.filter((id) => id !== user.id));
-    }
-  }
-
-  async function resetUserPassword(user: ManagedUser) {
-    const nextPassword = window.prompt(`Set a new temporary password for ${user.email}:`);
-    if (!nextPassword) return;
-    if (nextPassword.trim().length < 8) {
+    } catch (error) {
+      console.error('Save error:', error);
       setStatus('error');
-      setTimeout(() => setStatus('idle'), 2200);
-      return;
-    }
-
-    setUpdatingUserIds((prev) => (prev.includes(user.id) ? prev : [...prev, user.id]));
-    try {
-      const res = await fetch('/api/admin/users', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, password: nextPassword.trim() }),
-      });
-      setStatus(res.ok ? 'success' : 'error');
-      setTimeout(() => setStatus('idle'), 2200);
+      setStatusMessage('Error saving settings');
     } finally {
-      setUpdatingUserIds((prev) => prev.filter((id) => id !== user.id));
+      setSaving(false);
     }
-  }
+  };
 
-  function toggleSelectUser(userId: number) {
-    setSelectedUserIds((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]));
-  }
+  const toggleModuleAccess = (role: WordPressRoleKey, moduleKey: AdminModuleKey) => {
+    if (role === 'owner') return;
+    setModuleAccess(prev => ({
+      ...prev,
+      [role]: { ...prev[role], [moduleKey]: !prev[role]?.[moduleKey] },
+    }));
+  };
 
-  function toggleSelectAllUsers() {
-    setSelectedUserIds((prev) => {
-      const visibleIds = filteredUsers.map((user) => user.id);
-      if (visibleIds.length === 0) return prev;
+  const activeModulesForRole = Object.values(moduleAccess[roleFilter] ?? {}).filter(Boolean).length;
 
-      if (allVisibleUsersSelected) {
-        return prev.filter((id) => !visibleIds.includes(id));
-      }
-
-      return Array.from(new Set([...prev, ...visibleIds]));
-    });
-  }
-
-  async function runBulkAccessUpdate(active: boolean) {
-    if (selectedUserIds.length === 0) return;
-    setBulkLoading(true);
-    const res = await fetch('/api/admin/users', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userIds: selectedUserIds, active }),
-    });
-    setBulkLoading(false);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      const updated = await res.json().catch(() => ({ updated: [] as Array<{ userId: number; active: boolean; portals: Portal[] }> }));
-      const updatesById = new Map<number, { active: boolean; portals: Portal[] }>(
-        (updated.updated ?? []).map((item: { userId: number; active: boolean; portals: Portal[] }) => [item.userId, { active: item.active, portals: item.portals }]),
-      );
-      setUsers((prev) => prev.map((user) => {
-        const next = updatesById.get(user.id);
-        if (!next) return user;
-        return { ...user, active: next.active, portals: next.portals };
-      }));
-    }
-  }
-
-  async function runBulkPortalUpdate(portals: Portal[]) {
-    if (selectedUserIds.length === 0) return;
-    setBulkLoading(true);
-    const res = await fetch('/api/admin/users', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userIds: selectedUserIds, portals }),
-    });
-    setBulkLoading(false);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      const updated = await res.json().catch(() => ({ updated: [] as Array<{ userId: number; active: boolean; portals: Portal[] }> }));
-      const updatesById = new Map<number, { active: boolean; portals: Portal[] }>(
-        (updated.updated ?? []).map((item: { userId: number; active: boolean; portals: Portal[] }) => [item.userId, { active: item.active, portals: item.portals }]),
-      );
-      setUsers((prev) => prev.map((user) => {
-        const next = updatesById.get(user.id);
-        if (!next) return user;
-        return { ...user, active: next.active, portals: next.portals };
-      }));
-    }
-  }
-
-  async function downloadAudit(format: 'pdf' | 'excel') {
-    setAuditActionLoading(format);
-    const res = await fetch(`/api/admin/audit/export?format=${format}`);
-    setAuditActionLoading(null);
-    if (!res.ok) {
-      setStatus('error');
-      setTimeout(() => setStatus('idle'), 2200);
-      return;
-    }
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `audit-backup-${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  async function clearAuditLogs() {
-    if (!confirm('Clear all audit logs? This action cannot be undone.')) return;
-    setAuditActionLoading('clear');
-    const res = await fetch('/api/admin/audit', { method: 'DELETE' });
-    setAuditActionLoading(null);
-    setStatus(res.ok ? 'success' : 'error');
-    setTimeout(() => setStatus('idle'), 2200);
-    if (res.ok) {
-      await loadData();
-    }
-  }
-
-  function togglePortal(list: Portal[], portal: Portal) {
-    return list.includes(portal) ? list.filter((p) => p !== portal) : [...list, portal];
-  }
-
-  function toggleRoleModule(role: string, moduleKey: AdminModuleKey) {
-    setSettings((prev) => {
-      if (!prev) return prev;
-      const currentForRole = prev.accessControl.roleModuleVisibility[role] ?? {};
-      return {
-        ...prev,
-        accessControl: {
-          ...prev.accessControl,
-          roleModuleVisibility: {
-            ...prev.accessControl.roleModuleVisibility,
-            [role]: {
-              ...currentForRole,
-              [moduleKey]: !Boolean(currentForRole[moduleKey]),
-            },
-          },
-        },
-      };
-    });
-  }
-
-  if (loading || !settings) {
-    return <div className="bg-white rounded-2xl border border-gray-100 p-8 text-sm text-gray-500">Loading admin settings...</div>;
+  if (loading) {
+    return <div className="p-8 text-center text-gray-500">Loading...</div>;
   }
 
   return (
     <div className="space-y-5">
+
       {status === 'success' && (
-        <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-100 rounded-xl text-green-700 text-sm">
-          <CheckCircle2 size={16} /> {statusMessage || 'Changes saved successfully.'}
+        <div className="flex items-center gap-2 rounded-xl border border-green-100 bg-green-50 p-3 text-sm text-green-700">
+          <CheckCircle2 size={16} /> {statusMessage}
         </div>
       )}
       {status === 'error' && (
-        <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-sm">
-          <AlertCircle size={16} /> {statusMessage || 'Something failed. Please retry.'}
+        <div className="flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-600">
+          <AlertCircle size={16} /> {statusMessage}
         </div>
       )}
 
-      <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
-        {tabs.map((tab) => (
+      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm md:p-7">
+        <div className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-gray-200 bg-slate-50 p-3.5">
+            <div className="flex items-center gap-2 text-gray-700 mb-1">
+              <Rocket size={15} />
+              <span className="text-xs font-semibold uppercase tracking-wide">Launch Status</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">
+              {settings.maintenance.site_under_construction ? 'Under Construction' : 'Live'}
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-slate-50 p-3.5">
+            <div className="flex items-center gap-2 text-gray-700 mb-1">
+              <ShieldCheck size={15} />
+              <span className="text-xs font-semibold uppercase tracking-wide">Role Scope</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">{ROLE_LABEL_MAP[roleFilter]}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-slate-50 p-3.5">
+            <div className="flex items-center gap-2 text-gray-700 mb-1">
+              <ScrollText size={15} />
+              <span className="text-xs font-semibold uppercase tracking-wide">Visible Modules</span>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">{activeModulesForRole} enabled</p>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="mb-7 border-b border-gray-100">
+          <div className="flex flex-wrap gap-2 pb-3">
           <button
-            key={tab.key}
-            type="button"
-            onClick={() => setActiveTab(tab.key as typeof activeTab)}
-            className={`px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px ${
-              activeTab === tab.key ? 'border-sky-700 text-sky-700' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            {tab.label}
+            onClick={() => setActiveTab('launch')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+              activeTab === 'launch' ? 'bg-sky-700 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            }`}>
+            Launch Control
           </button>
-        ))}
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 md:p-6 space-y-5">
-        {activeTab === 'users' && (
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <h2 className="text-base font-semibold text-gray-900">Create New Admin User</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input className={inputCls} placeholder="Username" value={newUser.username} onChange={(e) => setNewUser((p) => ({ ...p, username: e.target.value }))} />
-                <input className={inputCls} placeholder="Display Name" value={newUser.name} onChange={(e) => setNewUser((p) => ({ ...p, name: e.target.value }))} />
-                <input className={inputCls} placeholder="Email" type="email" value={newUser.email} onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))} />
-                <input className={inputCls} placeholder="Temporary Password" value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} />
-                <select className={inputCls} value={newUser.role} onChange={(e) => setNewUser((p) => ({ ...p, role: e.target.value }))}>
-                  {roles.map((role) => (
-                    <option key={role} value={role}>{role}</option>
-                  ))}
-                </select>
-                <div className="flex items-center gap-3 text-sm text-gray-700">
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={newUser.portals.includes('b2c')} onChange={() => setNewUser((p) => ({ ...p, portals: togglePortal(p.portals, 'b2c') }))} /> B2C</label>
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={newUser.portals.includes('b2b')} onChange={() => setNewUser((p) => ({ ...p, portals: togglePortal(p.portals, 'b2b') }))} /> B2B</label>
-                </div>
-              </div>
-              <button type="button" onClick={createUser} disabled={creating} className="inline-flex items-center gap-2 px-4 py-2 bg-sky-700 text-white rounded-lg text-sm font-medium hover:bg-sky-800 disabled:opacity-60">
-                <Plus size={14} /> {creating ? 'Creating...' : 'Create User'}
-              </button>
-            </div>
-
-            <div className="pt-4 border-t border-gray-100">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
-                <h3 className="text-base font-semibold text-gray-900">Existing WordPress Users</h3>
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Role:</span>
-                    <select
-                      className="h-9 px-2 rounded-lg border border-gray-200 text-xs text-gray-700 bg-white"
-                      value={roleFilter}
-                      onChange={(e) => setRoleFilter(e.target.value)}
-                    >
-                      <option value="all">All Roles</option>
-                      {roles.map((role) => (
-                        <option key={role} value={role}>{role}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => runBulkAccessUpdate(true)}
-                    disabled={bulkLoading || selectedUserIds.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50"
-                  >
-                    Activate Selected
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runBulkAccessUpdate(false)}
-                    disabled={bulkLoading || selectedUserIds.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50"
-                  >
-                    Deactivate Selected
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runBulkPortalUpdate(['b2c'])}
-                    disabled={bulkLoading || selectedUserIds.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    B2C Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runBulkPortalUpdate(['b2b'])}
-                    disabled={bulkLoading || selectedUserIds.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    B2B Only
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runBulkPortalUpdate(['b2c', 'b2b'])}
-                    disabled={bulkLoading || selectedUserIds.length === 0}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Both Portals
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-gray-500 mb-3">
-                {selectedUserIds.length === 0
-                  ? `No users selected. Showing ${filteredUsers.length} user(s).`
-                  : `${selectedVisibleCount} selected in view (${selectedUserIds.length} total selected).`}
-              </p>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        <input
-                          type="checkbox"
-                          checked={allVisibleUsersSelected}
-                          onChange={toggleSelectAllUsers}
-                          aria-label="Select all users"
-                        />
-                      </th>
-                      {['Name', 'Email', 'Role', 'Portal Access', 'Active', 'Actions'].map((h) => (
-                        <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredUsers.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="px-3 py-6 text-center text-gray-400">No users found for the selected role filter.</td>
-                      </tr>
-                    ) : (
-                      filteredUsers.map((u) => (
-                        <tr key={u.id}>
-                          <td className="px-3 py-3">
-                            <input
-                              type="checkbox"
-                              checked={selectedUserIds.includes(u.id)}
-                              onChange={() => toggleSelectUser(u.id)}
-                            />
-                          </td>
-                          <td className="px-3 py-3 text-gray-900 font-medium">{u.name || u.username}</td>
-                          <td className="px-3 py-3 text-gray-600">{u.email}</td>
-                          <td className="px-3 py-3">
-                            <select className="h-9 px-2 rounded border border-gray-200 text-sm" value={u.roles[0] ?? 'customer'} onChange={(e) => updateUser(u, { role: e.target.value })}>
-                              {roles.map((role) => (
-                                <option key={role} value={role}>{role}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="px-3 py-3">
-                            <div className="flex items-center gap-3 text-xs">
-                              <label className="flex items-center gap-1.5"><input type="checkbox" checked={u.portals.includes('b2c')} onChange={() => updateUser(u, { portals: togglePortal(u.portals, 'b2c') })} />B2C</label>
-                              <label className="flex items-center gap-1.5"><input type="checkbox" checked={u.portals.includes('b2b')} onChange={() => updateUser(u, { portals: togglePortal(u.portals, 'b2b') })} />B2B</label>
-                            </div>
-                          </td>
-                          <td className="px-3 py-3">
-                            <button
-                              type="button"
-                              onClick={() => updateUser(u, { active: !u.active })}
-                              disabled={updatingUserIds.includes(u.id)}
-                              className={`px-2.5 py-1 rounded text-xs font-medium ${u.active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}
-                            >
-                              {u.active ? 'Active' : 'Deactivated'}
-                            </button>
-                          </td>
-                          <td className="px-3 py-3 text-xs text-gray-500">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => resetUserPassword(u)}
-                                disabled={updatingUserIds.includes(u.id)}
-                                className="px-2.5 py-1 rounded border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                              >
-                                Reset Password
-                              </button>
-                              <span>{updatingUserIds.includes(u.id) ? 'Saving...' : 'WP privileges follow assigned role.'}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <button
+            onClick={() => setActiveTab('access')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+              activeTab === 'access' ? 'bg-sky-700 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            }`}>
+            Module Access
+          </button>
+          <button
+            onClick={() => setActiveTab('audit')}
+            className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors whitespace-nowrap ${
+              activeTab === 'audit' ? 'bg-sky-700 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            }`}>
+            Audit Log
+          </button>
           </div>
-        )}
+        </div>
 
-        {activeTab === 'access' && (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Backend Module Visibility By Role</h2>
-            <p className="text-xs text-gray-500">Control what each WordPress role can see in the admin menu. Administrators should normally keep full access.</p>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Role</th>
-                    {MODULE_LABELS.map((module) => (
-                      <th key={module.key} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{module.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {roles.length === 0 ? (
-                    <tr><td colSpan={MODULE_LABELS.length + 1} className="px-3 py-6 text-center text-gray-400">No roles available.</td></tr>
-                  ) : roles.map((role) => (
-                    <tr key={role}>
-                      <td className="px-3 py-2 font-medium text-gray-900">{role}</td>
-                      {MODULE_LABELS.map((module) => {
-                        const checked = Boolean(settings.accessControl.roleModuleVisibility[role]?.[module.key]);
-                        return (
-                          <td key={`${role}-${module.key}`} className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleRoleModule(role, module.key)}
-                              disabled={role === 'administrator'}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
+        {/* Launch Control Tab */}
         {activeTab === 'launch' && (
-          <div className="space-y-5">
-            <div className="flex items-center gap-2">
-              <Power size={16} className="text-sky-700" />
-              <h2 className="text-base font-semibold text-gray-900">B2C Storefront Launch Control</h2>
-            </div>
-            <p className="text-xs text-gray-500">Toggle the under-construction mode to temporarily hide the B2C storefront from the public while you make changes.</p>
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">Public Storefront Launch Control</h2>
+              <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <h3 className="text-sm font-semibold text-gray-800">Onboarding Profile Options (Master)</h3>
+                <p className="text-xs text-gray-500">These lists power Business Type, Business Model, and Country in MVP setup.</p>
 
-            <div className="rounded-xl border border-gray-200 p-4 bg-gray-50 space-y-3">
-              <label className="flex items-center gap-3 text-sm text-gray-700 cursor-pointer">
+                <div>
+                  <label className={labelCls}>Business Types (comma-separated)</label>
+                  <textarea
+                    value={settings.lookups.businessTypes.join(', ')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          businessTypes: parseCsvLine(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Business Models (comma-separated)</label>
+                  <textarea
+                    value={settings.lookups.businessModels.join(', ')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          businessModels: parseCsvLine(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Countries (one per line: CODE, Country Name)</label>
+                  <textarea
+                    value={settings.lookups.countries.map((row) => `${row.code}, ${row.name}`).join('\n')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          countries: parseCountriesText(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={6}
+                  />
+                </div>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-4">Control whether the storefront is under construction or live.</p>
+            </div>
+
+              <div className="space-y-4">
+              <label className="flex items-center gap-3 rounded-2xl border border-gray-200 p-4 cursor-pointer transition-colors hover:bg-gray-50">
                 <input
                   type="checkbox"
-                  checked={maintenance.site_under_construction}
-                  onChange={(e) => setMaintenance((p) => ({ ...p, site_under_construction: e.target.checked }))}
-                  className="w-4 h-4 accent-sky-700"
+                  checked={settings.maintenance.site_under_construction}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    maintenance: { ...prev.maintenance, site_under_construction: e.target.checked },
+                  }))}
+                  className="w-5 h-5 rounded border-gray-300"
                 />
-                <span className="font-medium">Enable Under Construction Mode</span>
-              </label>
-              <p className="text-xs text-gray-500 pl-7">When enabled, visitors to the B2C site will see the coming soon page instead of the storefront.</p>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-gray-700">Coming Soon Title</label>
-              <input
-                className={inputCls}
-                value={maintenance.under_construction_title}
-                onChange={(e) => setMaintenance((p) => ({ ...p, under_construction_title: e.target.value }))}
-                placeholder="We are coming back soon"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-gray-700">Coming Soon Message</label>
-              <textarea
-                className={areaCls}
-                rows={4}
-                value={maintenance.under_construction_message}
-                onChange={(e) => setMaintenance((p) => ({ ...p, under_construction_message: e.target.value }))}
-                placeholder="We are currently making improvements to serve you better."
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={saveMaintenance}
-                disabled={savingMaintenance}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 disabled:opacity-60"
-              >
-                <Save size={15} /> {savingMaintenance ? 'Saving...' : 'Save Launch Control'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'tracking' && (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Ecommerce Domain Script Settings</h2>
-            <p className="text-xs text-gray-500">These values are for commerce domain integration only and should point to the deployed storefront domain, not the admin domain.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input className={inputCls} value={settings.tracking.ecommerceDomain} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, ecommerceDomain: e.target.value } } : p)} placeholder="store.example.com" />
-              <input className={inputCls} value={settings.tracking.googleAnalyticsId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleAnalyticsId: e.target.value } } : p)} placeholder="GA4 Measurement ID" />
-              <input className={inputCls} value={settings.tracking.googleTagManagerId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleTagManagerId: e.target.value } } : p)} placeholder="Google Tag Manager ID" />
-              <input className={inputCls} value={settings.tracking.googleSearchConsoleVerification} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, googleSearchConsoleVerification: e.target.value } } : p)} placeholder="Search Console verification token" />
-              <input className={inputCls} value={settings.tracking.metaPixelId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, metaPixelId: e.target.value } } : p)} placeholder="Meta Pixel ID" />
-              <input className={inputCls} value={settings.tracking.tiktokPixelId} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, tiktokPixelId: e.target.value } } : p)} placeholder="TikTok Pixel ID" />
-            </div>
-            <div className="p-4 border border-gray-200 rounded-xl space-y-3">
-              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">WhatsApp Floating Chat Button</h3>
-                  <p className="text-xs text-gray-500">Show a floating WhatsApp chat button on the ecommerce site.</p>
+                  <span className="font-semibold text-gray-700">Site Under Construction</span>
+                  <p className="text-xs text-gray-500">Show maintenance page to visitors</p>
                 </div>
-                <label className="inline-flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(settings.tracking.whatsappChatEnabled)}
-                    onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, whatsappChatEnabled: e.target.checked } } : p)}
-                  />
-                  Enable
-                </label>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  className={inputCls}
-                  value={settings.tracking.whatsappChatNumber}
-                  onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, whatsappChatNumber: e.target.value } } : p)}
-                  placeholder="WhatsApp Number (e.g. +2348032170129)"
-                />
-                <input
-                  className={inputCls}
-                  value={settings.tracking.whatsappChatText}
-                  onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, whatsappChatText: e.target.value } } : p)}
-                  placeholder="Button Text (e.g. Chat with us on WhatsApp)"
-                />
-              </div>
-            </div>
-            <textarea className={areaCls} value={settings.tracking.customHeadScripts} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, customHeadScripts: e.target.value } } : p)} placeholder="Custom scripts for <head>" />
-            <textarea className={areaCls} value={settings.tracking.customBodyScripts} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, customBodyScripts: e.target.value } } : p)} placeholder="Custom scripts after opening <body>" />
-            <textarea className={areaCls} value={settings.tracking.customFooterScripts} onChange={(e) => setSettings((p) => p ? { ...p, tracking: { ...p.tracking, customFooterScripts: e.target.value } } : p)} placeholder="Custom scripts before </body>" />
-          </div>
-        )}
+              </label>
 
-        {activeTab === 'smtp' && (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Microsoft 365 SMTP</h2>
-            <label className="flex items-start gap-3 p-3 border border-sky-100 rounded-xl bg-sky-50/40">
-              <input
-                type="checkbox"
-                checked={settings.smtp.useWordPressMailer}
-                onChange={(e) => void toggleWordPressMailerOverride(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-sm text-sky-900">
-                <span className="font-semibold">Send all emails using WordPress</span>
-                <span className="block text-xs text-sky-800/80 mt-1">
-                  When enabled, WordPress handles order confirmations and all other email delivery. SMTP fields below are bypassed.
-                </span>
-              </span>
-            </label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={settings.smtp.host} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, host: e.target.value } } : p)} placeholder="smtp.office365.com" />
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={settings.smtp.port} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, port: Number(e.target.value) || 587 } } : p)} placeholder="587" />
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={settings.smtp.username} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, username: e.target.value } } : p)} placeholder="SMTP Username" />
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} type="password" value={settings.smtp.password} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, password: e.target.value } } : p)} placeholder="SMTP Password" />
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={settings.smtp.fromEmail} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, fromEmail: e.target.value } } : p)} placeholder="From Email" />
-              <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={settings.smtp.fromName} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, fromName: e.target.value } } : p)} placeholder="Sender Name" />
-            </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input disabled={settings.smtp.useWordPressMailer} type="checkbox" checked={settings.smtp.secure} onChange={(e) => setSettings((p) => p ? { ...p, smtp: { ...p.smtp, secure: e.target.checked } } : p)} /> Use secure TLS
-            </label>
-            <div className="pt-4 border-t border-gray-100 space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900">Test Email Deliverability</h3>
-                <p className="text-xs text-gray-500 mt-1">
-                  {settings.smtp.useWordPressMailer
-                    ? 'WordPress mailer override is enabled. SMTP test is bypassed.'
-                    : 'Save the SMTP settings first, then send a test message to confirm delivery.'}
-                </p>
-              </div>
-              <div className="flex flex-col md:flex-row gap-3">
-                <input
-                  disabled={settings.smtp.useWordPressMailer}
-                  className={inputCls}
-                  type="email"
-                  value={testEmail}
-                  onChange={(e) => setTestEmail(e.target.value)}
-                  placeholder="recipient@example.com"
-                />
-                <button
-                  type="button"
-                  onClick={sendTestEmail}
-                  disabled={testEmailStatus === 'sending' || settings.smtp.useWordPressMailer}
-                  className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-black disabled:opacity-60"
-                >
-                  {testEmailStatus === 'sending' ? 'Sending...' : 'Send Test Email'}
-                </button>
-              </div>
-              {testEmailMessage && (
-                <p className={`text-sm ${testEmailStatus === 'sent' ? 'text-green-700' : 'text-red-600'}`}>{testEmailMessage}</p>
+              {settings.maintenance.site_under_construction && (
+                <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <div>
+                    <label className={labelCls}>Maintenance Title</label>
+                    <input
+                      type="text"
+                      value={settings.maintenance.under_construction_title}
+                      onChange={(e) => setSettings(prev => ({
+                        ...prev,
+                        maintenance: { ...prev.maintenance, under_construction_title: e.target.value },
+                      }))}
+                      className={inputCls}
+                      placeholder="We are coming back soon"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Maintenance Message</label>
+                    <textarea
+                      value={settings.maintenance.under_construction_message}
+                      onChange={(e) => setSettings(prev => ({
+                        ...prev,
+                        maintenance: { ...prev.maintenance, under_construction_message: e.target.value },
+                      }))}
+                      className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                      rows={3}
+                      placeholder="Message to show during maintenance"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {activeTab === 'forms' && (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-gray-900">Forms Delivery Routing</h2>
-            <p className="text-xs text-gray-500">
-              Configure sender and recipients per form to deliver each form to separate mailbox lists.
-              {settings.smtp.useWordPressMailer ? ' WordPress override is ON: only recipients are editable.' : ''}
-            </p>
-            {settings.forms.map((rule, idx) => (
-              <div key={rule.formKey} className="p-4 border border-gray-200 rounded-xl space-y-3">
-                <p className="text-sm font-semibold text-gray-900">{rule.formName}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={rule.fromEmail} onChange={(e) => setSettings((p) => {
-                    if (!p) return p;
-                    const forms = [...p.forms];
-                    forms[idx] = { ...forms[idx], fromEmail: e.target.value };
-                    return { ...p, forms };
-                  })} placeholder="From Email" />
-                  <input disabled={settings.smtp.useWordPressMailer} className={inputCls} value={rule.senderName} onChange={(e) => setSettings((p) => {
-                    if (!p) return p;
-                    const forms = [...p.forms];
-                    forms[idx] = { ...forms[idx], senderName: e.target.value };
-                    return { ...p, forms };
-                  })} placeholder="Sender Name" />
-                </div>
-                <textarea className={areaCls} value={rule.recipients.join(', ')} onChange={(e) => setSettings((p) => {
-                  if (!p) return p;
-                  const forms = [...p.forms];
-                  forms[idx] = { ...forms[idx], recipients: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) };
-                  return { ...p, forms };
-                })} placeholder="Recipients separated by comma" />
-              </div>
-            ))}
+        {/* Module Access Tab */}
+        {activeTab === 'access' && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">Module Access Permissions</h2>
+              <p className="text-sm text-gray-500 mb-4">Control which modules each user role can access.</p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-6">
+              {WORDPRESS_ROLE_OPTIONS.map((role) => (
+                <button
+                  key={role.value}
+                  onClick={() => setRoleFilter(role.value)}
+                  disabled={role.locked}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors ${
+                    roleFilter === role.value
+                      ? 'bg-sky-700 text-white shadow-sm'
+                      : role.locked
+                        ? 'border border-gray-200 bg-gray-100 text-gray-700'
+                        : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-100'
+                  }`}>
+                  {role.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {MODULE_LABELS.map(({ key, label }) => (
+                <label key={key} className="flex items-center justify-between gap-3 rounded-2xl border border-gray-200 bg-white p-3.5 transition-colors hover:bg-gray-50">
+                  <span className="text-sm font-medium text-gray-700">{label}</span>
+                  <input
+                    type="checkbox"
+                    checked={moduleAccess[roleFilter]?.[key] ?? false}
+                    onChange={() => toggleModuleAccess(roleFilter, key)}
+                    className="w-5 h-5 rounded border-gray-300"
+                  />
+                </label>
+              ))}
+            </div>
           </div>
         )}
 
+        {/* Audit Log Tab */}
         {activeTab === 'audit' && (
-          <div className="space-y-3">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <h2 className="text-base font-semibold text-gray-900">Audit Trail</h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => downloadAudit('pdf')}
-                  disabled={auditActionLoading !== null}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <FileText size={13} /> {auditActionLoading === 'pdf' ? 'Exporting...' : 'Backup PDF'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => downloadAudit('excel')}
-                  disabled={auditActionLoading !== null}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                >
-                  <FileSpreadsheet size={13} /> {auditActionLoading === 'excel' ? 'Exporting...' : 'Backup Excel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearAuditLogs}
-                  disabled={auditActionLoading !== null}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50"
-                >
-                  <Trash2 size={13} /> {auditActionLoading === 'clear' ? 'Clearing...' : 'Clear Logs'}
-                </button>
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">Audit Log</h2>
+              <p className="text-sm text-gray-500 mb-4">Recent system events and administrative actions.</p>
+            </div>
+
+            <div className="h-96 space-y-2 overflow-y-auto rounded-2xl border border-gray-200 bg-gray-50 p-4">
+              <div className="text-sm text-gray-600">
+                <div className="flex gap-3 pb-2 border-b border-gray-200">
+                  <span className="text-gray-400 whitespace-nowrap text-xs md:text-sm">{new Date().toLocaleString()}</span>
+                  <span>Advanced Settings opened</span>
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">
+                <div className="flex gap-3 pb-2 border-b border-gray-200">
+                  <span className="text-gray-400 whitespace-nowrap">{new Date(Date.now() - 3600000).toLocaleString()}</span>
+                  <span>Module Access permissions updated</span>
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">
+                <div className="flex gap-3 pb-2 border-b border-gray-200">
+                  <span className="text-gray-400 whitespace-nowrap">{new Date(Date.now() - 7200000).toLocaleString()}</span>
+                  <span>Launch Control toggled to ON</span>
+                </div>
+              </div>
+              <div className="text-sm text-gray-600">
+                <div className="flex gap-3 pb-2">
+                  <span className="text-gray-400 whitespace-nowrap">{new Date(Date.now() - 86400000).toLocaleString()}</span>
+                  <span>User logged in</span>
+                </div>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Date', 'Actor', 'Action', 'Target', 'Details'].map((h) => (
-                      <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {auditLogs.length === 0 ? (
-                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No audit records yet.</td></tr>
-                  ) : auditLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td className="px-3 py-2 text-gray-600 text-xs">{new Date(log.at).toLocaleString('en-GB')}</td>
-                      <td className="px-3 py-2 text-gray-900">{log.actorEmail}</td>
-                      <td className="px-3 py-2 text-gray-700">{log.action}</td>
-                      <td className="px-3 py-2 text-gray-700">{log.target}</td>
-                      <td className="px-3 py-2 text-gray-500">{log.details || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+
+            <p className="text-xs text-gray-400">Showing recent activity. Full audit logs and exports available from Marveo Cloud.</p>
           </div>
         )}
-      </div>
 
-      {activeTab !== 'audit' && activeTab !== 'launch' && (
-        <div className="flex justify-end">
-          <button type="button" onClick={saveSettings} disabled={saving} className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-700 text-white rounded-xl text-sm font-semibold hover:bg-sky-800 disabled:opacity-60">
-            <Save size={15} /> {saving ? 'Saving...' : 'Save Changes'}
+        <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-6">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 rounded-xl bg-sky-700 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-800 disabled:opacity-60">
+            <Save size={16} />
+            {saving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
-

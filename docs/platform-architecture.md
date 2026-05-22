@@ -215,7 +215,7 @@ export default function RootLayout({ children }) {
 6. Module dependencies satisfied
 7. License key valid (if configured)
 8. Plugin endpoint reachable
-9. No PRAG config remains
+9. No legacy client config remains
 10. Content mapping complete (if Existing WordPress)
 11. Frontend adapter configured (if Existing Headless)
 
@@ -247,24 +247,24 @@ if (!result.canProceed) {
 
 ---
 
-### 9. PRAG Migration Layer (`includes/class-prag-migration.php`)
+### 9. Legacy Migration Layer (`includes/class-marveo-migration.php`)
 
-**Purpose**: Backward compatibility for existing PRAG deployments.
+**Purpose**: Backward compatibility for legacy deployments.
 
 **Migration Features**:
-- Auto-detect existing PRAG configuration
-- Convert PRAG config to new Marveo format
-- Migrate PRAG post types to generic equivalents
-- Migrate PRAG settings to new settings groups
+- Auto-detect existing legacy configuration
+- Convert legacy config to new Marveo format
+- Migrate legacy post types to generic equivalents
+- Migrate legacy settings to new settings groups
 - Create rollback points for safety
 - Preserve all content without loss
 
 **Key Functions**:
-- `has_prag_config()` - Check if PRAG exists
+- `has_marveo_config()` - Check if legacy config exists
 - `migrate_configuration()` - Convert config
-- `migrate_post_types()` - Rename post types (prag_store → marveo_location)
+- `migrate_post_types()` - Rename post types (marveo_store → marveo_location)
 - `migrate_settings()` - Move admin settings
-- `detect_prag_features()` - Count stores, documents, products
+- `detect_marveo_features()` - Count stores, documents, products
 - `create_rollback_point()` - Save state before migration
 - `rollback_migration()` - Undo if needed
 
@@ -274,7 +274,7 @@ not_started → pending_review → completed
 ```
 
 **Files Created**:
-- `/marveo-connector/includes/class-prag-migration.php` - Migration logic
+- `/marveo-connector/includes/class-marveo-migration.php` - Migration logic
 
 ---
 
@@ -312,7 +312,7 @@ require_once 'class-onboarding.php';
 require_once 'class-content-discovery.php';
 require_once 'class-settings-schema.php';
 require_once 'class-rest-api-extended.php';
-require_once 'class-prag-migration.php';
+require_once 'class-marveo-migration.php';
 ```
 
 ### Frontend Config Layer
@@ -356,7 +356,7 @@ All files compiled successfully with zero errors:
 ✅ class-content-discovery.php
 ✅ class-settings-schema.php
 ✅ class-rest-api-extended.php
-✅ class-prag-migration.php
+✅ class-marveo-migration.php
 
 **Frontend Files**:
 ✅ src/lib/marveo.ts
@@ -381,13 +381,13 @@ All files compiled successfully with zero errors:
 - [ ] Add enhanced validation to dashboard layout
 - [ ] Create `/setup` page showing validation results
 - [ ] Add module toggle UI to dashboard settings
-- [ ] Create migration status page for PRAG clients
+- [ ] Create migration status page for legacy clients
 
 ### Phase 3: Testing & Documentation
 - [ ] Test each onboarding path end-to-end
 - [ ] Test content discovery on real WordPress sites
 - [ ] Verify frontend adapter with existing Next.js projects
-- [ ] Test PRAG migration with sample data
+- [ ] Test legacy migration with sample data
 - [ ] Create video guides for each path
 
 ### Phase 4: Launch & Support
@@ -401,15 +401,15 @@ All files compiled successfully with zero errors:
 
 ## Feature Comparison: Old vs New
 
-| Feature | PRAG | Marveo |
+| Feature | Legacy Template | Marveo |
 |---------|------|--------|
-| Onboarding Paths | 1 (PRAG hardcoded) | 3 (flexible) |
+| Onboarding Paths | 1 (legacy hardcoded) | 3 (flexible) |
 | Deployment Modes | 1 (WordPress) | 3 (WP, Headless, Hybrid) |
 | Content Discovery | Manual | Automated scan |
 | Settings Organization | Scattered | 8 organized groups |
 | Module System | Hardcoded features | 14 configurable modules |
 | Access Control | Basic | Advanced (Client vs System) |
-| Migration Support | None | Auto-detect + PRAG compat |
+| Migration Support | None | Auto-detect + legacy compat |
 | Frontend Reuse | Not supported | Adapter library + hooks |
 | Global Deployment | Single domain | Multi-tenant ready |
 | Validation | Basic checks | Comprehensive matrix |
@@ -516,7 +516,7 @@ curl -X POST https://yoursite.com/wp-json/marveo/v1/modules/validate \
 - `marveo-connector/includes/class-content-discovery.php` (284 lines)
 - `marveo-connector/includes/class-settings-schema.php` (334 lines)
 - `marveo-connector/includes/class-rest-api-extended.php` (296 lines)
-- `marveo-connector/includes/class-prag-migration.php` (324 lines)
+- `marveo-connector/includes/class-marveo-migration.php` (324 lines)
 
 **Frontend Files Added** (4):
 - `marveos/src/lib/marveo.ts` (177 lines)
@@ -575,7 +575,7 @@ curl -X POST https://yoursite.com/wp-json/marveo/v1/modules/validate \
 │  ├─ 11+ comprehensive checks                                │
 │  ├─ Module dependency validation                            │
 │  ├─ API connectivity tests                                  │
-│  ├─ PRAG config detection                                   │
+│  ├─ Legacy config detection                                 │
 │  └─ Content mapping verification                            │
 └─────────────────────────────────────────────────────────────┘
                            ↓
@@ -588,8 +588,8 @@ curl -X POST https://yoursite.com/wp-json/marveo/v1/modules/validate \
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  PRAG Migration (class-prag-migration.php)                  │
-│  ├─ Auto-detect existing PRAG config                        │
+│  Legacy Migration (class-marveo-migration.php)                │
+│  ├─ Auto-detect existing legacy config                      │
 │  ├─ Convert to new format                                   │
 │  ├─ Migrate post types                                      │
 │  ├─ Create rollback points                                  │
@@ -610,7 +610,7 @@ All objectives achieved:
 ✅ **Module System**: 14 features with dependency validation
 ✅ **Enhanced Validation**: Comprehensive 11+ point check matrix
 ✅ **Access Control**: CLIENT vs SYSTEM settings with permission enforcement
-✅ **Migration Support**: Auto-detect and convert PRAG deployments
+✅ **Migration Support**: Auto-detect and convert legacy deployments
 ✅ **Documentation**: Two detailed guides (onboarding + access control)
 ✅ **Compilation**: All files pass TypeScript/PHP validation
 
@@ -622,6 +622,6 @@ Marveo is now a **global, multi-tenant deployment platform** supporting:
 - Organizations starting fresh (New Build)
 - Organizations migrating from WordPress (Existing WP)
 - Organizations with existing frontends (Existing Headless)
-- Organizations migrating from PRAG (backward compatible)
+- Organizations migrating from legacy deployments (backward compatible)
 
 With strict access control, comprehensive validation, and flexible deployment modes.

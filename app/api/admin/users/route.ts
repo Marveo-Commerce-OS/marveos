@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
+import { getSession, getCurrentWpUser, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
 
@@ -61,7 +61,7 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const ok = await isSuperAdmin(session.token);
+  const ok = await isAdmin(session.token);
   if (!ok) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   let wpUsers: WpUserRecord[] = [];

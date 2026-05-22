@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { cookies } from 'next/headers';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
+import type { MaintenanceSettings } from '@/lib/types';
 
 export type PortalAccess = 'b2c' | 'b2b';
 
@@ -54,6 +55,241 @@ export interface AuditRecord {
   details?: string;
 }
 
+export type OnboardingStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
+
+export interface OnboardingStepState {
+  step: number;
+  key: string;
+  status: OnboardingStepStatus;
+  retryCount: number;
+  maxRetries: number;
+  startedAt?: string;
+  completedAt?: string;
+  lastError?: string;
+  recoveryActions: string[];
+}
+
+export interface VersionedSchema<T> {
+  version: number;
+  status: 'draft' | 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string;
+  data: T;
+}
+
+export interface PageSchemaData {
+  pages: Array<{
+    id: string;
+    title: string;
+    slug: string;
+    page_type: string;
+    source: string;
+    seo: Record<string, unknown>;
+    components: Array<{ key: string; props?: Record<string, unknown> }>;
+    navigation_visibility: boolean;
+    frontend_visibility: boolean;
+    template: string;
+    status: string;
+  }>;
+}
+
+export interface ComponentSchemaData {
+  components: Array<{
+    key: string;
+    name: string;
+    category: string;
+    fields: string[];
+    allowed_page_types: string[];
+    data_source: string;
+    visibility: string;
+  }>;
+}
+
+export interface ConnectorCommandRecord {
+  id: string;
+  workspaceId: string;
+  auditId: string;
+  type: 'content_mapping_sync' | 'module_activation';
+  payload: Record<string, unknown>;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'rolled_back';
+  createdAt: string;
+  updatedAt: string;
+  attempts: number;
+  lastError?: string;
+}
+
+export interface WorkspaceOrchestration {
+  id: string;
+  name: string;
+  clientOrganizationId?: string;
+  clientOrganizationName?: string;
+  clientSubscriptionId?: string;
+  clientSubscriptionPlan?: AccountPlan;
+  workspaceOwnership?: 'client' | 'internal_demo';
+  businessType: string;
+  country: string;
+  businessModel: string;
+  contentSource: 'wordpress' | 'nextjs';
+  contentBaseUrl: string;
+  planId?: string;
+  websiteType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+  onboardingStepKey?:
+    | 'PLAN_SELECTED'
+    | 'PROFILE_CREATED'
+    | 'WEBSITE_TYPE_SELECTED'
+    | 'BUSINESS_DETAILS_COMPLETED'
+    | 'CONNECTOR_TOKEN_GENERATED'
+    | 'TEMPLATE_SELECTED'
+    | 'DEPLOYMENT_STARTED'
+    | 'WORKSPACE_CREATED'
+    | 'SUPPORT_ASSIGNED'
+    | 'LAUNCH_CHECKLIST_READY';
+  onboardingStatus?:
+    | 'NOT_STARTED'
+    | 'IN_PROGRESS'
+    | 'WAITING_FOR_CLIENT'
+    | 'WAITING_FOR_SUPPORT'
+    | 'DEPLOYING'
+    | 'READY_FOR_REVIEW'
+    | 'READY_FOR_LAUNCH'
+    | 'LIVE'
+    | 'FAILED';
+  businessProfile?: Record<string, unknown>;
+  selectedTemplateId?: string;
+  collectedBusinessData?: Record<string, unknown>;
+  supportRequired?: boolean;
+  onboardingPath?: string;
+  architecture?: string;
+  selectedModules: string[];
+  brandSetup: Record<string, unknown>;
+  onboardingSteps: OnboardingStepState[];
+  currentStep: number;
+  status: 'draft' | 'onboarding' | 'ready_for_launch' | 'launched' | 'blocked';
+  deploymentReadiness: {
+    onboardingComplete: boolean;
+    architectureValidated: boolean;
+    apisReachable: boolean;
+    modulesValid: boolean;
+    frontendValidated: boolean;
+    contentMapped: boolean;
+    integrationsConfigured: boolean;
+  };
+  missingRequirements: string[];
+  recoverySuggestions: string[];
+  rollout: {
+    pageSchemaVersion: number;
+    componentSchemaVersion: number;
+    channel: 'stable' | 'beta';
+    promotedAt?: string;
+  };
+  supportAssignment?: {
+    status: 'UNASSIGNED' | 'ASSIGNED';
+    assignedAt?: string;
+    assignedBy?: string;
+    supportOfficerId?: string;
+    supportOfficerName?: string;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    reason?: string;
+    setupType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+    requiredSkills?: string[];
+    initialNotes?: string;
+  };
+  launchGuardLastCheckedAt?: string;
+  connectorStatus?: ConnectorStatusKey;
+  connectorToken?: string;
+  connectorConnectedAt?: string;
+  connectorLastVerificationAttempt?: string;
+  connectorVerificationError?: string;
+  connectorSiteMetadata?: ConnectorSiteMetadata;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ConnectorStatusKey =
+  | 'NOT_CONNECTED'
+  | 'TOKEN_GENERATED'
+  | 'PENDING_VERIFICATION'
+  | 'CONNECTED'
+  | 'FAILED'
+  | 'SUPPORT_REQUIRED';
+
+export interface ConnectorSiteMetadata {
+  siteUrl?: string;
+  siteName?: string;
+  platform?: string;
+  wordpressVersion?: string;
+  woocommerceEnabled?: boolean;
+  connectorVersion?: string;
+  connectorPluginStatus?: string;
+  siteId?: string;
+  jwtEnabled?: boolean;
+  pageCount?: number;
+  productCount?: number;
+  menuCount?: number;
+  mediaCount?: number;
+  detectedCapabilities?: {
+    statusEndpoint: boolean;
+    siteProfile: boolean;
+    woocommerceDetection: boolean;
+    pagesDiscovery: boolean;
+    productsDiscovery: boolean;
+    navigationDiscovery: boolean;
+    mediaDiscovery: boolean;
+    contentInventory: boolean;
+  };
+  discoveredAt?: string;
+}
+
+export type AccountPlan = 'starter' | 'business' | 'enterprise';
+
+export interface DeploymentLink {
+  id: string;
+  plan: AccountPlan;
+  createdAt: string;
+  expiresAt: string;
+  used: boolean;
+  usedAt?: string;
+  workspaceId?: string;
+  provisioning: {
+    status: 'pending' | 'in_progress' | 'completed' | 'failed';
+    currentStep: number;
+    totalSteps: number;
+    lastError?: string;
+  };
+}
+
+export interface CloudOrchestrationStore {
+  workspaces: Record<string, WorkspaceOrchestration>;
+  pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
+  componentSchemas: Record<string, VersionedSchema<ComponentSchemaData>[]>;
+  commands: ConnectorCommandRecord[];
+  pagePublications: Record<
+    string,
+    {
+      sourceType: 'wordpress' | 'nextjs';
+      baseUrl: string;
+      pageId: string;
+      title: string;
+      sections: Array<Record<string, unknown>>;
+      updatedAt: string;
+    }
+  >;
+  deploymentLinks: Record<string, DeploymentLink>;
+  accountPlan: AccountPlan;
+  accountPlanUpdatedAt: string;
+  lookups: {
+    businessTypes: string[];
+    businessModels: string[];
+    countries: Array<{ code: string; name: string }>;
+  };
+}
+
+export const PLAN_WORKSPACE_LIMITS: Record<AccountPlan, number> = {
+  starter: 1,
+  business: 3,
+  enterprise: 999, // Effectively unlimited
+};
+
 export const ADMIN_MODULE_KEYS = [
   'dashboard',
   'products',
@@ -75,7 +311,9 @@ export interface AdminConfigStore {
   smtp: SmtpConfig;
   forms: FormRoutingRule[];
   roleModuleVisibility: RoleModuleVisibility;
+  maintenance: MaintenanceSettings;
   audit: AuditRecord[];
+  cloud: CloudOrchestrationStore;
 }
 
 const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
@@ -199,10 +437,75 @@ const DEFAULT_STORE: AdminConfigStore = {
       adminSettings: false,
     },
   },
+  maintenance: {
+    site_under_construction: false,
+    under_construction_title: 'We are coming back soon',
+    under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
+  },
   audit: [],
+  cloud: {
+    workspaces: {},
+    pageSchemas: {},
+    componentSchemas: {},
+    commands: [],
+    pagePublications: {},
+    deploymentLinks: {},
+    accountPlan: 'starter',
+    accountPlanUpdatedAt: new Date().toISOString(),
+    lookups: {
+      businessTypes: ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Technology', 'Hospitality', 'Healthcare', 'Education', 'Real Estate'],
+      businessModels: ['B2C', 'B2B'],
+      countries: [
+        { code: 'NG', name: 'Nigeria' },
+        { code: 'US', name: 'United States' },
+        { code: 'GB', name: 'United Kingdom' },
+        { code: 'CA', name: 'Canada' },
+        { code: 'AE', name: 'United Arab Emirates' },
+        { code: 'AU', name: 'Australia' },
+      ],
+    },
+  },
 };
 
 function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore {
+  const rawCloud = (parsed.cloud as unknown as Record<string, unknown> | undefined) ?? undefined;
+  const legacyPageDrafts = rawCloud?.pageDrafts as Record<string, unknown> | undefined;
+  const pagePublicationsRaw = parsed.cloud?.pagePublications as Record<string, unknown> | undefined;
+
+  const sanitizePublications = (input: Record<string, unknown> | undefined) => {
+    if (!input) return {} as CloudOrchestrationStore['pagePublications'];
+
+    const output: CloudOrchestrationStore['pagePublications'] = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (!value || typeof value !== 'object') continue;
+      const row = value as Record<string, unknown>;
+      const sourceType = String(row.sourceType || '').toLowerCase() === 'nextjs' ? 'nextjs' : 'wordpress';
+      const baseUrl = String(row.baseUrl || '').trim();
+      const pageId = String(row.pageId || '').trim();
+      const title = String(row.title || '').trim();
+      const sections = Array.isArray(row.sections)
+        ? row.sections.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+        : [];
+
+      if (!baseUrl || !pageId) continue;
+
+      output[key] = {
+        sourceType,
+        baseUrl,
+        pageId,
+        title: title || pageId,
+        sections,
+        updatedAt: String(row.updatedAt || ''),
+      };
+    }
+
+    return output;
+  };
+
+  const mergedPublications = Object.keys(pagePublicationsRaw || {}).length > 0
+    ? sanitizePublications(pagePublicationsRaw)
+    : sanitizePublications(legacyPageDrafts);
+
   return {
     ...DEFAULT_STORE,
     ...parsed,
@@ -214,7 +517,38 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       ...DEFAULT_STORE.roleModuleVisibility,
       ...(parsed.roleModuleVisibility ?? {}),
     },
+    maintenance: { ...DEFAULT_STORE.maintenance, ...(parsed.maintenance ?? {}) },
     audit: Array.isArray(parsed.audit) ? parsed.audit : [],
+    cloud: {
+      ...DEFAULT_STORE.cloud,
+      ...(parsed.cloud ?? {}),
+      workspaces: parsed.cloud?.workspaces ?? {},
+      pageSchemas: parsed.cloud?.pageSchemas ?? {},
+      componentSchemas: parsed.cloud?.componentSchemas ?? {},
+      commands: Array.isArray(parsed.cloud?.commands) ? parsed.cloud?.commands : [],
+      pagePublications: mergedPublications,
+      deploymentLinks: parsed.cloud?.deploymentLinks ?? {},
+      accountPlan: (['starter', 'business', 'enterprise'].includes(parsed.cloud?.accountPlan ?? '')
+        ? (parsed.cloud?.accountPlan as AccountPlan)
+        : 'starter'),
+      accountPlanUpdatedAt: parsed.cloud?.accountPlanUpdatedAt ?? DEFAULT_STORE.cloud.accountPlanUpdatedAt,
+      lookups: {
+        businessTypes: Array.isArray(parsed.cloud?.lookups?.businessTypes)
+          ? parsed.cloud.lookups.businessTypes.map((item) => String(item)).filter(Boolean)
+          : DEFAULT_STORE.cloud.lookups.businessTypes,
+        businessModels: Array.isArray(parsed.cloud?.lookups?.businessModels)
+          ? parsed.cloud.lookups.businessModels.map((item) => String(item)).filter(Boolean)
+          : DEFAULT_STORE.cloud.lookups.businessModels,
+        countries: Array.isArray(parsed.cloud?.lookups?.countries)
+          ? parsed.cloud.lookups.countries
+              .map((item) => ({
+                code: String(item?.code ?? '').trim().toUpperCase(),
+                name: String(item?.name ?? '').trim(),
+              }))
+              .filter((item) => item.code && item.name)
+          : DEFAULT_STORE.cloud.lookups.countries,
+      },
+    },
   };
 }
 
@@ -316,5 +650,96 @@ export async function appendAuditLog(record: Omit<AuditRecord, 'id' | 'at'>) {
       audit: [entry, ...current.audit].slice(0, 500),
     };
   });
+}
+
+export async function getWorkspaceSupportAssignment(workspaceId: string) {
+  const store = await readAdminStore();
+  const workspace = store.cloud.workspaces[workspaceId];
+  if (!workspace) return null;
+  return workspace.supportAssignment ?? { status: 'UNASSIGNED' as const };
+}
+
+export async function setWorkspaceSupportAssignment(
+  workspaceId: string,
+  assignment: NonNullable<WorkspaceOrchestration['supportAssignment']>,
+) {
+  let updatedWorkspace: WorkspaceOrchestration | null = null;
+
+  await updateAdminStore((current) => {
+    const workspace = current.cloud.workspaces[workspaceId];
+    if (!workspace) return current;
+
+    updatedWorkspace = {
+      ...workspace,
+      supportAssignment: assignment,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        workspaces: {
+          ...current.cloud.workspaces,
+          [workspaceId]: updatedWorkspace,
+        },
+      },
+    };
+  });
+
+  return updatedWorkspace;
+}
+
+export async function getWorkspaceConnectorState(workspaceId: string) {
+  const store = await readAdminStore();
+  const workspace = store.cloud.workspaces[workspaceId];
+  if (!workspace) return null;
+  return {
+    connectorStatus: workspace.connectorStatus ?? ('NOT_CONNECTED' as ConnectorStatusKey),
+    connectorToken: workspace.connectorToken ?? null,
+    connectorConnectedAt: workspace.connectorConnectedAt ?? null,
+    connectorLastVerificationAttempt: workspace.connectorLastVerificationAttempt ?? null,
+    connectorVerificationError: workspace.connectorVerificationError ?? null,
+    connectorSiteMetadata: workspace.connectorSiteMetadata ?? null,
+  };
+}
+
+export async function setWorkspaceConnectorState(
+  workspaceId: string,
+  patch: Partial<Pick<WorkspaceOrchestration,
+    | 'connectorStatus'
+    | 'supportRequired'
+    | 'connectorToken'
+    | 'connectorConnectedAt'
+    | 'connectorLastVerificationAttempt'
+    | 'connectorVerificationError'
+    | 'connectorSiteMetadata'
+  >>,
+) {
+  let updated: WorkspaceOrchestration | null = null;
+
+  await updateAdminStore((current) => {
+    const workspace = current.cloud.workspaces[workspaceId];
+    if (!workspace) return current;
+
+    updated = {
+      ...workspace,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        workspaces: {
+          ...current.cloud.workspaces,
+          [workspaceId]: updated,
+        },
+      },
+    };
+  });
+
+  return updated;
 }
 

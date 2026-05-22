@@ -1,5 +1,11 @@
 'use client';
 
+/**
+ * @deprecated Transitional runtime/provider layer.
+ * Pending migration verification, this file remains for compatibility only.
+ * New runtime/provider work should use root-level components/MarveoProvider.tsx.
+ */
+
 import React, { ReactNode, useEffect, useState } from 'react';
 import { MarveoContext } from '../lib/hooks/useMarveo';
 import type { MarveoClient, MarveoSettings, MarveoContextType } from '../lib/marveo';

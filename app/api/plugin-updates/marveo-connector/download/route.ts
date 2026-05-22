@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import AdmZip from 'adm-zip';
-import { fetchPluginZip, pluginUpdateToken } from '@/src/lib/pluginUpdates';
+import { fetchPluginZip } from '@/src/lib/pluginUpdates';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,17 +36,44 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing tag' }, { status: 400 });
   }
 
-  if (!pluginUpdateToken()) {
-    return NextResponse.json({ error: 'Plugin update token is not configured' }, { status: 500 });
-  }
+  let upstream = await fetchPluginZip(tag);
 
-  const upstream = await fetchPluginZip(tag);
+  // Fallback to codeload archive when GitHub API zipball is rate-limited or unavailable.
   if (!upstream.ok) {
-    return NextResponse.json({ error: 'Unable to download plugin package' }, { status: 502 });
+    upstream = await fetch(`https://codeload.github.com/Marveo-Commerce-OS/marveo-connector/zip/refs/tags/${encodeURIComponent(tag)}`, {
+      cache: 'no-store',
+      redirect: 'follow',
+    });
   }
 
-  const upstreamBuffer = Buffer.from(await upstream.arrayBuffer());
-  const normalizedZip = normalizePluginZip(upstreamBuffer);
+  let normalizedZip: Buffer | null = null;
+
+  if (upstream.ok) {
+    const upstreamBuffer = Buffer.from(await upstream.arrayBuffer());
+    normalizedZip = normalizePluginZip(upstreamBuffer);
+  } else {
+    const localVersion = tag.replace(/^v/i, '');
+    const localPackagePath = path.join(
+      process.cwd(),
+      'public',
+      'plugin-packages',
+      `marveo-connector-${localVersion}.zip`,
+    );
+
+    try {
+      const localZip = await readFile(localPackagePath);
+      normalizedZip = Buffer.from(localZip);
+    } catch {
+      return NextResponse.json(
+        { error: `Unable to download plugin package for ${tag}. Upstream responded ${upstream.status} and local package fallback was not found.` },
+        { status: 502 },
+      );
+    }
+  }
+
+  if (!normalizedZip) {
+    return NextResponse.json({ error: 'Plugin package was empty' }, { status: 502 });
+  }
 
   const filename = `marveo-connector-${tag.replace(/^v/i, '')}.zip`;
 

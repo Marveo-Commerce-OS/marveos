@@ -524,15 +524,15 @@ wp option update marveo_github_token 'ghp_xxxxxxxx'
 
 ---
 
-## Migration from PRAG
+## Migration from Legacy Deployments
 
-PRAG had limited access control. When migrating:
+Legacy deployments may have limited access control. When migrating:
 
-1. **Detect PRAG settings** in WordPress options
+1. **Detect legacy settings** in WordPress options
 2. **Map to new permission model**:
-   - PRAG settings → Client settings (Business Profile, Brand, Content)
-   - PRAG API URLs → System settings (Locked)
-3. **Create backup** of old PRAG options before migration
+  - Legacy settings → Client settings (Business Profile, Brand, Content)
+  - Legacy API URLs → System settings (Locked)
+3. **Create backup** of old options before migration
 4. **Set super admin flag** on primary account for system settings access
 5. **Document for client** which team members should be Admins vs Super Admins
 

@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { readAdminStore } from '@/lib/adminStore';
+import { hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
 import { getConfig } from '@/src/config/client';
 
 const getWpApiUrl = () => {
   const config = getConfig();
   return config.wordpressApiUrl || 'https://localhost/wp-json';
 };
+
+const isDemoAuthEnabled = () =>
+  process.env.NODE_ENV !== 'production' &&
+  (process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true');
+
+const getDemoCredentials = () => ({
+  username: process.env.MARVEO_DEMO_USERNAME || 'demo-admin',
+  password: process.env.MARVEO_DEMO_PASSWORD || 'demo-pass-2026',
+});
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 10000) => {
   const controller = new AbortController();
@@ -32,6 +42,28 @@ export async function POST(req: NextRequest) {
     if (!username || !password) {
       return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
     }
+
+    if (isDemoAuthEnabled()) {
+      const demo = getDemoCredentials();
+      if (username !== demo.username || password !== demo.password) {
+        return NextResponse.json({ error: 'Invalid demo credentials' }, { status: 401 });
+      }
+
+      const cookieStore = await cookies();
+      const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
+      cookieStore.set('admin_token', `demo-token-${Date.now()}`, opts);
+      cookieStore.set('admin_user', JSON.stringify({
+        id: 1,
+        user_display_name: 'Demo Admin',
+        user_email: 'demo@marveo.local',
+        isAdmin: true,
+        roles: ['administrator'],
+        portals: ['b2c'],
+      }), opts);
+
+      return NextResponse.json({ success: true, redirect: '/master' });
+    }
+
     let wpRes;
     try {
       wpRes = await fetchWithTimeout(`${WP_API_URL}/jwt-auth/v1/token`, {
@@ -66,10 +98,12 @@ export async function POST(req: NextRequest) {
     }
 
     const userData = await userRes.json();
-    const allowed = userData?.roles?.some((r: string) => ['administrator', 'shop_manager'].includes(r.toLowerCase()));
-    
-    if (!allowed) {
-      return NextResponse.json({ error: 'Your account does not have access to this operations portal.' }, { status: 403 });
+    const roles = normalizeRoles(userData?.roles);
+    const internalAccess = hasInternalPlatformAccess(roles);
+    const clientAccess = hasClientWorkspaceAccess(roles);
+
+    if (!internalAccess && !clientAccess) {
+      return NextResponse.json({ error: 'Your account does not have access to Marveo platform surfaces.' }, { status: 403 });
     }
 
     const store = await readAdminStore();
@@ -85,12 +119,12 @@ export async function POST(req: NextRequest) {
       id: userData.id,
       user_display_name: data.user_display_name,
       user_email: data.user_email,
-      isAdmin: allowed,
+      isAdmin: internalAccess,
       roles: Array.isArray(userData.roles) ? userData.roles : [],
       portals: userState?.portals ?? ['b2c'],
     }), opts);
 
-    return NextResponse.json({ success: true, redirect: '/portal' });
+    return NextResponse.json({ success: true, redirect: internalAccess ? '/master' : '/portal' });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 });

@@ -17,6 +17,17 @@ interface RoleModuleVisibilityPayload {
   [role: string]: Partial<Record<(typeof ADMIN_MODULE_KEYS)[number], boolean>>;
 }
 
+interface LookupCountryPayload {
+  code?: unknown;
+  name?: unknown;
+}
+
+interface LookupsPayload {
+  businessTypes?: unknown;
+  businessModels?: unknown;
+  countries?: unknown;
+}
+
 async function discoverForms() {
   try {
     const res = await fetch(WP_API_URL, { cache: 'no-store' });
@@ -74,6 +85,9 @@ export async function GET() {
     tracking: store.tracking,
     smtp: store.smtp,
     forms: store.forms,
+    maintenance: store.maintenance,
+    lookups: store.cloud.lookups,
+    module_access: store.roleModuleVisibility,
     accessControl: {
       roleModuleVisibility: store.roleModuleVisibility,
     },
@@ -90,16 +104,40 @@ export async function PUT(req: NextRequest) {
   const actor = await getCurrentWpUser(session.token);
   const body = await req.json();
 
-  const incomingRoleModuleVisibility = body?.accessControl?.roleModuleVisibility as RoleModuleVisibilityPayload | undefined;
-  const sanitizedRoleModuleVisibility = incomingRoleModuleVisibility
+  // Accept role visibility from either `module_access` (frontend) or `accessControl.roleModuleVisibility` (legacy)
+  const rawRoleVisibility = (body?.module_access ?? body?.accessControl?.roleModuleVisibility) as RoleModuleVisibilityPayload | undefined;
+  const sanitizedRoleModuleVisibility = rawRoleVisibility
     ? Object.fromEntries(
-        Object.entries(incomingRoleModuleVisibility).map(([role, modules]) => [
+        Object.entries(rawRoleVisibility).map(([role, modules]) => [
           String(role),
           Object.fromEntries(
             ADMIN_MODULE_KEYS.map((key) => [key, Boolean(modules?.[key])]),
           ),
         ]),
       )
+    : undefined;
+
+  const rawLookups = body?.lookups as LookupsPayload | undefined;
+  const sanitizedLookups = rawLookups
+    ? {
+        businessTypes: Array.isArray(rawLookups.businessTypes)
+          ? rawLookups.businessTypes.map((item) => String(item).trim()).filter(Boolean)
+          : undefined,
+        businessModels: Array.isArray(rawLookups.businessModels)
+          ? rawLookups.businessModels.map((item) => String(item).trim()).filter(Boolean)
+          : undefined,
+        countries: Array.isArray(rawLookups.countries)
+          ? rawLookups.countries
+              .map((item) => {
+                const row = item as LookupCountryPayload;
+                return {
+                  code: String(row?.code ?? '').trim().toUpperCase(),
+                  name: String(row?.name ?? '').trim(),
+                };
+              })
+              .filter((item) => item.code && item.name)
+          : undefined,
+      }
     : undefined;
 
   try {
@@ -124,13 +162,29 @@ export async function PUT(req: NextRequest) {
           }))
         : current.forms,
       roleModuleVisibility: sanitizedRoleModuleVisibility ?? current.roleModuleVisibility,
+      maintenance: body.maintenance
+        ? {
+            site_under_construction: Boolean(body.maintenance.site_under_construction ?? current.maintenance.site_under_construction),
+            under_construction_title: String(body.maintenance.under_construction_title ?? current.maintenance.under_construction_title),
+            under_construction_message: String(body.maintenance.under_construction_message ?? current.maintenance.under_construction_message),
+          }
+        : current.maintenance,
+      cloud: {
+        ...current.cloud,
+        lookups: {
+          ...current.cloud.lookups,
+          ...(sanitizedLookups?.businessTypes ? { businessTypes: sanitizedLookups.businessTypes } : {}),
+          ...(sanitizedLookups?.businessModels ? { businessModels: sanitizedLookups.businessModels } : {}),
+          ...(sanitizedLookups?.countries ? { countries: sanitizedLookups.countries } : {}),
+        },
+      },
     }));
 
     await appendAuditLog({
       actorEmail: actor?.email ?? session.user?.user_email ?? 'unknown',
       action: 'settings.updated',
       target: 'ecommerce-admin-settings',
-      details: 'Updated tracking, SMTP, forms routing, or backend access settings.',
+      details: 'Updated tracking, SMTP, forms routing, backend access settings, or maintenance mode.',
     });
 
     return NextResponse.json({
@@ -138,6 +192,9 @@ export async function PUT(req: NextRequest) {
       tracking: next.tracking,
       smtp: next.smtp,
       forms: next.forms,
+      maintenance: next.maintenance,
+      lookups: next.cloud.lookups,
+      module_access: next.roleModuleVisibility,
       accessControl: {
         roleModuleVisibility: next.roleModuleVisibility,
       },
@@ -147,3 +204,6 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+// Frontend uses POST; alias it to PUT for compatibility
+export { PUT as POST };

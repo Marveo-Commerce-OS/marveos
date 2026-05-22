@@ -1,0 +1,1316 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import { AnimatedChecklist } from './AnimatedChecklist';
+import { AnimatedProgressRail } from './AnimatedProgressRail';
+import { GlassCard } from './GlassCard';
+import { StatusPill } from './StatusPill';
+import { TerminalPanel } from './TerminalPanel';
+import { MVP_ONBOARDING_STEP_SEQUENCE, WEBSITE_TYPE_OPTIONS } from '@/src/contexts/onboarding/constants';
+import {
+  ONBOARDING_BUSINESS_MODEL_OPTIONS,
+  ONBOARDING_BUSINESS_TYPE_OPTIONS,
+  ONBOARDING_COUNTRY_OPTIONS,
+} from '@/src/config/onboardingProfileOptions';
+import type {
+  CustomHeadlessDataContract,
+  ExistingWebsiteDataContract,
+  NewWebsiteDataContract,
+  OnboardingStatusKey,
+  WebsiteTypeKey,
+} from '@/src/contexts/onboarding/types';
+import type { OnboardingFlowContract } from '@/src/contexts/onboarding/onboarding-flow.contract';
+import type { LaunchChecklistContract } from '@/src/contexts/onboarding/onboarding-status.contract';
+import type { SupportAssignmentContract } from '@/src/contexts/support/support-assignment.contract';
+
+type ConnectorStatusKey =
+  | 'NOT_CONNECTED'
+  | 'TOKEN_GENERATED'
+  | 'PENDING_VERIFICATION'
+  | 'CONNECTED'
+  | 'FAILED'
+  | 'SUPPORT_REQUIRED';
+
+interface ConnectorSiteMetadata {
+  siteUrl?: string;
+  siteName?: string;
+  platform?: string;
+  wordpressVersion?: string;
+  woocommerceEnabled?: boolean;
+  connectorVersion?: string;
+  connectorPluginStatus?: string;
+  siteId?: string;
+  jwtEnabled?: boolean;
+  pageCount?: number;
+  productCount?: number;
+  menuCount?: number;
+  mediaCount?: number;
+  discoveredAt?: string;
+}
+
+type WizardStep =
+  | 'plan'
+  | 'profile'
+  | 'website_type'
+  | 'details'
+  | 'review'
+  | 'deploying'
+  | 'ready';
+
+interface ProfileBasics {
+  businessName: string;
+  businessType: string;
+  country: string;
+  businessModel: string;
+  contactEmail: string;
+  contactPhone: string;
+  domain: string;
+}
+
+interface DraftState {
+  wizardStep: WizardStep;
+  planId: string;
+  websiteType: WebsiteTypeKey | null;
+  profile: ProfileBasics;
+  selectedTemplateId: string;
+  supportRequired: boolean;
+  existingConnectionChoice: 'connector' | 'manual';
+  newWebsiteData: NewWebsiteDataContract;
+  existingWebsiteData: ExistingWebsiteDataContract;
+  customHeadlessData: CustomHeadlessDataContract;
+}
+
+function isWordPressLikeStack(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return normalized.includes('wordpress') || normalized.includes('woocommerce');
+}
+
+type PhaseStatus = 'pending' | 'running' | 'done' | 'failed';
+
+interface PhaseItem {
+  key: 'prepare' | 'connect' | 'support' | 'check';
+  label: string;
+  status: PhaseStatus;
+  note?: string;
+}
+
+interface ProfileLookupsState {
+  businessTypes: string[];
+  businessModels: string[];
+  countries: string[];
+}
+
+const STORAGE_KEY = 'marveo.mvp.onboarding.v1';
+
+const PLAN_OPTIONS = [
+  { id: 'starter', name: 'Starter', description: 'For early stage brands and pilots.' },
+  { id: 'business', name: 'Business', description: 'Balanced setup for growing teams.' },
+  { id: 'enterprise', name: 'Enterprise', description: 'Advanced governance and support.' },
+];
+
+const TEMPLATE_OPTIONS = [
+  { id: 'template-business', name: 'Business Template', description: 'Company profile and services focused.' },
+  { id: 'template-ecommerce', name: 'Ecommerce Template', description: 'Catalog and conversion first layout.' },
+  { id: 'template-landing', name: 'Landing Template', description: 'Fast launch page with strong CTA flow.' },
+];
+
+const CONNECTOR_DOWNLOAD_URL = '/plugin-packages/marveo-connector-1.0.16.zip';
+const CONNECTOR_INSTALL_GUIDE_URL = process.env.NEXT_PUBLIC_CONNECTOR_INSTALL_GUIDE_URL || '/docs/connector-installation';
+
+const INITIAL_PHASES: PhaseItem[] = [
+  { key: 'prepare', label: 'Prepare workspace', status: 'pending' },
+  { key: 'connect', label: 'Connect website', status: 'pending' },
+  { key: 'support', label: 'Assign support', status: 'pending' },
+  { key: 'check', label: 'Run launch checks', status: 'pending' },
+];
+
+const DEFAULT_PROFILE_LOOKUPS: ProfileLookupsState = {
+  businessTypes: ONBOARDING_BUSINESS_TYPE_OPTIONS.map((option) => option.value),
+  businessModels: ONBOARDING_BUSINESS_MODEL_OPTIONS.map((option) => option.value),
+  countries: ONBOARDING_COUNTRY_OPTIONS.map((option) => option.value),
+};
+
+const BUSINESS_MODEL_LABELS: Record<string, string> = {
+  B2C: 'Business to Consumer',
+  B2B: 'Business to Business',
+};
+
+const BUSINESS_MODEL_TOOLTIPS: Record<string, string> = {
+  B2C: 'Business to Consumer: direct sales to individual customers.',
+  B2B: 'Business to Business: sales to companies, usually with account or bulk workflows.',
+};
+
+function withCurrentOption(options: string[], current: string): string[] {
+  const value = current.trim();
+  if (!value) return options;
+  return options.includes(value) ? options : [value, ...options];
+}
+
+function toLabel(raw: string): string {
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function prettyWebsiteType(value: WebsiteTypeKey | null): string {
+  if (!value) return 'Not selected';
+  if (value === 'NEW_WEBSITE') return 'New Website';
+  if (value === 'EXISTING_WEBSITE') return 'Existing Website';
+  return 'Custom / Headless';
+}
+
+function prettyConnectorStatus(value: ConnectorStatusKey): string {
+  if (value === 'NOT_CONNECTED') return 'Not connected';
+  if (value === 'TOKEN_GENERATED') return 'Token generated';
+  if (value === 'PENDING_VERIFICATION') return 'Pending verification';
+  if (value === 'CONNECTED') return 'Connected';
+  if (value === 'FAILED') return 'Connection failed';
+  if (value === 'SUPPORT_REQUIRED') return 'Support required';
+  return toLabel(value);
+}
+
+function normalizeOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  try {
+    const withScheme = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`;
+    return new URL(withScheme).origin.toLowerCase();
+  } catch {
+    return trimmed.toLowerCase().replace(/\/$/, '');
+  }
+}
+
+function prettyWooCommerceState(value: boolean | undefined): string {
+  if (typeof value !== 'boolean') return 'Unknown';
+  return value ? 'Installed' : 'Not installed';
+}
+
+function defaultDraft(): DraftState {
+  return {
+    wizardStep: 'plan',
+    planId: 'starter',
+    websiteType: null,
+    profile: {
+      businessName: '',
+      businessType: 'Retail',
+      country: 'United States',
+      businessModel: 'B2C',
+      contactEmail: '',
+      contactPhone: '',
+      domain: '',
+    },
+    selectedTemplateId: 'template-business',
+    supportRequired: false,
+    existingConnectionChoice: 'connector',
+    newWebsiteData: {
+      businessName: '',
+      businessType: '',
+      domain: '',
+      frontendDomain: '',
+      backendCmsSubdomain: '',
+      domainStrategy: 'HEADLESS_WORDPRESS',
+      logo: '',
+      brandColors: {
+        primary: '#0f172a',
+        secondary: '#334155',
+      },
+      pagesNeeded: ['Home', 'About', 'Contact'],
+      contactInfo: {
+        email: '',
+        phone: '',
+      },
+      socialLinks: [],
+      selectedTemplateId: 'template-business',
+    },
+    existingWebsiteData: {
+      domain: '',
+      wordpressAdminUrl: '',
+      currentPlatform: 'WordPress/WooCommerce',
+      connectionMethod: 'connector',
+      connectorToken: '',
+      manualAccessRequired: false,
+      supportRequired: false,
+    },
+    customHeadlessData: {
+      stack: '',
+      apiDetails: '',
+      developerContact: '',
+      integrationNotes: '',
+      supportRequired: true,
+    },
+  };
+}
+
+function toApiBaseUrl(domainOrUrl: string): string {
+  const input = domainOrUrl.trim();
+  if (!input) return 'https://example.com';
+  if (input.startsWith('http://') || input.startsWith('https://')) return input;
+  return `https://${input}`;
+}
+
+async function safeJson<T>(res: Response): Promise<T | null> {
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+export default function SetupMvpPage() {
+  const enabled = process.env.NEXT_PUBLIC_ENABLE_MVP_ONBOARDING !== 'false';
+  const [draft, setDraft] = useState<DraftState>(defaultDraft());
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [phases, setPhases] = useState<PhaseItem[]>(INITIAL_PHASES);
+  const [checklist, setChecklist] = useState<LaunchChecklistContract | null>(null);
+  const [profileLookups, setProfileLookups] = useState<ProfileLookupsState>(DEFAULT_PROFILE_LOOKUPS);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectorStatusKey>('NOT_CONNECTED');
+  const [connectorSiteMetadata, setConnectorSiteMetadata] = useState<ConnectorSiteMetadata | null>(null);
+  const [lastVerificationAt, setLastVerificationAt] = useState<string | null>(null);
+  const [showConnectorToken, setShowConnectorToken] = useState(false);
+  const [connectorTokenFocused, setConnectorTokenFocused] = useState(false);
+  const [connectorCheck, setConnectorCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'failed'; message?: string }>({
+    status: 'idle',
+  });
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<DraftState>;
+      setDraft((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // Ignore malformed local draft.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore local storage failures.
+    }
+  }, [draft]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfileLookups() {
+      try {
+        const response = await fetch('/api/cloud/lookups', { method: 'GET' });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as {
+          lookups?: {
+            businessTypes?: string[];
+            businessModels?: string[];
+            countries?: Array<{ code?: string; name?: string }>;
+          };
+        };
+
+        if (cancelled) return;
+
+        const businessTypes = Array.isArray(data?.lookups?.businessTypes)
+          ? data.lookups.businessTypes.map((item) => String(item).trim()).filter(Boolean)
+          : DEFAULT_PROFILE_LOOKUPS.businessTypes;
+
+        const businessModels = Array.isArray(data?.lookups?.businessModels)
+          ? data.lookups.businessModels.map((item) => String(item).trim()).filter(Boolean)
+          : DEFAULT_PROFILE_LOOKUPS.businessModels;
+
+        const countries = Array.isArray(data?.lookups?.countries)
+          ? data.lookups.countries.map((item) => String(item?.name ?? '').trim()).filter(Boolean)
+          : DEFAULT_PROFILE_LOOKUPS.countries;
+
+        setProfileLookups({
+          businessTypes: businessTypes.length > 0 ? businessTypes : DEFAULT_PROFILE_LOOKUPS.businessTypes,
+          businessModels: businessModels.length > 0 ? businessModels : DEFAULT_PROFILE_LOOKUPS.businessModels,
+          countries: countries.length > 0 ? countries : DEFAULT_PROFILE_LOOKUPS.countries,
+        });
+      } catch {
+        // Keep local fallback defaults if API is unavailable.
+      }
+    }
+
+    void loadProfileLookups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const supportNeeded = useMemo(() => {
+    if (draft.websiteType === 'CUSTOM_HEADLESS') return true;
+    if (draft.websiteType === 'EXISTING_WEBSITE') {
+      return draft.existingConnectionChoice === 'manual' || draft.existingWebsiteData.supportRequired;
+    }
+    return draft.supportRequired;
+  }, [draft]);
+
+  const flowSummary = useMemo<OnboardingFlowContract | null>(() => {
+    if (!draft.websiteType) return null;
+
+    const record = {
+      clientId: draft.profile.contactEmail || 'pending-client',
+      workspaceId: workspaceId || undefined,
+      planId: draft.planId,
+      websiteType: draft.websiteType,
+      status: 'IN_PROGRESS' as OnboardingStatusKey,
+      steps: MVP_ONBOARDING_STEP_SEQUENCE.map((step) => ({ step, completed: false })),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (draft.websiteType === 'NEW_WEBSITE') {
+      return {
+        stepSequence: MVP_ONBOARDING_STEP_SEQUENCE,
+        websiteType: draft.websiteType,
+        record,
+        websiteSetup: { websiteType: 'NEW_WEBSITE', data: draft.newWebsiteData },
+      };
+    }
+
+    if (draft.websiteType === 'EXISTING_WEBSITE') {
+      return {
+        stepSequence: MVP_ONBOARDING_STEP_SEQUENCE,
+        websiteType: draft.websiteType,
+        record,
+        websiteSetup: { websiteType: 'EXISTING_WEBSITE', data: draft.existingWebsiteData },
+      };
+    }
+
+    return {
+      stepSequence: MVP_ONBOARDING_STEP_SEQUENCE,
+      websiteType: draft.websiteType,
+      record,
+      websiteSetup: { websiteType: 'CUSTOM_HEADLESS', data: draft.customHeadlessData },
+    };
+  }, [draft, workspaceId]);
+
+  const canMoveFromPlan = Boolean(draft.planId);
+  const canMoveFromProfile = Boolean(
+    draft.profile.businessName.trim() &&
+      draft.profile.businessType.trim() &&
+      draft.profile.businessModel.trim() &&
+      draft.profile.contactEmail.trim(),
+  );
+  const canMoveFromType = Boolean(draft.websiteType);
+
+  const discoverySummary = useMemo(() => {
+    if (!connectorSiteMetadata) return [];
+
+    const lines = ['We discovered:'];
+    if (typeof connectorSiteMetadata.pageCount === 'number') lines.push(`- ${connectorSiteMetadata.pageCount} Pages`);
+    if (typeof connectorSiteMetadata.menuCount === 'number') lines.push(`- ${connectorSiteMetadata.menuCount} Menus`);
+    if (typeof connectorSiteMetadata.productCount === 'number' && connectorSiteMetadata.woocommerceEnabled) {
+      lines.push(`- ${connectorSiteMetadata.productCount} Products`);
+    }
+    lines.push(`- WooCommerce ${prettyWooCommerceState(connectorSiteMetadata.woocommerceEnabled).toLowerCase()}`);
+    lines.push('Ready to continue?');
+    return lines;
+  }, [connectorSiteMetadata]);
+
+  function setWizardStep(step: WizardStep) {
+    setDraft((prev) => ({ ...prev, wizardStep: step }));
+    setError('');
+  }
+
+  function withPhaseStatus(key: PhaseItem['key'], status: PhaseStatus, note?: string) {
+    setPhases((prev) => prev.map((phase) => (phase.key === key ? { ...phase, status, note } : phase)));
+  }
+
+  async function callOnboardingUpdate(nextWorkspaceId: string, payload: Record<string, unknown>) {
+    const res = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/onboarding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const data = await safeJson<{ error?: string }>(res);
+      throw new Error(data?.error || 'Failed to save onboarding progress');
+    }
+  }
+
+  function requestSupportSetup() {
+    setDraft((prev) => ({
+      ...prev,
+      existingConnectionChoice: 'manual',
+      existingWebsiteData: {
+        ...prev.existingWebsiteData,
+        connectionMethod: 'manual',
+        manualAccessRequired: true,
+        supportRequired: true,
+      },
+    }));
+    setConnectionStatus('SUPPORT_REQUIRED');
+    setConnectorCheck({ status: 'failed', message: 'Our setup team can help install the connector, verify your WordPress site, and complete the connection safely.' });
+  }
+
+  function clearConnectorToken() {
+    setDraft((prev) => ({
+      ...prev,
+      existingWebsiteData: {
+        ...prev.existingWebsiteData,
+        connectorToken: '',
+      },
+    }));
+    setConnectionStatus('NOT_CONNECTED');
+    setConnectorSiteMetadata(null);
+    setLastVerificationAt(null);
+    setConnectorCheck({ status: 'idle' });
+    setShowConnectorToken(false);
+  }
+
+  async function checkConnectorPlugin() {
+    const domain = (draft.existingWebsiteData.domain || draft.profile.domain).trim();
+    const token = draft.existingWebsiteData.connectorToken.trim();
+    const submittedOrigin = normalizeOrigin(domain);
+    if (!domain) {
+      setConnectorCheck({ status: 'failed', message: 'Please provide a domain first.' });
+      return;
+    }
+    if (!token) {
+      setConnectorCheck({ status: 'failed', message: 'Paste the Generated Secure Connection Token from the WordPress connector first, then verify the WordPress connection.' });
+      return;
+    }
+
+    setConnectorCheck({ status: 'checking' });
+    setConnectionStatus('PENDING_VERIFICATION');
+    setLastVerificationAt(new Date().toISOString());
+
+    try {
+      const response = await fetch('/api/cloud/connector/preflight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain }),
+      });
+
+      const data = await safeJson<{
+        verified?: boolean;
+        connectorStatus?: ConnectorStatusKey;
+        siteMetadata?: ConnectorSiteMetadata;
+        error?: string;
+      }>(response);
+
+      if (!data?.verified || !data.siteMetadata) {
+        setConnectionStatus('FAILED');
+        setConnectorSiteMetadata(null);
+        setConnectorCheck({ status: 'failed', message: data?.error || 'Plugin endpoint is not reachable.' });
+        return;
+      }
+
+      const verifiedOrigin = normalizeOrigin(data.siteOrigin || data.siteMetadata.siteUrl || '');
+      if (submittedOrigin && verifiedOrigin && submittedOrigin !== verifiedOrigin) {
+        setConnectionStatus('FAILED');
+        setConnectorSiteMetadata(null);
+        setConnectorCheck({
+          status: 'failed',
+          message: 'This token does not match the website domain entered. Please confirm the WordPress site and token.',
+        });
+        return;
+      }
+
+      setConnectionStatus('CONNECTED');
+      setConnectorSiteMetadata(data.siteMetadata);
+      setDraft((prev) => ({
+        ...prev,
+        existingWebsiteData: {
+          ...prev.existingWebsiteData,
+          currentPlatform: data.siteMetadata?.platform || prev.existingWebsiteData.currentPlatform,
+        },
+      }));
+      setConnectorCheck({ status: 'ok', message: 'Connector verified. Site metadata detected successfully.' });
+    } catch {
+      setConnectionStatus('FAILED');
+      setConnectorCheck({ status: 'failed', message: 'Could not verify plugin right now.' });
+    }
+  }
+
+  async function startDeployment() {
+    if (!draft.websiteType) {
+      setError('Please choose a website type first.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setChecklist(null);
+    setPhases(INITIAL_PHASES);
+    setWizardStep('deploying');
+
+    try {
+      const businessProfile = {
+        businessName: draft.profile.businessName,
+        businessType: draft.profile.businessType,
+        country: draft.profile.country,
+        businessModel: draft.profile.businessModel,
+        contactEmail: draft.profile.contactEmail,
+        contactPhone: draft.profile.contactPhone,
+        domain: draft.profile.domain,
+      };
+
+      const collectedBusinessData =
+        draft.websiteType === 'NEW_WEBSITE'
+          ? draft.newWebsiteData
+          : draft.websiteType === 'EXISTING_WEBSITE'
+            ? draft.existingWebsiteData
+            : draft.customHeadlessData;
+
+      const contentBaseUrl =
+        draft.websiteType === 'NEW_WEBSITE'
+          ? toApiBaseUrl(draft.newWebsiteData.frontendDomain || draft.newWebsiteData.domain || draft.profile.domain)
+          : draft.websiteType === 'EXISTING_WEBSITE'
+            ? toApiBaseUrl(draft.existingWebsiteData.domain || draft.profile.domain)
+            : toApiBaseUrl(draft.profile.domain || 'headless.marveo.local');
+
+      const effectiveSupportNeededBase =
+        draft.websiteType === 'EXISTING_WEBSITE'
+          ? draft.existingConnectionChoice === 'manual' || draft.existingWebsiteData.supportRequired
+          : supportNeeded;
+      let effectiveSupportNeeded = effectiveSupportNeededBase;
+
+      withPhaseStatus('prepare', 'running', 'Preparing your workspace');
+
+      const createRes = await fetch('/api/cloud/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: draft.profile.businessName || 'Marveo Workspace',
+          businessType: draft.profile.businessType || 'Retail',
+          country: draft.profile.country || 'United States',
+          businessModel: draft.profile.businessModel || 'B2C',
+          contentSource: draft.websiteType === 'CUSTOM_HEADLESS' ? 'nextjs' : 'wordpress',
+          contentBaseUrl,
+          planId: draft.planId,
+          websiteType: draft.websiteType,
+          businessProfile,
+          selectedTemplateId: draft.selectedTemplateId,
+          supportRequired: effectiveSupportNeeded,
+        }),
+      });
+
+      if (!createRes.ok) {
+        const data = await safeJson<{ error?: string }>(createRes);
+        throw new Error(data?.error || 'Failed to create workspace');
+      }
+
+      const createData = await safeJson<{ workspace?: { id: string } }>(createRes);
+      const nextWorkspaceId = createData?.workspace?.id;
+      if (!nextWorkspaceId) throw new Error('Workspace id was not returned.');
+
+      setWorkspaceId(nextWorkspaceId);
+      withPhaseStatus('prepare', 'done', 'Workspace prepared');
+
+      withPhaseStatus('connect', 'running', 'Saving onboarding details');
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        step: 1,
+        action: 'complete',
+        onboardingStepKey: 'PLAN_SELECTED',
+        onboardingStatus: 'IN_PROGRESS',
+        websiteType: draft.websiteType,
+      });
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'PROFILE_CREATED',
+        action: 'complete',
+        onboardingStatus: 'IN_PROGRESS',
+      });
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'WEBSITE_TYPE_SELECTED',
+        action: 'complete',
+        websiteType: draft.websiteType,
+        onboardingStatus: 'IN_PROGRESS',
+      });
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'BUSINESS_DETAILS_COMPLETED',
+        action: 'complete',
+        websiteType: draft.websiteType,
+        onboardingStatus: 'IN_PROGRESS',
+        collectedBusinessData,
+        supportRequired: effectiveSupportNeeded,
+      });
+
+      if (draft.websiteType === 'EXISTING_WEBSITE' && draft.existingConnectionChoice === 'connector') {
+        const connectorToken = draft.existingWebsiteData.connectorToken.trim();
+        if (!connectorToken) {
+          throw new Error('Paste the Generated Secure Connection Token before deployment.');
+        }
+
+        await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'set_token', connectorToken }),
+        });
+
+        setConnectionStatus('TOKEN_GENERATED');
+
+        await callOnboardingUpdate(nextWorkspaceId, {
+          onboardingStepKey: 'CONNECTOR_TOKEN_GENERATED',
+          action: 'complete',
+          onboardingStatus: 'IN_PROGRESS',
+          websiteType: draft.websiteType,
+          connectorToken,
+        });
+
+        const verifyDomain = draft.existingWebsiteData.domain || draft.profile.domain;
+        if (verifyDomain.trim()) {
+          const submittedOrigin = normalizeOrigin(verifyDomain);
+          setConnectionStatus('PENDING_VERIFICATION');
+          const verifyRes = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: verifyDomain, connectorToken }),
+          });
+
+          const verifyData = await safeJson<{
+            verified?: boolean;
+            connectorStatus?: ConnectorStatusKey;
+            siteMetadata?: ConnectorSiteMetadata;
+            error?: string;
+            siteOrigin?: string;
+          }>(verifyRes);
+
+          setLastVerificationAt(new Date().toISOString());
+
+          if (!verifyRes.ok || !verifyData?.verified) {
+            effectiveSupportNeeded = true;
+            setConnectionStatus('FAILED');
+            setConnectorCheck({ status: 'failed', message: verifyData?.error || 'Connector verification failed. Support setup required.' });
+
+            await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'update_status', connectorStatus: 'FAILED' }),
+            });
+          } else {
+            const verifiedOrigin = normalizeOrigin(verifyData.siteOrigin || verifyData.siteMetadata?.siteUrl || '');
+            if (submittedOrigin && verifiedOrigin && submittedOrigin !== verifiedOrigin) {
+              effectiveSupportNeeded = true;
+              setConnectionStatus('FAILED');
+              setConnectorSiteMetadata(null);
+              setConnectorCheck({
+                status: 'failed',
+                message: 'This token does not match the website domain entered. Please confirm the WordPress site and token.',
+              });
+
+              await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'update_status', connectorStatus: 'FAILED' }),
+              });
+
+              throw new Error('This token does not match the website domain entered. Please confirm the WordPress site and token.');
+            }
+
+            setConnectionStatus('CONNECTED');
+            setConnectorSiteMetadata(verifyData.siteMetadata || null);
+            setDraft((prev) => ({
+              ...prev,
+              existingWebsiteData: {
+                ...prev.existingWebsiteData,
+                currentPlatform: verifyData.siteMetadata?.platform || prev.existingWebsiteData.currentPlatform,
+              },
+            }));
+            setConnectorCheck({ status: 'ok', message: 'Connector verified and linked to workspace.' });
+          }
+        } else {
+          effectiveSupportNeeded = true;
+          setConnectionStatus('SUPPORT_REQUIRED');
+          setConnectorCheck({ status: 'failed', message: 'No domain was provided. Support setup required.' });
+
+          await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update_status', connectorStatus: 'SUPPORT_REQUIRED' }),
+          });
+        }
+      } else if (draft.websiteType === 'EXISTING_WEBSITE' && draft.existingConnectionChoice === 'manual') {
+        setConnectionStatus('SUPPORT_REQUIRED');
+        await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_status', connectorStatus: 'SUPPORT_REQUIRED' }),
+        });
+      }
+
+      if (draft.websiteType === 'NEW_WEBSITE') {
+        await callOnboardingUpdate(nextWorkspaceId, {
+          onboardingStepKey: 'TEMPLATE_SELECTED',
+          action: 'complete',
+          onboardingStatus: 'IN_PROGRESS',
+          websiteType: draft.websiteType,
+        });
+      }
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'DEPLOYMENT_STARTED',
+        action: 'complete',
+        onboardingStatus: 'DEPLOYING',
+        websiteType: draft.websiteType,
+      });
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'WORKSPACE_CREATED',
+        action: 'complete',
+        onboardingStatus: 'IN_PROGRESS',
+        websiteType: draft.websiteType,
+      });
+
+      withPhaseStatus('connect', 'done', 'Website setup details saved');
+
+      withPhaseStatus('support', 'running', 'Assigning support officer');
+
+      if (effectiveSupportNeeded) {
+        const supportPayload: SupportAssignmentContract = {
+          workspaceId: nextWorkspaceId,
+          clientId: draft.profile.contactEmail || draft.profile.businessName,
+          priority: draft.websiteType === 'CUSTOM_HEADLESS' ? 'HIGH' : 'MEDIUM',
+          reason:
+            draft.websiteType === 'CUSTOM_HEADLESS'
+              ? 'Custom integration onboarding'
+              : draft.existingConnectionChoice === 'manual'
+                ? 'Client requested manual support setup for WordPress connector installation'
+                : 'Onboarding support required',
+          setupType: draft.websiteType,
+          requiredSkills:
+            draft.websiteType === 'CUSTOM_HEADLESS'
+              ? ['API Integration', 'Headless Architecture']
+              : draft.websiteType === 'EXISTING_WEBSITE'
+                ? ['WordPress', 'Migration']
+                : ['Template Setup', 'Content Structure'],
+          initialNotes: 'Please prioritize onboarding handoff.',
+        };
+
+        const supportRes = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/support-assignment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...supportPayload,
+            supportOfficerId: 'support-queue',
+            supportOfficerName: 'Marveo Support Queue',
+          }),
+        });
+
+        if (!supportRes.ok) {
+          const supportData = await safeJson<{ error?: string }>(supportRes);
+          throw new Error(supportData?.error || 'Support assignment failed');
+        }
+
+        await callOnboardingUpdate(nextWorkspaceId, {
+          onboardingStepKey: 'SUPPORT_ASSIGNED',
+          action: 'complete',
+          onboardingStatus: 'READY_FOR_REVIEW',
+          websiteType: draft.websiteType,
+        });
+
+        withPhaseStatus('support', 'done', 'Support officer assigned');
+      } else {
+        withPhaseStatus('support', 'done', 'Support assignment not required');
+      }
+
+      withPhaseStatus('check', 'running', 'Checking launch readiness');
+
+      const checklistRes = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/launch-checklist`, { method: 'GET' });
+
+      if (!checklistRes.ok) {
+        const checklistData = await safeJson<{ error?: string }>(checklistRes);
+        throw new Error(checklistData?.error || 'Launch checklist could not be loaded');
+      }
+
+      const checklistData = await safeJson<LaunchChecklistContract>(checklistRes);
+      if (checklistData) setChecklist(checklistData);
+
+      await callOnboardingUpdate(nextWorkspaceId, {
+        onboardingStepKey: 'LAUNCH_CHECKLIST_READY',
+        action: 'complete',
+        onboardingStatus: checklistData?.readyForLaunch ? 'READY_FOR_LAUNCH' : 'READY_FOR_REVIEW',
+        websiteType: draft.websiteType,
+      });
+
+      withPhaseStatus('check', 'done', 'Launch readiness checked');
+      setWizardStep('ready');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong while preparing onboarding.';
+      setError(message);
+      setPhases((prev) => {
+        const active = prev.find((phase) => phase.status === 'running');
+        if (!active) return prev;
+        return prev.map((phase) => (phase.key === active.key ? { ...phase, status: 'failed', note: message } : phase));
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const progressStep =
+    draft.wizardStep === 'plan'
+      ? 0
+      : draft.wizardStep === 'profile'
+        ? 1
+        : draft.wizardStep === 'website_type'
+          ? 2
+          : draft.wizardStep === 'details'
+            ? 3
+            : draft.wizardStep === 'review'
+              ? 4
+              : draft.wizardStep === 'deploying'
+                ? 5
+                : 6;
+
+  const terminalLogs = phases.map((p) => `${p.label}: ${p.note || p.status}`);
+  const businessTypeOptions = withCurrentOption(profileLookups.businessTypes, draft.profile.businessType);
+  const businessModelOptions = withCurrentOption(profileLookups.businessModels, draft.profile.businessModel);
+  const countryOptions = withCurrentOption(profileLookups.countries, draft.profile.country);
+
+  if (!enabled) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0a1020] to-[#101c2c]">
+        <GlassCard className="max-w-2xl w-full p-10 border-blue-900/30">
+          <p className="text-xs uppercase tracking-[0.3em] text-blue-400 font-semibold mb-2">Marveo OS Installation</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Onboarding is currently disabled</h1>
+          <p className="text-slate-300 mb-6">Ask your administrator to enable this onboarding flow or continue with the standard setup flow.</p>
+          <div className="flex gap-3">
+            <a href="/setup" className="px-5 py-3 rounded-full bg-blue-800 text-white font-semibold">Back to setup</a>
+            <a href="/setup/activate" className="px-5 py-3 rounded-full bg-slate-800 text-blue-200 font-semibold">Open current setup</a>
+          </div>
+        </GlassCard>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-[#0a1020] to-[#101c2c] relative overflow-hidden">
+      <div className="pointer-events-none absolute -left-16 top-10 h-56 w-56 rounded-full bg-cyan-500/20 blur-3xl animate-float-slow" />
+      <div className="pointer-events-none absolute -right-12 bottom-12 h-64 w-64 rounded-full bg-indigo-500/20 blur-3xl animate-float-slower" />
+      <div className="absolute inset-0 pointer-events-none z-0 animate-fade-in">
+        <svg width="100%" height="100%" className="absolute inset-0 w-full h-full" style={{ opacity: 0.12 }}>
+          <defs>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#3b4261" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)" />
+        </svg>
+      </div>
+
+      <div className="relative z-10 mx-auto max-w-4xl px-3 py-10 md:px-0 md:py-16 flex flex-col gap-8">
+        <GlassCard className="p-8 md:p-12 border-blue-900/30 shadow-2xl mvp-panel-enter">
+          <p className="text-xs uppercase tracking-[0.3em] text-blue-400 font-semibold mb-2">Marveo OS Installation</p>
+          <h1 className="text-4xl md:text-5xl font-extrabold text-white mb-2">Installing Marveo OS for your business</h1>
+          <p className="text-slate-300 max-w-2xl mb-3">A premium guided install with secure handoff, production-safe defaults, and launch readiness checks.</p>
+          <p className="text-slate-400 text-sm max-w-2xl">Estimated setup time: 3-5 minutes. You can pause and resume from this browser at any point.</p>
+
+          <AnimatedProgressRail
+            steps={['Plan', 'Profile', 'Website', 'Details', 'Review', 'Install', 'Ready']}
+            currentStep={progressStep}
+          />
+
+          <div className="mt-4 grid gap-2 md:grid-cols-3 text-xs">
+            <div className="rounded-full border border-cyan-800/70 bg-cyan-950/40 px-3 py-2 text-cyan-200">Secure onboarding contract</div>
+            <div className="rounded-full border border-indigo-800/70 bg-indigo-950/40 px-3 py-2 text-indigo-200">Support handoff automation</div>
+            <div className="rounded-full border border-emerald-800/70 bg-emerald-950/40 px-3 py-2 text-emerald-200">Launch checklist verification</div>
+          </div>
+
+          {error ? <p className="mt-4 text-red-300 text-sm">{error}</p> : null}
+
+          {draft.wizardStep === 'plan' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Choose your plan</h2>
+              <p className="text-sm text-slate-400">Pick a baseline. You can adjust plan details after workspace provisioning.</p>
+              <div className="grid md:grid-cols-3 gap-3">
+                {PLAN_OPTIONS.map((plan) => (
+                  <button
+                    key={plan.id}
+                    onClick={() => setDraft((prev) => ({ ...prev, planId: plan.id }))}
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      draft.planId === plan.id
+                        ? 'border-blue-400 bg-blue-900/40 text-white'
+                        : 'border-slate-600 bg-slate-900/50 text-slate-200 hover:border-slate-400'
+                    }`}
+                  >
+                    <p className="font-semibold">{plan.name}</p>
+                    <p className="text-sm mt-1 opacity-80">{plan.description}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setWizardStep('profile')}
+                  disabled={!canMoveFromPlan}
+                  className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold disabled:opacity-50"
+                >
+                  Continue
+                </button>
+              </div>
+            </section>
+          )}
+
+          {draft.wizardStep === 'profile' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Business profile</h2>
+              <p className="text-sm text-slate-400">This information configures workspace identity, defaults, and support routing.</p>
+              <div className="grid md:grid-cols-2 gap-3">
+                <input value={draft.profile.businessName} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessName: e.target.value } }))} placeholder="Business name" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Business type</span>
+                  <select
+                    value={draft.profile.businessType}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessType: e.target.value } }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    {businessTypeOptions.map((option) => (
+                      <option key={option} value={option} className="bg-slate-900 text-white">
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                    Business model
+                    <span
+                      className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-500 text-[10px] font-bold text-slate-300"
+                      title="Business to Consumer: direct sales to individual customers. Business to Business: sales to companies, usually with account or bulk workflows."
+                    >
+                      ?
+                    </span>
+                  </span>
+                  <select
+                    value={draft.profile.businessModel}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessModel: e.target.value } }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    {businessModelOptions.map((option) => (
+                      <option
+                        key={option}
+                        value={option}
+                        className="bg-slate-900 text-white"
+                        title={BUSINESS_MODEL_TOOLTIPS[option] ?? option}
+                      >
+                        {BUSINESS_MODEL_LABELS[option] ?? option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Country</span>
+                  <select
+                    value={draft.profile.country}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, country: e.target.value } }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    {countryOptions.map((option) => (
+                      <option key={option} value={option} className="bg-slate-900 text-white">
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input value={draft.profile.contactEmail} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, contactEmail: e.target.value } }))} placeholder="Contact email" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                <input value={draft.profile.domain} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, domain: e.target.value } }))} placeholder="Primary domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+              </div>
+              <div className="flex justify-between">
+                <button onClick={() => setWizardStep('plan')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
+                <button onClick={() => setWizardStep('website_type')} disabled={!canMoveFromProfile} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold disabled:opacity-50">Continue</button>
+              </div>
+            </section>
+          )}
+
+          {draft.wizardStep === 'website_type' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Select website type</h2>
+              <p className="text-sm text-slate-400">Choose how Marveo OS integrates with your current architecture.</p>
+              <div className="grid md:grid-cols-3 gap-3">
+                {WEBSITE_TYPE_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    onClick={() => setDraft((prev) => ({ ...prev, websiteType: option.key }))}
+                    className={`rounded-2xl border p-4 text-left ${
+                      draft.websiteType === option.key
+                        ? 'border-blue-400 bg-blue-900/40 text-white'
+                        : 'border-slate-600 bg-slate-900/50 text-slate-200'
+                    }`}
+                  >
+                    <p className="font-semibold">{option.label}</p>
+                  </button>
+                ))}
+              </div>
+              <div className="flex justify-between">
+                <button onClick={() => setWizardStep('profile')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
+                <button onClick={() => setWizardStep('details')} disabled={!canMoveFromType} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold disabled:opacity-50">Continue</button>
+              </div>
+            </section>
+          )}
+
+          {draft.wizardStep === 'details' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Setup details</h2>
+              <p className="text-sm text-slate-400">Provide deployment details so we can build the exact onboarding path for your stack.</p>
+
+              {draft.websiteType === 'NEW_WEBSITE' && (
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-cyan-900/40 bg-cyan-950/20 p-4 text-sm text-slate-200">
+                    <p className="font-semibold text-white">Website domain strategy</p>
+                    <p className="mt-1 text-slate-300">Frontend domain is what customers will visit. Backend CMS subdomain is where WordPress will run behind the scenes.</p>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <input
+                        value={draft.newWebsiteData.frontendDomain}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            newWebsiteData: {
+                              ...prev.newWebsiteData,
+                              frontendDomain: e.target.value,
+                              domain: e.target.value,
+                              domainStrategy: 'HEADLESS_WORDPRESS',
+                            },
+                          }))
+                        }
+                        placeholder="Frontend domain (example.com)"
+                        className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white w-full"
+                      />
+                      <p className="text-xs text-slate-400">Frontend domain: your public website, e.g. example.com</p>
+                    </div>
+                    <div className="space-y-2">
+                      <input
+                        value={draft.newWebsiteData.backendCmsSubdomain}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            newWebsiteData: {
+                              ...prev.newWebsiteData,
+                              backendCmsSubdomain: e.target.value,
+                              domainStrategy: 'HEADLESS_WORDPRESS',
+                            },
+                          }))
+                        }
+                        placeholder="Backend CMS subdomain (cms.example.com)"
+                        className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white w-full"
+                      />
+                      <p className="text-xs text-slate-400">Backend CMS subdomain: your WordPress admin/backend, e.g. cms.example.com</p>
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input value={draft.newWebsiteData.domain} onChange={(e) => setDraft((prev) => ({ ...prev, newWebsiteData: { ...prev.newWebsiteData, domain: e.target.value, frontendDomain: e.target.value } }))} placeholder="Primary website domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <input value={draft.newWebsiteData.contactInfo.email} onChange={(e) => setDraft((prev) => ({ ...prev, newWebsiteData: { ...prev.newWebsiteData, contactInfo: { ...prev.newWebsiteData.contactInfo, email: e.target.value } } }))} placeholder="Contact email" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    {TEMPLATE_OPTIONS.map((template) => (
+                      <button key={template.id} onClick={() => setDraft((prev) => ({ ...prev, selectedTemplateId: template.id, newWebsiteData: { ...prev.newWebsiteData, selectedTemplateId: template.id } }))} className={`rounded-2xl border p-4 text-left ${draft.selectedTemplateId === template.id ? 'border-blue-400 bg-blue-900/40 text-white' : 'border-slate-600 bg-slate-900/50 text-slate-200'}`}>
+                        <p className="font-semibold">{template.name}</p>
+                        <p className="text-xs opacity-80 mt-1">{template.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {draft.websiteType === 'EXISTING_WEBSITE' && (
+                <div className="space-y-3">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input value={draft.existingWebsiteData.domain} onChange={(e) => setDraft((prev) => ({ ...prev, existingWebsiteData: { ...prev.existingWebsiteData, domain: e.target.value } }))} placeholder="Current website domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <div className="space-y-2">
+                      <input
+                        value={draft.existingWebsiteData.wordpressAdminUrl || ''}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            existingWebsiteData: { ...prev.existingWebsiteData, wordpressAdminUrl: e.target.value },
+                          }))
+                        }
+                        placeholder="WordPress Admin URL"
+                        className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white w-full"
+                      />
+                      <p className="text-xs text-slate-400">Example: https://example.com/wp-admin</p>
+                    </div>
+                    <input value={connectorSiteMetadata?.platform || draft.existingWebsiteData.currentPlatform} readOnly placeholder="Detected platform" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white md:col-span-2" />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <button onClick={() => setDraft((prev) => ({ ...prev, existingConnectionChoice: 'connector', existingWebsiteData: { ...prev.existingWebsiteData, connectionMethod: 'connector', supportRequired: false } }))} className={`px-4 py-2 rounded-full ${draft.existingConnectionChoice === 'connector' ? 'bg-blue-700 text-white' : 'bg-slate-700 text-slate-200'}`}>Connector setup</button>
+                    <button onClick={requestSupportSetup} className={`px-4 py-2 rounded-full ${draft.existingConnectionChoice === 'manual' ? 'bg-amber-600 text-white' : 'bg-slate-700 text-slate-200'}`}>Let a Marveo specialist assist</button>
+                  </div>
+                  <div className="rounded-2xl border border-amber-800/50 bg-amber-950/20 p-4 text-sm text-amber-100">
+                    <p className="font-semibold text-amber-50">Prefer guided setup?</p>
+                    <p className="mt-1">Our setup team can help install the connector, verify your WordPress site, and complete the connection safely.</p>
+                  </div>
+                  {draft.existingConnectionChoice === 'connector' && (
+                    <div className="space-y-3">
+                      <div className="rounded-2xl border border-blue-900/40 bg-blue-950/30 p-4 text-sm text-slate-200">
+                        <p className="font-semibold text-white">Existing Website Connector Setup</p>
+                        <ol className="mt-2 list-decimal pl-5 space-y-2 text-slate-300">
+                          <li>
+                            <span className="font-semibold text-slate-100">Download Connector</span>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <a
+                                href={CONNECTOR_DOWNLOAD_URL}
+                                className="inline-flex items-center rounded-full bg-cyan-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-600"
+                              >
+                                Download Connector Plugin (.zip)
+                              </a>
+                              <a
+                                href={CONNECTOR_INSTALL_GUIDE_URL}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center rounded-full bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-600"
+                              >
+                                View Installation Guide
+                              </a>
+                            </div>
+                          </li>
+                          <li><span className="font-semibold text-slate-100">Install Connector on WordPress</span></li>
+                          <li><span className="font-semibold text-slate-100">Generate Secure Connection Token in WordPress Connector</span></li>
+                          <li>
+                            <span className="font-semibold text-slate-100">Paste Generated Secure Connection Token in Marveo</span>
+                            <div className="mt-2">
+                              <input
+                                value={draft.existingWebsiteData.connectorToken}
+                                type={connectorTokenFocused || showConnectorToken ? 'text' : 'password'}
+                                onFocus={() => setConnectorTokenFocused(true)}
+                                onBlur={() => setConnectorTokenFocused(false)}
+                                onChange={(e) => {
+                                  const nextToken = e.target.value;
+                                  setDraft((prev) => ({
+                                    ...prev,
+                                    existingWebsiteData: {
+                                      ...prev.existingWebsiteData,
+                                      connectorToken: nextToken,
+                                    },
+                                  }));
+                                  const hasToken = nextToken.trim().length > 0;
+                                  setConnectionStatus(hasToken ? 'TOKEN_GENERATED' : 'NOT_CONNECTED');
+                                }}
+                                placeholder="Paste the Generated Secure Connection Token from WordPress"
+                                className="rounded-xl bg-slate-950/90 border border-slate-700 px-4 py-3 text-white w-full font-mono"
+                              />
+                              <p className="mt-2 text-xs text-slate-400">Find this in WordPress Admin → Marvéo Connector → Connection Token. Copy the token and paste it here.</p>
+                              <p className="mt-1 text-xs text-amber-200">Do not share this token publicly. It securely links your WordPress site to Marvéo.</p>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button onClick={() => setShowConnectorToken((current) => !current)} className="rounded-full bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-100 hover:bg-slate-600">
+                                  {showConnectorToken ? 'Hide token' : 'Show token'}
+                                </button>
+                                <button onClick={clearConnectorToken} disabled={loading || connectorCheck.status === 'checking' || !draft.existingWebsiteData.connectorToken.trim()} className="rounded-full bg-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50">
+                                  Clear token
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                          <li>
+                            <span className="font-semibold text-slate-100">Verify WordPress Connection</span>
+                            <p className="mt-1 text-xs text-slate-400">Paste token into plugin settings, save connector, then click Verify WordPress Connection.</p>
+                          </li>
+                        </ol>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button onClick={checkConnectorPlugin} disabled={connectorCheck.status === 'checking'} className="px-4 py-2 rounded-full bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">{connectorCheck.status === 'checking' ? 'Checking...' : 'Verify WordPress Connection'}</button>
+                        {connectorCheck.message ? <p className="text-sm text-slate-300">{connectorCheck.message}</p> : null}
+                      </div>
+                      {connectorSiteMetadata ? (
+                        <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 text-sm text-slate-200">
+                          <p className="text-base font-semibold text-white">{discoverySummary[0]}</p>
+                          <ul className="mt-2 space-y-1 text-slate-200">
+                            {discoverySummary.slice(1, -1).map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
+                          <p className="mt-3 text-cyan-200">{discoverySummary[discoverySummary.length - 1]}</p>
+                          <p className="mt-3 text-xs text-slate-400">WordPress version: {connectorSiteMetadata.wordpressVersion || 'Unknown'}</p>
+                        </div>
+                      ) : null}
+                      <div className="text-sm text-slate-300">Connection status: {prettyConnectorStatus(connectionStatus)}</div>
+                      <button onClick={requestSupportSetup} className="px-4 py-2 rounded-full bg-amber-700 text-white text-sm font-semibold">Let a Marveo specialist assist</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {draft.websiteType === 'CUSTOM_HEADLESS' && (
+                <div className="space-y-3">
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input value={draft.customHeadlessData.stack} onChange={(e) => setDraft((prev) => ({ ...prev, customHeadlessData: { ...prev.customHeadlessData, stack: e.target.value } }))} placeholder="Stack (Next.js, Nuxt, etc.)" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <input value={draft.customHeadlessData.developerContact} onChange={(e) => setDraft((prev) => ({ ...prev, customHeadlessData: { ...prev.customHeadlessData, developerContact: e.target.value } }))} placeholder="Developer contact" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                  </div>
+
+                  {isWordPressLikeStack(draft.customHeadlessData.stack) ? (
+                    <div className="rounded-2xl border border-blue-900/40 bg-blue-950/20 p-4 text-sm text-slate-200">
+                      <p className="font-semibold text-white">Optional: Connect WordPress Backend</p>
+                      <p className="mt-1 text-slate-300">Because your stack includes WordPress/WooCommerce, you can install Marveo Connector and verify a backend connection during onboarding.</p>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              <div className="flex justify-between">
+                <button onClick={() => setWizardStep('website_type')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
+                <button onClick={() => setWizardStep('review')} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold">Review</button>
+              </div>
+            </section>
+          )}
+
+          {draft.wizardStep === 'review' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Review and launch</h2>
+              <p className="text-sm text-slate-400">Validate this summary, then start installation and orchestration.</p>
+              <div className="rounded-2xl border border-slate-600 bg-slate-900/50 p-4 text-slate-200 text-sm space-y-1">
+                <p>Plan: {draft.planId}</p>
+                <p>Website type: {prettyWebsiteType(draft.websiteType)}</p>
+                <p>Business: {draft.profile.businessName || '-'}</p>
+                <p>Email: {draft.profile.contactEmail || '-'}</p>
+                <p>Support required: {supportNeeded || connectionStatus === 'SUPPORT_REQUIRED' ? 'Yes' : 'No'}</p>
+                <p>Flow summary ready: {flowSummary ? 'Yes' : 'No'}</p>
+              </div>
+              <div className="flex justify-between">
+                <button onClick={() => setWizardStep('details')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
+                <button onClick={startDeployment} disabled={loading || !draft.websiteType} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold disabled:opacity-50">Start installation</button>
+              </div>
+            </section>
+          )}
+
+          {draft.wizardStep === 'deploying' && (
+            <section className="mt-8 space-y-5">
+              <h2 className="text-2xl text-white font-semibold">Installing workspace</h2>
+              <p className="text-sm text-slate-400">Provisioning infrastructure and syncing onboarding milestones in real time.</p>
+              <AnimatedChecklist progress={Math.min(phases.filter((p) => p.status === 'done').length, 6)} />
+              <div className="space-y-2">
+                {phases.map((phase) => (
+                  <div key={phase.key} className="flex items-center justify-between rounded-xl bg-slate-900/50 border border-slate-700 px-4 py-3">
+                    <div>
+                      <p className="text-white text-sm font-semibold">{phase.label}</p>
+                      {phase.note ? <p className="text-xs text-slate-300">{phase.note}</p> : null}
+                    </div>
+                    <StatusPill status={phase.status} />
+                  </div>
+                ))}
+              </div>
+              <TerminalPanel logs={terminalLogs} running={loading} />
+            </section>
+          )}
+
+          {draft.wizardStep === 'ready' && (
+            <section className="mt-8 space-y-4">
+              <h2 className="text-2xl text-white font-semibold">Workspace ready</h2>
+              <p className="text-slate-300">Your Marveo OS workspace is provisioned and onboarding has completed successfully.</p>
+              <div className="rounded-2xl border border-slate-600 bg-slate-900/50 p-4 text-slate-200 text-sm">
+                <p>Workspace ID: {workspaceId || '-'}</p>
+                <p>Launch ready: {checklist?.readyForLaunch ? 'Yes' : 'Needs review'}</p>
+                <p>Checklist blockers: {checklist?.blockers.length || 0}</p>
+              </div>
+              <div className="flex gap-3">
+                <a href={workspaceId ? `/dashboard?workspaceId=${workspaceId}` : '/dashboard'} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold">Open dashboard</a>
+                <button onClick={() => setDraft(defaultDraft())} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Start another setup</button>
+              </div>
+            </section>
+          )}
+        </GlassCard>
+      </div>
+    </div>
+  );
+}
