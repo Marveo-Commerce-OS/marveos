@@ -57,7 +57,7 @@ export async function PUT(req: NextRequest) {
             name: String(row?.name ?? '').trim(),
           };
         })
-        .filter((item) => item.code && item.name)
+        .filter((item: { code: string; name: string }) => item.code.length > 0 && item.name.length > 0)
     : null;
 
   if (!businessTypes && !businessModels && !countries) {
