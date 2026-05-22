@@ -3,6 +3,7 @@ import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
 import { validateWorkspaceReadiness } from '@/lib/cloudOrchestration';
+import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -55,6 +56,38 @@ function buildRecoveryActions(missingRequirements: string[]): string[] {
   return missingRequirements.map((item) => `Resolve ${item} and re-run launch guard validation.`);
 }
 
+function buildMvpLaunchSignals(workspace: {
+  currentStep: number;
+  onboardingStepKey?: string;
+  onboardingStatus?: string;
+}) {
+  const resolvedStepKey = workspace.onboardingStepKey || mapLegacyStepToMvpStepKey(workspace.currentStep);
+  const resolvedStatus = workspace.onboardingStatus || null;
+
+  const supportAssigned =
+    resolvedStepKey === 'SUPPORT_ASSIGNED' ||
+    resolvedStatus === 'READY_FOR_REVIEW' ||
+    resolvedStatus === 'READY_FOR_LAUNCH' ||
+    resolvedStatus === 'LIVE';
+
+  const launchChecklistReady =
+    resolvedStepKey === 'LAUNCH_CHECKLIST_READY' ||
+    resolvedStatus === 'READY_FOR_LAUNCH' ||
+    resolvedStatus === 'LIVE';
+
+  const readyForReview = resolvedStatus === 'READY_FOR_REVIEW' || supportAssigned;
+  const readyForLaunch = resolvedStatus === 'READY_FOR_LAUNCH' || launchChecklistReady;
+
+  return {
+    stepKey: resolvedStepKey,
+    status: resolvedStatus,
+    supportAssigned,
+    launchChecklistReady,
+    readyForReview,
+    readyForLaunch,
+  };
+}
+
 export async function GET(
   _req: NextRequest,
   context: { params: Promise<{ workspaceId: string }> },
@@ -74,6 +107,7 @@ export async function GET(
 
   const connectorStatus = await fetchConnectorDeploymentStatus(auth.session.token);
   const validated = validateWorkspaceReadiness(workspace, connectorStatus || undefined);
+  const mvpSignals = buildMvpLaunchSignals(workspace);
 
   return NextResponse.json({
     workspaceId,
@@ -82,6 +116,7 @@ export async function GET(
     missingRequirements: validated.missingRequirements,
     recoveryActions: buildRecoveryActions(validated.missingRequirements),
     connectorStatus,
+    mvpSignals,
   });
 }
 
@@ -106,6 +141,7 @@ export async function POST(
 
   const connectorStatus = await fetchConnectorDeploymentStatus(auth.session.token);
   const validated = validateWorkspaceReadiness(workspace, connectorStatus || undefined);
+  const mvpSignals = buildMvpLaunchSignals(workspace);
 
   await updateAdminStore((current) => ({
     ...current,
@@ -119,6 +155,7 @@ export async function POST(
             validated.missingRequirements.length === 0
               ? (launch ? 'launched' : 'ready_for_launch')
               : 'blocked',
+          launchGuardLastCheckedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
       },
@@ -140,6 +177,7 @@ export async function POST(
         blocked: true,
         missingRequirements: validated.missingRequirements,
         recoveryActions: buildRecoveryActions(validated.missingRequirements),
+        mvpSignals,
       },
       { status: 409 },
     );
@@ -150,5 +188,6 @@ export async function POST(
     blocked: false,
     message: launch ? 'Launch approved and status promoted to launched.' : 'Launch validation passed.',
     deploymentReadiness: validated.deploymentReadiness,
+    mvpSignals,
   });
 }

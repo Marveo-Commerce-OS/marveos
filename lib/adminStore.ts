@@ -121,11 +121,43 @@ export interface ConnectorCommandRecord {
 export interface WorkspaceOrchestration {
   id: string;
   name: string;
+  clientOrganizationId?: string;
+  clientOrganizationName?: string;
+  clientSubscriptionId?: string;
+  clientSubscriptionPlan?: AccountPlan;
+  workspaceOwnership?: 'client' | 'internal_demo';
   businessType: string;
   country: string;
   businessModel: string;
   contentSource: 'wordpress' | 'nextjs';
   contentBaseUrl: string;
+  planId?: string;
+  websiteType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+  onboardingStepKey?:
+    | 'PLAN_SELECTED'
+    | 'PROFILE_CREATED'
+    | 'WEBSITE_TYPE_SELECTED'
+    | 'BUSINESS_DETAILS_COMPLETED'
+    | 'CONNECTOR_TOKEN_GENERATED'
+    | 'TEMPLATE_SELECTED'
+    | 'DEPLOYMENT_STARTED'
+    | 'WORKSPACE_CREATED'
+    | 'SUPPORT_ASSIGNED'
+    | 'LAUNCH_CHECKLIST_READY';
+  onboardingStatus?:
+    | 'NOT_STARTED'
+    | 'IN_PROGRESS'
+    | 'WAITING_FOR_CLIENT'
+    | 'WAITING_FOR_SUPPORT'
+    | 'DEPLOYING'
+    | 'READY_FOR_REVIEW'
+    | 'READY_FOR_LAUNCH'
+    | 'LIVE'
+    | 'FAILED';
+  businessProfile?: Record<string, unknown>;
+  selectedTemplateId?: string;
+  collectedBusinessData?: Record<string, unknown>;
+  supportRequired?: boolean;
   onboardingPath?: string;
   architecture?: string;
   selectedModules: string[];
@@ -150,8 +182,62 @@ export interface WorkspaceOrchestration {
     channel: 'stable' | 'beta';
     promotedAt?: string;
   };
+  supportAssignment?: {
+    status: 'UNASSIGNED' | 'ASSIGNED';
+    assignedAt?: string;
+    assignedBy?: string;
+    supportOfficerId?: string;
+    supportOfficerName?: string;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    reason?: string;
+    setupType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+    requiredSkills?: string[];
+    initialNotes?: string;
+  };
+  launchGuardLastCheckedAt?: string;
+  connectorStatus?: ConnectorStatusKey;
+  connectorToken?: string;
+  connectorConnectedAt?: string;
+  connectorLastVerificationAttempt?: string;
+  connectorVerificationError?: string;
+  connectorSiteMetadata?: ConnectorSiteMetadata;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ConnectorStatusKey =
+  | 'NOT_CONNECTED'
+  | 'TOKEN_GENERATED'
+  | 'PENDING_VERIFICATION'
+  | 'CONNECTED'
+  | 'FAILED'
+  | 'SUPPORT_REQUIRED';
+
+export interface ConnectorSiteMetadata {
+  siteUrl?: string;
+  siteName?: string;
+  platform?: string;
+  wordpressVersion?: string;
+  woocommerceEnabled?: boolean;
+  connectorVersion?: string;
+  connectorPluginStatus?: string;
+  siteId?: string;
+  jwtEnabled?: boolean;
+  pageCount?: number;
+  productCount?: number;
+  menuCount?: number;
+  mediaCount?: number;
+  detectedCapabilities?: {
+    statusEndpoint: boolean;
+    siteProfile: boolean;
+    woocommerceDetection: boolean;
+    pagesDiscovery: boolean;
+    productsDiscovery: boolean;
+    navigationDiscovery: boolean;
+    mediaDiscovery: boolean;
+    contentInventory: boolean;
+  };
+  discoveredAt?: string;
 }
 
 export type AccountPlan = 'starter' | 'business' | 'enterprise';
@@ -367,17 +453,15 @@ const DEFAULT_STORE: AdminConfigStore = {
     accountPlan: 'starter',
     accountPlanUpdatedAt: new Date().toISOString(),
     lookups: {
-      businessTypes: ['Retail', 'Wholesale', 'Manufacturing', 'Services', 'Healthcare', 'Education', 'Hospitality', 'Technology'],
-      businessModels: ['B2C', 'B2B', 'B2B2C', 'Marketplace', 'Subscription', 'Hybrid'],
+      businessTypes: ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Technology', 'Hospitality', 'Healthcare', 'Education', 'Real Estate'],
+      businessModels: ['B2C', 'B2B'],
       countries: [
+        { code: 'NG', name: 'Nigeria' },
         { code: 'US', name: 'United States' },
         { code: 'GB', name: 'United Kingdom' },
         { code: 'CA', name: 'Canada' },
-        { code: 'NG', name: 'Nigeria' },
-        { code: 'KE', name: 'Kenya' },
-        { code: 'ZA', name: 'South Africa' },
         { code: 'AE', name: 'United Arab Emirates' },
-        { code: 'IN', name: 'India' },
+        { code: 'AU', name: 'Australia' },
       ],
     },
   },
@@ -566,5 +650,96 @@ export async function appendAuditLog(record: Omit<AuditRecord, 'id' | 'at'>) {
       audit: [entry, ...current.audit].slice(0, 500),
     };
   });
+}
+
+export async function getWorkspaceSupportAssignment(workspaceId: string) {
+  const store = await readAdminStore();
+  const workspace = store.cloud.workspaces[workspaceId];
+  if (!workspace) return null;
+  return workspace.supportAssignment ?? { status: 'UNASSIGNED' as const };
+}
+
+export async function setWorkspaceSupportAssignment(
+  workspaceId: string,
+  assignment: NonNullable<WorkspaceOrchestration['supportAssignment']>,
+) {
+  let updatedWorkspace: WorkspaceOrchestration | null = null;
+
+  await updateAdminStore((current) => {
+    const workspace = current.cloud.workspaces[workspaceId];
+    if (!workspace) return current;
+
+    updatedWorkspace = {
+      ...workspace,
+      supportAssignment: assignment,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        workspaces: {
+          ...current.cloud.workspaces,
+          [workspaceId]: updatedWorkspace,
+        },
+      },
+    };
+  });
+
+  return updatedWorkspace;
+}
+
+export async function getWorkspaceConnectorState(workspaceId: string) {
+  const store = await readAdminStore();
+  const workspace = store.cloud.workspaces[workspaceId];
+  if (!workspace) return null;
+  return {
+    connectorStatus: workspace.connectorStatus ?? ('NOT_CONNECTED' as ConnectorStatusKey),
+    connectorToken: workspace.connectorToken ?? null,
+    connectorConnectedAt: workspace.connectorConnectedAt ?? null,
+    connectorLastVerificationAttempt: workspace.connectorLastVerificationAttempt ?? null,
+    connectorVerificationError: workspace.connectorVerificationError ?? null,
+    connectorSiteMetadata: workspace.connectorSiteMetadata ?? null,
+  };
+}
+
+export async function setWorkspaceConnectorState(
+  workspaceId: string,
+  patch: Partial<Pick<WorkspaceOrchestration,
+    | 'connectorStatus'
+    | 'supportRequired'
+    | 'connectorToken'
+    | 'connectorConnectedAt'
+    | 'connectorLastVerificationAttempt'
+    | 'connectorVerificationError'
+    | 'connectorSiteMetadata'
+  >>,
+) {
+  let updated: WorkspaceOrchestration | null = null;
+
+  await updateAdminStore((current) => {
+    const workspace = current.cloud.workspaces[workspaceId];
+    if (!workspace) return current;
+
+    updated = {
+      ...workspace,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        workspaces: {
+          ...current.cloud.workspaces,
+          [workspaceId]: updated,
+        },
+      },
+    };
+  });
+
+  return updated;
 }
 

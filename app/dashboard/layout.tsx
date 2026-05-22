@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getSession, isAdmin, isSuperAdmin } from '@/lib/auth';
+import { getSession, hasClientWorkspaceAccess, isAdmin, isSuperAdmin, normalizeRoles } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import Sidebar from '@/components/Sidebar';
 import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
@@ -7,6 +7,9 @@ import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect('/login');
+
+  const roles = normalizeRoles(session.user?.roles);
+  if (hasClientWorkspaceAccess(roles)) redirect('/portal');
 
   const status = await getRuntimeDeploymentStatus();
   if (!status.setup_completed || !status.validation_passed) {
@@ -20,7 +23,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let allowedModules: string[] | undefined;
   if (!superAdmin) {
     const store = await readAdminStore();
-    const roles = Array.isArray(session.user?.roles) ? session.user.roles.map((r: string) => String(r).toLowerCase()) : [];
     const primaryRole = roles[0] ?? 'shop_manager';
     const roleVisibility = store.roleModuleVisibility[primaryRole] ?? {};
     allowedModules = Object.entries(roleVisibility)

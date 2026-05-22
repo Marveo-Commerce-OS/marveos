@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { readAdminStore } from '@/lib/adminStore';
+import { hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
 import { getConfig } from '@/src/config/client';
 
 const getWpApiUrl = () => {
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
         portals: ['b2c'],
       }), opts);
 
-      return NextResponse.json({ success: true, redirect: '/portal' });
+      return NextResponse.json({ success: true, redirect: '/master' });
     }
 
     let wpRes;
@@ -97,10 +98,12 @@ export async function POST(req: NextRequest) {
     }
 
     const userData = await userRes.json();
-    const allowed = userData?.roles?.some((r: string) => ['administrator', 'shop_manager'].includes(r.toLowerCase()));
-    
-    if (!allowed) {
-      return NextResponse.json({ error: 'Your account does not have access to this operations portal.' }, { status: 403 });
+    const roles = normalizeRoles(userData?.roles);
+    const internalAccess = hasInternalPlatformAccess(roles);
+    const clientAccess = hasClientWorkspaceAccess(roles);
+
+    if (!internalAccess && !clientAccess) {
+      return NextResponse.json({ error: 'Your account does not have access to Marveo platform surfaces.' }, { status: 403 });
     }
 
     const store = await readAdminStore();
@@ -116,12 +119,12 @@ export async function POST(req: NextRequest) {
       id: userData.id,
       user_display_name: data.user_display_name,
       user_email: data.user_email,
-      isAdmin: allowed,
+      isAdmin: internalAccess,
       roles: Array.isArray(userData.roles) ? userData.roles : [],
       portals: userState?.portals ?? ['b2c'],
     }), opts);
 
-    return NextResponse.json({ success: true, redirect: '/portal' });
+    return NextResponse.json({ success: true, redirect: internalAccess ? '/master' : '/portal' });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 });

@@ -2,9 +2,25 @@ import { cookies } from 'next/headers';
 import { readAdminStore } from './adminStore';
 import { getConfig } from '@/src/config/client';
 
+export const INTERNAL_PLATFORM_ROLES = ['administrator', 'shop_manager'] as const;
+export const CLIENT_PLATFORM_ROLES = ['customer', 'subscriber'] as const;
+
 function getWpApiUrl(): string {
   const config = getConfig();
   return config.wordpressApiUrl || 'https://localhost/wp-json';
+}
+
+export function normalizeRoles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((role) => String(role).toLowerCase());
+}
+
+export function hasInternalPlatformAccess(roles: string[]): boolean {
+  return roles.some((role) => INTERNAL_PLATFORM_ROLES.includes(role as (typeof INTERNAL_PLATFORM_ROLES)[number]));
+}
+
+export function hasClientWorkspaceAccess(roles: string[]): boolean {
+  return roles.some((role) => CLIENT_PLATFORM_ROLES.includes(role as (typeof CLIENT_PLATFORM_ROLES)[number]));
 }
 
 async function getCookieUserInfo(): Promise<Record<string, unknown> | null> {
@@ -63,7 +79,8 @@ export async function isAdmin(token: string): Promise<boolean> {
     });
     if (!res.ok) return false;
     const data = await res.json();
-    const allowedByRole = data?.roles?.some((r: string) => ['administrator', 'shop_manager'].includes(r.toLowerCase())) ?? false;
+    const roles = normalizeRoles(data?.roles);
+    const allowedByRole = hasInternalPlatformAccess(roles);
     if (!allowedByRole) return false;
 
     const store = await readAdminStore();
@@ -97,7 +114,7 @@ export async function getCurrentWpUser(token: string): Promise<{ id: number; ema
 export async function isSuperAdmin(token: string): Promise<boolean> {
   const cookieUser = await getCookieUserInfo();
   if (cookieUser && Array.isArray(cookieUser.roles)) {
-    return cookieUser.roles.some((role) => String(role).toLowerCase() === 'administrator');
+    return normalizeRoles(cookieUser.roles).includes('administrator');
   }
 
   const user = await getCurrentWpUser(token);
