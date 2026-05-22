@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetchLatestPluginRelease } from '@/src/lib/pluginUpdates';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const release = {
-    tag: 'v1.0.16',
-    version: '1.0.16',
-    detailsUrl: 'https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/v1.0.16',
-    changelog: 'Version 1.0.16 — Adds unified site_settings schema support so Settings tabs in Marveo dashboard save correctly through one payload.',
-    publishedAt: '2026-05-09T00:00:00Z',
+  const fallbackTag = process.env.MARVEO_CONNECTOR_FALLBACK_TAG || 'v1.0.16';
+  const fallbackVersion = fallbackTag.replace(/^v/i, '');
+  const fallbackRelease = {
+    tag: fallbackTag,
+    version: fallbackVersion,
+    detailsUrl: `https://github.com/Marveo-Commerce-OS/marveo-connector/releases/tag/${fallbackTag}`,
+    changelog: `Version ${fallbackVersion}`,
+    publishedAt: '',
   };
+
+  const release = (await fetchLatestPluginRelease()) ?? fallbackRelease;
 
   const packageUrl = new URL('/api/plugin-updates/marveo-connector/download', req.nextUrl.origin);
   packageUrl.searchParams.set('tag', release.tag);
