@@ -49,7 +49,7 @@ export default function Sidebar({
   );
   
   const navItems = canManageAccess && (allowed.size === 0 || allowed.has('adminSettings'))
-    ? [...baseItemsWithHrefs, { href: `${basePath}/admin-settings`, label: 'Advanced Settings', icon: Shield, moduleKey: 'adminSettings' }]
+    ? [...baseItemsWithHrefs, { href: `${basePath}/admin-settings`, label: 'Advanced Settings', icon: Shield, exact: false, moduleKey: 'adminSettings' }]
     : baseItemsWithHrefs;
 
   async function logout() {

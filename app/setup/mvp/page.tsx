@@ -494,6 +494,7 @@ export default function SetupMvpPage() {
         connectorStatus?: ConnectorStatusKey;
         siteMetadata?: ConnectorSiteMetadata;
         error?: string;
+        siteOrigin?: string;
       }>(response);
 
       if (!data?.verified || !data.siteMetadata) {

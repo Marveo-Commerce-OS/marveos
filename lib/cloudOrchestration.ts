@@ -43,6 +43,13 @@ function isInternalDemoEmail(email: string): boolean {
   return normalized.endsWith('@marveo.local') || normalized.includes('demo@') || normalized.includes('demo-admin');
 }
 
+function normalizeAccountPlan(planId?: string): AccountPlan {
+  if (planId === 'starter' || planId === 'business' || planId === 'enterprise') {
+    return planId;
+  }
+  return 'starter';
+}
+
 export function deriveClientOwnershipContext(payload: {
   name: string;
   contentBaseUrl: string;
@@ -64,7 +71,7 @@ export function deriveClientOwnershipContext(payload: {
       clientOrganizationId: payload.clientOrganizationId || `demo_org_${makeId('tenant')}`,
       clientOrganizationName: businessName || payload.name || 'Demo Client Organization',
       clientSubscriptionId: payload.clientSubscriptionId || `demo_sub_${makeId('subscription')}`,
-      clientSubscriptionPlan: payload.planId || 'starter',
+      clientSubscriptionPlan: normalizeAccountPlan(payload.planId),
       workspaceOwnership: 'internal_demo' as const,
     };
   }
@@ -76,7 +83,7 @@ export function deriveClientOwnershipContext(payload: {
     clientOrganizationId: payload.clientOrganizationId || `org_${organizationHash}`,
     clientOrganizationName: businessName || payload.name || 'Client Organization',
     clientSubscriptionId: payload.clientSubscriptionId || `sub_${subscriptionHash}`,
-    clientSubscriptionPlan: payload.planId || 'starter',
+    clientSubscriptionPlan: normalizeAccountPlan(payload.planId),
     workspaceOwnership: 'client' as const,
   };
 }
