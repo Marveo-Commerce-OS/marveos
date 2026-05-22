@@ -1,8 +1,12 @@
 import { redirect } from 'next/navigation';
-import { getSession } from '@/lib/auth';
+import { getSession, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
 
 export default async function RootPage() {
   const session = await getSession();
-  if (session) redirect('/dashboard');
+  if (session) {
+    const roles = normalizeRoles(session.user?.roles);
+    if (hasInternalPlatformAccess(roles)) redirect('/master');
+    redirect('/portal');
+  }
   redirect('/login');
 }

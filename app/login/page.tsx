@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getConfig } from '@/src/config/client';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const config = getConfig();
   const demoMode = process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true';
   const demoUsername = process.env.NEXT_PUBLIC_MARVEO_DEMO_USERNAME || 'demo-admin';
@@ -15,6 +17,14 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  const debugInfo = process.env.NODE_ENV !== 'production'
+    ? {
+        from: searchParams.get('from') || 'n/a',
+        reason: searchParams.get('error') || 'n/a',
+        roles: searchParams.get('roles') || 'n/a',
+      }
+    : null;
 
   useEffect(() => {
     setMounted(true);
@@ -83,10 +93,23 @@ export default function LoginPage() {
           <h2 className="text-2xl font-bold text-white mb-2">Operations Portal</h2>
           <p className="text-gray-300 text-sm mb-8">Secure access for authorized managers</p>
 
+          <div className="mb-6 rounded-2xl border border-blue-300/30 bg-blue-500/15 p-3 text-xs text-blue-100">
+            Internal team? Use <Link href="/master-login" className="font-semibold underline">/master-login</Link>.
+          </div>
+
           {demoMode && (
             <div className="mb-6 p-4 bg-emerald-500/15 backdrop-blur-xl border border-emerald-300/30 rounded-2xl text-emerald-100 text-sm">
               <p className="font-semibold">Demo mode enabled</p>
               <p className="mt-1 text-xs">Username: {demoUsername}</p>
+            </div>
+          )}
+
+          {debugInfo && (debugInfo.reason !== 'n/a' || debugInfo.from !== 'n/a') && (
+            <div className="mb-6 rounded-2xl border border-amber-300/40 bg-amber-500/15 p-3 text-xs text-amber-100">
+              <p className="font-semibold">Dev debug</p>
+              <p>from: {debugInfo.from}</p>
+              <p>reason: {debugInfo.reason}</p>
+              <p>roles: {debugInfo.roles}</p>
             </div>
           )}
 

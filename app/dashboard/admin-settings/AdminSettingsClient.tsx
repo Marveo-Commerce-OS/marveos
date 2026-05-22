@@ -22,6 +22,11 @@ type SettingsPayload = {
     under_construction_title: string;
     under_construction_message: string;
   };
+  lookups: {
+    businessTypes: string[];
+    businessModels: string[];
+    countries: Array<{ code: string; name: string }>;
+  };
 };
 
 const MODULE_LABELS: Array<{ key: AdminModuleKey; label: string }> = [
@@ -84,6 +89,28 @@ function createDefaultRoleAccess(role: WordPressRoleKey): Record<AdminModuleKey,
 const inputCls = 'w-full h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500';
 const labelCls = 'text-sm font-semibold text-gray-700';
 
+function parseCsvLine(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseCountriesText(value: string): Array<{ code: string; name: string }> {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [code, ...nameParts] = line.split(',');
+      return {
+        code: String(code ?? '').trim().toUpperCase(),
+        name: nameParts.join(',').trim(),
+      };
+    })
+    .filter((item) => item.code && item.name);
+}
+
 export default function AdminSettingsClient() {
   const [activeTab, setActiveTab] = useState<'access' | 'launch' | 'audit'>('launch');
   const [loading, setLoading] = useState(true);
@@ -97,6 +124,18 @@ export default function AdminSettingsClient() {
       site_under_construction: false,
       under_construction_title: 'We are coming back soon',
       under_construction_message: 'We are currently making improvements to serve you better. Please check back shortly.',
+    },
+    lookups: {
+      businessTypes: ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Technology', 'Hospitality', 'Healthcare', 'Education', 'Real Estate'],
+      businessModels: ['B2C', 'B2B'],
+      countries: [
+        { code: 'NG', name: 'Nigeria' },
+        { code: 'US', name: 'United States' },
+        { code: 'GB', name: 'United Kingdom' },
+        { code: 'CA', name: 'Canada' },
+        { code: 'AE', name: 'United Arab Emirates' },
+        { code: 'AU', name: 'Australia' },
+      ],
     },
   });
 
@@ -124,6 +163,22 @@ export default function AdminSettingsClient() {
               site_under_construction: data.maintenance?.site_under_construction ?? prev.maintenance.site_under_construction,
               under_construction_title: data.maintenance?.under_construction_title ?? prev.maintenance.under_construction_title,
               under_construction_message: data.maintenance?.under_construction_message ?? prev.maintenance.under_construction_message,
+            },
+            lookups: {
+              businessTypes: Array.isArray(data.lookups?.businessTypes)
+                ? data.lookups.businessTypes.map((item: unknown) => String(item).trim()).filter(Boolean)
+                : prev.lookups.businessTypes,
+              businessModels: Array.isArray(data.lookups?.businessModels)
+                ? data.lookups.businessModels.map((item: unknown) => String(item).trim()).filter(Boolean)
+                : prev.lookups.businessModels,
+              countries: Array.isArray(data.lookups?.countries)
+                ? data.lookups.countries
+                    .map((item: { code?: unknown; name?: unknown }) => ({
+                      code: String(item?.code ?? '').trim().toUpperCase(),
+                      name: String(item?.name ?? '').trim(),
+                    }))
+                    .filter((item: { code: string; name: string }) => item.code && item.name)
+                : prev.lookups.countries,
             },
           }));
           setModuleAccess(data.module_access || moduleAccess);
@@ -251,6 +306,65 @@ export default function AdminSettingsClient() {
           <div className="space-y-6">
             <div>
               <h2 className="text-lg font-semibold text-gray-900 mb-2">Public Storefront Launch Control</h2>
+              <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <h3 className="text-sm font-semibold text-gray-800">Onboarding Profile Options (Master)</h3>
+                <p className="text-xs text-gray-500">These lists power Business Type, Business Model, and Country in MVP setup.</p>
+
+                <div>
+                  <label className={labelCls}>Business Types (comma-separated)</label>
+                  <textarea
+                    value={settings.lookups.businessTypes.join(', ')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          businessTypes: parseCsvLine(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Business Models (comma-separated)</label>
+                  <textarea
+                    value={settings.lookups.businessModels.join(', ')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          businessModels: parseCsvLine(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Countries (one per line: CODE, Country Name)</label>
+                  <textarea
+                    value={settings.lookups.countries.map((row) => `${row.code}, ${row.name}`).join('\n')}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        lookups: {
+                          ...prev.lookups,
+                          countries: parseCountriesText(e.target.value),
+                        },
+                      }))
+                    }
+                    className="w-full p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 resize-none"
+                    rows={6}
+                  />
+                </div>
+              </div>
+
               <p className="text-sm text-gray-500 mb-4">Control whether the storefront is under construction or live.</p>
             </div>
 

@@ -1,4 +1,8 @@
 /**
+ * @deprecated Transitional adapter/runtime layer.
+ * Pending migration verification, this module remains for compatibility only.
+ * New runtime/provider work should use root-level lib/marveo-api.ts and lib/marveo.ts.
+ *
  * Marveo Adapter Library
  *
  * Reusable library for connecting existing Next.js frontends to Marveo backends.

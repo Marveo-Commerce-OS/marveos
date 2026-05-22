@@ -1,5 +1,11 @@
 'use client';
 
+/**
+ * @deprecated Transitional runtime hook layer.
+ * Pending migration verification, this file remains for compatibility only.
+ * New runtime/provider work should use root-level runtime provider/hooks path.
+ */
+
 import { useContext, useEffect, useState, useCallback } from 'react';
 import { createContext } from 'react';
 import type { MarveoClient, MarveoSettings, MarveoContent, MarveoContextType } from '../marveo';

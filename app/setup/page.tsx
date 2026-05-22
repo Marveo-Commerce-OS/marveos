@@ -3,6 +3,7 @@ import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 
 export default async function SetupStatusPage() {
   const status = await getRuntimeDeploymentStatus();
+  const mvpOnboardingEnabled = process.env.NEXT_PUBLIC_ENABLE_MVP_ONBOARDING !== 'false';
 
   if (status.setup_completed && status.validation_passed) {
     redirect('/dashboard');
@@ -42,7 +43,7 @@ export default async function SetupStatusPage() {
           )}
         </div>
 
-        <div className="mt-8 grid gap-3 md:grid-cols-2">
+        <div className={`mt-8 grid gap-3 ${mvpOnboardingEnabled ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
           <a
             href="/login"
             className="inline-flex items-center justify-center rounded-full px-5 py-3 bg-slate-900 text-white font-semibold hover:bg-slate-800 transition-colors"
@@ -55,6 +56,14 @@ export default async function SetupStatusPage() {
           >
             Open setup flow
           </a>
+          {mvpOnboardingEnabled && (
+            <a
+              href="/setup/mvp"
+              className="inline-flex items-center justify-center rounded-full px-5 py-3 bg-indigo-100 text-indigo-900 font-semibold hover:bg-indigo-200 transition-colors"
+            >
+              Open MVP onboarding
+            </a>
+          )}
         </div>
       </div>
     </div>

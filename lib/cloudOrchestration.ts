@@ -1,5 +1,6 @@
 import type {
   ConnectorCommandRecord,
+  AccountPlan,
   OnboardingStepState,
   WorkspaceOrchestration,
   VersionedSchema,
@@ -29,6 +30,57 @@ function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function hashString(input: string): string {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function isInternalDemoEmail(email: string): boolean {
+  const normalized = email.trim().toLowerCase();
+  return normalized.endsWith('@marveo.local') || normalized.includes('demo@') || normalized.includes('demo-admin');
+}
+
+export function deriveClientOwnershipContext(payload: {
+  name: string;
+  contentBaseUrl: string;
+  businessProfile?: Record<string, unknown>;
+  planId?: string;
+  clientOrganizationId?: string;
+  clientSubscriptionId?: string;
+  workspaceOwnership?: 'client' | 'internal_demo';
+  actorEmail?: string;
+}) {
+  const businessProfile = payload.businessProfile ?? {};
+  const businessName = String(businessProfile.businessName ?? payload.name ?? '').trim();
+  const contactEmail = String(businessProfile.contactEmail ?? '').trim().toLowerCase();
+  const seed = contactEmail || businessName.toLowerCase() || payload.contentBaseUrl.toLowerCase();
+  const internalDemo = Boolean(payload.workspaceOwnership === 'internal_demo' || isInternalDemoEmail(payload.actorEmail ?? ''));
+
+  if (internalDemo) {
+    return {
+      clientOrganizationId: payload.clientOrganizationId || `demo_org_${makeId('tenant')}`,
+      clientOrganizationName: businessName || payload.name || 'Demo Client Organization',
+      clientSubscriptionId: payload.clientSubscriptionId || `demo_sub_${makeId('subscription')}`,
+      clientSubscriptionPlan: payload.planId || 'starter',
+      workspaceOwnership: 'internal_demo' as const,
+    };
+  }
+
+  const organizationHash = hashString(seed);
+  const subscriptionHash = hashString(`${seed}|${payload.planId || 'starter'}`);
+
+  return {
+    clientOrganizationId: payload.clientOrganizationId || `org_${organizationHash}`,
+    clientOrganizationName: businessName || payload.name || 'Client Organization',
+    clientSubscriptionId: payload.clientSubscriptionId || `sub_${subscriptionHash}`,
+    clientSubscriptionPlan: payload.planId || 'starter',
+    workspaceOwnership: 'client' as const,
+  };
+}
+
 export function createDefaultOnboardingSteps(): OnboardingStepState[] {
   return ONBOARDING_STEP_KEYS.map((key, index) => ({
     step: index + 1,
@@ -51,16 +103,50 @@ export function createWorkspace(payload: {
   businessModel: string;
   contentSource: 'wordpress' | 'nextjs';
   contentBaseUrl: string;
+  planId?: string;
+  websiteType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+  businessProfile?: Record<string, unknown>;
+  selectedTemplateId?: string;
+  supportRequired?: boolean;
+  collectedBusinessData?: Record<string, unknown>;
+  clientOrganizationId?: string;
+  clientOrganizationName?: string;
+  clientSubscriptionId?: string;
+  clientSubscriptionPlan?: AccountPlan;
+  workspaceOwnership?: 'client' | 'internal_demo';
+  actorEmail?: string;
 }): WorkspaceOrchestration {
   const now = NOW();
+  const isExistingWebsite = payload.websiteType === 'EXISTING_WEBSITE';
+  const ownership = deriveClientOwnershipContext(payload);
+  const baselineMissingRequirements = isExistingWebsite
+    ? [
+        'Connector plugin installation not confirmed',
+        'Site connection token not validated',
+      ]
+    : ['Website connection review pending'];
+
   return {
     id: makeId('ws'),
     name: payload.name,
+    clientOrganizationId: ownership.clientOrganizationId,
+    clientOrganizationName: ownership.clientOrganizationName,
+    clientSubscriptionId: ownership.clientSubscriptionId,
+    clientSubscriptionPlan: ownership.clientSubscriptionPlan,
+    workspaceOwnership: ownership.workspaceOwnership,
     businessType: payload.businessType,
     country: payload.country,
     businessModel: payload.businessModel,
     contentSource: payload.contentSource,
     contentBaseUrl: payload.contentBaseUrl,
+    planId: payload.planId,
+    websiteType: payload.websiteType,
+    onboardingStepKey: 'PLAN_SELECTED',
+    onboardingStatus: 'IN_PROGRESS',
+    businessProfile: payload.businessProfile,
+    selectedTemplateId: payload.selectedTemplateId,
+    collectedBusinessData: payload.collectedBusinessData,
+    supportRequired: payload.supportRequired,
     selectedModules: [],
     brandSetup: {},
     onboardingSteps: createDefaultOnboardingSteps(),
@@ -76,8 +162,7 @@ export function createWorkspace(payload: {
       integrationsConfigured: false,
     },
     missingRequirements: [
-      'Connector plugin installation not confirmed',
-      'Site connection token not validated',
+      ...baselineMissingRequirements,
       'Architecture selection incomplete',
       'Modules and brand setup incomplete',
       'Validation and launch steps pending',
@@ -155,10 +240,11 @@ export function validateWorkspaceReadiness(
     validation_states?: Record<string, boolean>;
   },
 ): WorkspaceOrchestration {
+  const isExistingWebsite = workspace.websiteType === 'EXISTING_WEBSITE';
   const onboardingComplete = workspace.onboardingSteps.every((item) => item.status === 'completed');
   const architectureValidated = Boolean(workspace.architecture);
   const modulesValid = workspace.selectedModules.length > 0;
-  const apisReachable = Boolean(connectorDeploymentStatus);
+  const apisReachable = isExistingWebsite ? Boolean(connectorDeploymentStatus) : true;
   const frontendValidated = Boolean(connectorDeploymentStatus?.validation_passed);
   const contentMapped = Boolean(connectorDeploymentStatus?.setup_completed);
   const integrationsConfigured = workspace.onboardingSteps.find((item) => item.key === 'validation')?.status === 'completed';
@@ -171,7 +257,7 @@ export function validateWorkspaceReadiness(
   if (!architectureValidated) {
     missingRequirements.push('Architecture is not selected');
   }
-  if (!apisReachable) {
+  if (isExistingWebsite && !apisReachable) {
     missingRequirements.push('Connector deployment status is not reachable');
   }
   if (!modulesValid) {
