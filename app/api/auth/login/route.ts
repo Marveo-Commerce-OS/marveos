@@ -204,6 +204,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, redirect: '/master' });
     }
 
+    if (requestedSurface === 'master') {
+      return NextResponse.json(
+        {
+          error:
+            'Master access is not configured yet. Set MARVEO_SUPERADMIN_EMAIL and MARVEO_SUPERADMIN_PASSWORD in your environment.',
+        },
+        { status: 503 },
+      );
+    }
+
     let wpRes;
     try {
       wpRes = await fetchWithTimeout(`${WP_API_URL}/jwt-auth/v1/token`, {
@@ -213,7 +223,7 @@ export async function POST(req: NextRequest) {
       });
     } catch (error) {
       console.error('WordPress API error:', error);
-      return NextResponse.json({ error: 'Unable to connect to WordPress. Please try again.' }, { status: 503 });
+      return NextResponse.json({ error: 'Authentication service is currently unavailable. Please try again.' }, { status: 503 });
     }
 
     if (!wpRes.ok) {
@@ -258,11 +268,8 @@ export async function POST(req: NextRequest) {
     if (!internalAccess && !clientAccess) {
       return NextResponse.json({ error: 'Your account does not have access to Marveo platform surfaces.' }, { status: 403 });
     }
-    if (requestedSurface === 'portal' && internalAccess) {
+    if (internalAccess) {
       return NextResponse.json({ error: 'Internal team accounts must sign in via /master-login.' }, { status: 403 });
-    }
-    if (requestedSurface === 'master' && !internalAccess) {
-      return NextResponse.json({ error: 'Client accounts must sign in via /login.' }, { status: 403 });
     }
     if (userState && !userState.active) {
       return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 });
@@ -323,7 +330,7 @@ export async function POST(req: NextRequest) {
       portals: userState?.portals ?? ['b2c'],
     }), opts);
 
-    return NextResponse.json({ success: true, redirect: requestedSurface === 'master' ? '/master' : '/portal' });
+    return NextResponse.json({ success: true, redirect: '/portal' });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 });

@@ -8,7 +8,6 @@ import {
   resolveSessionMarveoRoles,
 } from '@/lib/auth';
 import MasterSidebar from '@/components/MasterSidebar';
-import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 
 export default async function MasterLayout({ children }: { children: React.ReactNode }) {
   const isDev = process.env.NODE_ENV !== 'production';
@@ -16,11 +15,6 @@ export default async function MasterLayout({ children }: { children: React.React
   if (!session) {
     const target = isDev ? '/master-login?error=auth_required&from=/master' : '/master-login';
     redirect(target);
-  }
-
-  const status = await getRuntimeDeploymentStatus();
-  if (!status.setup_completed || !status.validation_passed) {
-    redirect('/setup');
   }
 
   const roleContext = await resolveSessionMarveoRoles(session.user);
