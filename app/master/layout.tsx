@@ -1,5 +1,12 @@
 import { redirect } from 'next/navigation';
-import { getSession, hasClientWorkspaceAccess, isAdmin, isSuperAdmin, normalizeRoles } from '@/lib/auth';
+import {
+  getSession,
+  hasClientMasterAccess,
+  hasInternalMasterAccess,
+  isAdmin,
+  isSuperAdmin,
+  resolveSessionMarveoRoles,
+} from '@/lib/auth';
 import MasterSidebar from '@/components/MasterSidebar';
 import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 
@@ -16,15 +23,19 @@ export default async function MasterLayout({ children }: { children: React.React
     redirect('/setup');
   }
 
-  const roles = normalizeRoles(session.user?.roles);
-  if (hasClientWorkspaceAccess(roles)) {
+  const roleContext = await resolveSessionMarveoRoles(session.user);
+  const roles = roleContext.marveoRoles;
+
+  // Clients can never access /master.
+  // If a user is both a client and internal, internal access takes priority.
+  if (hasClientMasterAccess(roles) && !hasInternalMasterAccess(roles)) {
     redirect('/portal');
   }
 
   const admin = await isAdmin(session.token);
   if (!admin) {
     const base = '/master-login?error=unauthorized&from=/master';
-    const withRoles = isDev ? `${base}&roles=${encodeURIComponent(roles.join(','))}` : '/master-login?error=unauthorized';
+    const withRoles = isDev ? `${base}&roles=${encodeURIComponent(roleContext.rawRoles.join(','))}&marveoRoles=${encodeURIComponent(roles.join(','))}` : '/master-login?error=unauthorized';
     redirect(withRoles);
   }
 

@@ -1,5 +1,6 @@
 export const dynamic = 'force-dynamic';
 
+import Link from 'next/link';
 import { getControlCenterSnapshot } from '../_lib/controlCenter';
 
 export default async function MasterConnectorsPage() {
@@ -10,6 +11,9 @@ export default async function MasterConnectorsPage() {
       <div>
         <h1 className="text-3xl font-bold text-slate-900">Connectors</h1>
         <p className="mt-2 text-sm text-slate-600">Connector operational status across all workspaces and upcoming integration tracks.</p>
+        <p className="mt-3 inline-flex rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+          Read-only scaffold for non-WordPress connectors
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -70,6 +74,54 @@ export default async function MasterConnectorsPage() {
             <li>Upcoming connector tracks are placeholders in this phase and intentionally non-operational.</li>
           </ul>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+        <div className="border-b border-slate-200 bg-slate-50 px-5 py-3">
+          <h2 className="text-sm font-semibold text-slate-900">Connected workspaces and connector telemetry</h2>
+          <p className="mt-1 text-xs text-slate-600">Live workspace connector state (read-only).</p>
+        </div>
+        {snapshot.workspaces.filter((workspace) => workspace.websiteType === 'EXISTING_WEBSITE').length === 0 ? (
+          <div className="p-6 text-sm text-slate-600">No existing-website workspaces registered yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1200px]">
+              <thead className="border-b border-slate-200 bg-white">
+                <tr>
+                  {['Workspace', 'Connector status', 'Detected platform', 'Site URL', 'WooCommerce', 'Last verification', 'Discovered at'].map((header) => (
+                    <th key={header} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.workspaces
+                  .filter((workspace) => workspace.websiteType === 'EXISTING_WEBSITE')
+                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                  .map((workspace) => (
+                    <tr key={workspace.id} className="border-b border-slate-100">
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{workspace.name}</p>
+                        <p className="text-xs text-slate-500">{workspace.id}</p>
+                        <Link href={`/master/mvp-deployments/${workspace.id}`} className="mt-2 inline-block text-xs font-semibold text-slate-700 underline">
+                          View workspace
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorStatus || 'NOT_CONNECTED'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorSiteMetadata?.platform || 'Unknown'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorSiteMetadata?.siteUrl || '—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">
+                        {typeof workspace.connectorSiteMetadata?.woocommerceEnabled === 'boolean'
+                          ? (workspace.connectorSiteMetadata.woocommerceEnabled ? 'Enabled' : 'Not detected')
+                          : 'Unknown'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorLastVerificationAttempt ? new Date(workspace.connectorLastVerificationAttempt).toLocaleString() : '—'}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorSiteMetadata?.discoveredAt ? new Date(workspace.connectorSiteMetadata.discoveredAt).toLocaleString() : '—'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

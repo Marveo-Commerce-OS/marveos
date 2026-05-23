@@ -39,8 +39,8 @@ function hashString(input: string): string {
 }
 
 function isInternalDemoEmail(email: string): boolean {
-  const normalized = email.trim().toLowerCase();
-  return normalized.endsWith('@marveo.local') || normalized.includes('demo@') || normalized.includes('demo-admin');
+  // Disabled internal demo email check for full native platform hardening
+  return false;
 }
 
 function normalizeAccountPlan(planId?: string): AccountPlan {
