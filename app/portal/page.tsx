@@ -1,13 +1,60 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getConfig } from '@/src/config/client';
+
+type HealthStatus = 'pass' | 'warn' | 'fail' | 'unknown';
+type StackSegment = 'wordpress' | 'nextjs' | 'headless' | 'unknown';
+
+interface HealthCheck {
+  key: string;
+  label: string;
+  status: HealthStatus;
+  detail: string;
+}
+
+interface WorkspaceHealth {
+  workspaceId: string;
+  workspaceName: string;
+  websiteType: string;
+  stackSegments: StackSegment[];
+  generatedAt: string;
+  checks: HealthCheck[];
+}
+
+const HEALTH_AUTO_REFRESH_MS = 60000;
+
+function stackLabel(stack: StackSegment): string {
+  if (stack === 'wordpress') return 'WordPress/WooCommerce';
+  if (stack === 'nextjs') return 'Next.js';
+  if (stack === 'headless') return 'Headless/Custom';
+  return 'Unknown stack';
+}
+
+function statusStyle(status: HealthStatus): string {
+  if (status === 'pass') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (status === 'warn') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'fail') return 'bg-rose-50 text-rose-700 border-rose-200';
+  return 'bg-slate-50 text-slate-600 border-slate-200';
+}
+
+function statusLabel(status: HealthStatus): string {
+  if (status === 'pass') return 'Healthy';
+  if (status === 'warn') return 'Needs review';
+  if (status === 'fail') return 'Attention needed';
+  return 'Unknown';
+}
 
 export default function PortalPage() {
   const router = useRouter();
   const config = getConfig();
   const [showComingSoon, setShowComingSoon] = useState(false);
+  const [workspaceHealth, setWorkspaceHealth] = useState<WorkspaceHealth[]>([]);
+  const [healthLoading, setHealthLoading] = useState(true);
+  const [healthError, setHealthError] = useState('');
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('');
+  const [lastCheckedAt, setLastCheckedAt] = useState('');
   const workspaceSections = useMemo(
     () => [
       'Dashboard',
@@ -23,6 +70,76 @@ export default function PortalPage() {
     ],
     [],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWebsiteHealth(silent = false) {
+      if (!silent) {
+        setHealthLoading(true);
+      }
+
+      setHealthError('');
+
+      try {
+        const response = await fetch('/api/portal/website-health', { method: 'GET' });
+        const payload = (await response.json()) as {
+          error?: string;
+          generatedAt?: string;
+          workspaces?: WorkspaceHealth[];
+        };
+
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Unable to load website health checks.');
+        }
+
+        if (cancelled) return;
+
+        const rows = Array.isArray(payload?.workspaces) ? payload.workspaces : [];
+        setWorkspaceHealth(rows);
+        setLastCheckedAt(payload?.generatedAt || new Date().toISOString());
+
+        setSelectedWorkspaceId((current) => {
+          if (current && rows.some((item) => item.workspaceId === current)) {
+            return current;
+          }
+          return rows[0]?.workspaceId || '';
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setHealthError(error instanceof Error ? error.message : 'Unable to load website health checks.');
+      } finally {
+        if (!cancelled && !silent) {
+          setHealthLoading(false);
+        }
+      }
+    }
+
+    void loadWebsiteHealth(false);
+    const timerId = window.setInterval(() => {
+      void loadWebsiteHealth(true);
+    }, HEALTH_AUTO_REFRESH_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timerId);
+    };
+  }, []);
+
+  const selectedWorkspace = useMemo(() => {
+    if (!workspaceHealth.length) return null;
+    return workspaceHealth.find((item) => item.workspaceId === selectedWorkspaceId) ?? workspaceHealth[0];
+  }, [workspaceHealth, selectedWorkspaceId]);
+
+  const healthSummary = useMemo(() => {
+    const checks = selectedWorkspace?.checks ?? [];
+    return {
+      healthy: checks.filter((item) => item.status === 'pass').length,
+      review: checks.filter((item) => item.status === 'warn').length,
+      critical: checks.filter((item) => item.status === 'fail').length,
+      unknown: checks.filter((item) => item.status === 'unknown').length,
+    };
+  }, [selectedWorkspace]);
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -97,6 +214,93 @@ export default function PortalPage() {
               Contact support
             </button>
           </div>
+        </div>
+
+        <div className="mt-8 w-full max-w-3xl rounded-3xl border border-gray-100 bg-white p-8 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 font-['Space_Grotesk']">Website health monitoring</h2>
+              <p className="mt-2 text-sm text-gray-500 font-['Space_Grotesk']">
+                Stack-aware checks for connected websites, segmented by platform technology.
+              </p>
+              <p className="mt-1 text-xs text-gray-400 font-['Space_Grotesk']">
+                Last checked: {lastCheckedAt ? new Date(lastCheckedAt).toLocaleString() : 'Pending'} · Auto refresh every 60s
+              </p>
+            </div>
+
+            {workspaceHealth.length > 1 && (
+              <label className="text-sm text-gray-600 font-['Space_Grotesk']">
+                Workspace
+                <select
+                  value={selectedWorkspace?.workspaceId || ''}
+                  onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+                  className="ml-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+                >
+                  {workspaceHealth.map((item) => (
+                    <option key={item.workspaceId} value={item.workspaceId}>
+                      {item.workspaceName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
+          {healthLoading ? (
+            <p className="mt-6 text-sm text-gray-500 font-['Space_Grotesk']">Loading stack health checks...</p>
+          ) : healthError ? (
+            <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 font-['Space_Grotesk']">
+              {healthError}
+            </div>
+          ) : !selectedWorkspace ? (
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 font-['Space_Grotesk']">
+              No connected workspace found yet. Complete setup to enable monitoring.
+            </div>
+          ) : (
+            <>
+              <div className="mt-6 flex flex-wrap gap-2">
+                {selectedWorkspace.stackSegments.map((stack) => (
+                  <span key={stack} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 font-['Space_Grotesk']">
+                    {stackLabel(stack)}
+                  </span>
+                ))}
+                <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-600 font-['Space_Grotesk']">
+                  {selectedWorkspace.websiteType}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-xs text-emerald-700 font-['Space_Grotesk']">Healthy</p>
+                  <p className="text-xl font-bold text-emerald-800 font-['Space_Grotesk']">{healthSummary.healthy}</p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-xs text-amber-700 font-['Space_Grotesk']">Needs review</p>
+                  <p className="text-xl font-bold text-amber-800 font-['Space_Grotesk']">{healthSummary.review}</p>
+                </div>
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                  <p className="text-xs text-rose-700 font-['Space_Grotesk']">Attention</p>
+                  <p className="text-xl font-bold text-rose-800 font-['Space_Grotesk']">{healthSummary.critical}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs text-slate-600 font-['Space_Grotesk']">Unknown</p>
+                  <p className="text-xl font-bold text-slate-800 font-['Space_Grotesk']">{healthSummary.unknown}</p>
+                </div>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {selectedWorkspace.checks.map((check) => (
+                  <div key={check.key} className={`rounded-2xl border px-4 py-3 ${statusStyle(check.status)}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold font-['Space_Grotesk']">{check.label}</p>
+                      <span className="text-xs font-semibold font-['Space_Grotesk']">{statusLabel(check.status)}</span>
+                    </div>
+                    <p className="mt-1 text-sm font-['Space_Grotesk']">{check.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Coming soon toast */}
