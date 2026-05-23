@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AnimatedChecklist } from './AnimatedChecklist';
 import { AnimatedProgressRail } from './AnimatedProgressRail';
 import { GlassCard } from './GlassCard';
@@ -80,6 +81,23 @@ interface DraftState {
   customHeadlessData: CustomHeadlessDataContract;
 }
 
+interface PublicTemplateOption {
+  templateId: string;
+  name: string;
+  slug: string;
+  businessType: string;
+  description: string;
+  previewImage: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  visibility: 'INTERNAL' | 'PUBLIC';
+  supportedWebsiteTypes: Array<'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS'>;
+  supportedStacks: Array<'WORDPRESS_NEXTJS' | 'WORDPRESS_ONLY' | 'NEXTJS' | 'CUSTOM'>;
+  planAvailability: string[];
+  countryAvailability?: string[];
+  featureModules: string[];
+  requiresSupport: boolean;
+}
+
 function isWordPressLikeStack(value: string): boolean {
   const normalized = value.toLowerCase();
   return normalized.includes('wordpress') || normalized.includes('woocommerce');
@@ -104,14 +122,9 @@ const STORAGE_KEY = 'marveo.mvp.onboarding.v1';
 
 const PLAN_OPTIONS = [
   { id: 'starter', name: 'Starter', description: 'For early stage brands and pilots.' },
-  { id: 'business', name: 'Business', description: 'Balanced setup for growing teams.' },
+  { id: 'growth', name: 'Growth', description: 'Balanced setup for growing teams.' },
+  { id: 'business', name: 'Business', description: 'Legacy internal plan mapping.' },
   { id: 'enterprise', name: 'Enterprise', description: 'Advanced governance and support.' },
-];
-
-const TEMPLATE_OPTIONS = [
-  { id: 'template-business', name: 'Business Template', description: 'Company profile and services focused.' },
-  { id: 'template-ecommerce', name: 'Ecommerce Template', description: 'Catalog and conversion first layout.' },
-  { id: 'template-landing', name: 'Landing Template', description: 'Fast launch page with strong CTA flow.' },
 ];
 
 const CONNECTOR_DOWNLOAD_URL = '/plugin-packages/marveo-connector-1.0.16.zip';
@@ -187,6 +200,19 @@ function prettyWooCommerceState(value: boolean | undefined): string {
   return value ? 'Installed' : 'Not installed';
 }
 
+function mapCountryToCode(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return 'US';
+  if (normalized === 'ng' || normalized.includes('nigeria')) return 'NG';
+  if (normalized === 'us' || normalized.includes('united states')) return 'US';
+  if (normalized === 'gb' || normalized.includes('united kingdom')) return 'GB';
+  if (normalized === 'ca' || normalized.includes('canada')) return 'CA';
+  if (normalized === 'ae' || normalized.includes('united arab emirates')) return 'AE';
+  if (normalized === 'au' || normalized.includes('australia')) return 'AU';
+  if (normalized.length === 2) return normalized.toUpperCase();
+  return 'US';
+}
+
 function defaultDraft(): DraftState {
   return {
     wizardStep: 'plan',
@@ -201,7 +227,7 @@ function defaultDraft(): DraftState {
       contactPhone: '',
       domain: '',
     },
-    selectedTemplateId: 'template-business',
+    selectedTemplateId: '',
     supportRequired: false,
     existingConnectionChoice: 'connector',
     newWebsiteData: {
@@ -222,7 +248,7 @@ function defaultDraft(): DraftState {
         phone: '',
       },
       socialLinks: [],
-      selectedTemplateId: 'template-business',
+      selectedTemplateId: '',
     },
     existingWebsiteData: {
       domain: '',
@@ -258,8 +284,11 @@ async function safeJson<T>(res: Response): Promise<T | null> {
   }
 }
 
-export default function SetupMvpPage() {
+function SetupMvpPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const enabled = process.env.NEXT_PUBLIC_ENABLE_MVP_ONBOARDING !== 'false';
+  const marketingPricingUrl = process.env.NEXT_PUBLIC_MARKETING_PRICING_URL || 'https://getmarveo.com/pricing';
   const [draft, setDraft] = useState<DraftState>(defaultDraft());
   const [workspaceId, setWorkspaceId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -269,19 +298,28 @@ export default function SetupMvpPage() {
   const [profileLookups, setProfileLookups] = useState<ProfileLookupsState>(DEFAULT_PROFILE_LOOKUPS);
   const [connectionStatus, setConnectionStatus] = useState<ConnectorStatusKey>('NOT_CONNECTED');
   const [connectorSiteMetadata, setConnectorSiteMetadata] = useState<ConnectorSiteMetadata | null>(null);
-  const [lastVerificationAt, setLastVerificationAt] = useState<string | null>(null);
   const [showConnectorToken, setShowConnectorToken] = useState(false);
   const [connectorTokenFocused, setConnectorTokenFocused] = useState(false);
+  const [templateOptions, setTemplateOptions] = useState<PublicTemplateOption[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState('');
   const [connectorCheck, setConnectorCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'failed'; message?: string }>({
     status: 'idle',
   });
+  const [entitlementState, setEntitlementState] = useState<{
+    status: 'checking' | 'allowed' | 'trial_expired' | 'blocked';
+    message?: string;
+    upgradeUrl?: string;
+  }>({ status: 'checking' });
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<DraftState>;
-      setDraft((prev) => ({ ...prev, ...parsed }));
+      window.setTimeout(() => {
+        setDraft((prev) => ({ ...prev, ...parsed }));
+      }, 0);
     } catch {
       // Ignore malformed local draft.
     }
@@ -341,6 +379,174 @@ export default function SetupMvpPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkEntitlement() {
+      const onboardingSessionId = searchParams.get('session');
+      const params = onboardingSessionId ? `?session=${encodeURIComponent(onboardingSessionId)}` : '';
+
+      try {
+        const response = await fetch(`/api/subscription/current${params}`, { method: 'GET', cache: 'no-store' });
+        const payload = await safeJson<{
+          entitled?: boolean;
+          reason?: string;
+          redirectTo?: string;
+          lockBehavior?: {
+            allowLoginView?: boolean;
+            blockPublishing?: boolean;
+            blockLaunch?: boolean;
+            blockNewWorkspace?: boolean;
+          };
+        }>(response);
+
+        if (cancelled) return;
+
+        if (payload?.entitled) {
+          setEntitlementState({ status: 'allowed' });
+          return;
+        }
+
+        if (payload?.reason === 'TRIAL_EXPIRED') {
+          setEntitlementState({
+            status: 'trial_expired',
+            message: 'Your trial has expired. You can still sign in to review your workspace, but publishing and new workspace actions are locked until you upgrade.',
+            upgradeUrl: payload.redirectTo || marketingPricingUrl,
+          });
+          return;
+        }
+
+        const redirectTo = payload?.redirectTo || marketingPricingUrl;
+        setEntitlementState({ status: 'blocked' });
+
+        const resolvedRedirect = new URL(redirectTo, window.location.origin);
+        if (resolvedRedirect.origin === window.location.origin) {
+          router.replace(`${resolvedRedirect.pathname}${resolvedRedirect.search}${resolvedRedirect.hash}`);
+        } else {
+          window.open(resolvedRedirect.toString(), '_self', 'noopener,noreferrer');
+        }
+      } catch {
+        if (cancelled) return;
+        setEntitlementState({
+          status: 'blocked',
+          message: 'Unable to validate access right now. Please start from pricing to continue onboarding.',
+          upgradeUrl: marketingPricingUrl,
+        });
+      }
+    }
+
+    void checkEntitlement();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [marketingPricingUrl, router, searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const sessionId = searchParams.get('session');
+
+    async function hydrateFromSession() {
+      if (!sessionId) return;
+
+      try {
+        const response = await fetch(`/api/public/onboarding/session/${encodeURIComponent(sessionId)}`, { method: 'GET', cache: 'no-store' });
+        const payload = await safeJson<{
+          ok?: boolean;
+          selectedPlanId?: string;
+          selectedTemplateId?: string;
+        }>(response);
+
+        if (cancelled || !payload?.ok) return;
+
+        setDraft((prev) => ({
+          ...prev,
+          planId: payload.selectedPlanId || prev.planId,
+          selectedTemplateId: payload.selectedTemplateId || prev.selectedTemplateId,
+          newWebsiteData: {
+            ...prev.newWebsiteData,
+            selectedTemplateId: payload.selectedTemplateId || prev.newWebsiteData.selectedTemplateId,
+          },
+        }));
+      } catch {
+        // Ignore session hydration failures.
+      }
+    }
+
+    void hydrateFromSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTemplateOptions() {
+      if (draft.websiteType !== 'NEW_WEBSITE') {
+        setTemplatesError('');
+        return;
+      }
+
+      try {
+        setTemplatesLoading(true);
+        setTemplatesError('');
+
+        const countryCode = mapCountryToCode(draft.profile.country);
+        const params = new URLSearchParams({
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          websiteType: 'NEW_WEBSITE',
+          country: countryCode,
+          planId: draft.planId,
+        });
+
+        const response = await fetch(`/api/public/templates?${params.toString()}`, { method: 'GET', cache: 'no-store' });
+        const payload = await safeJson<{ templates?: PublicTemplateOption[] }>(response);
+
+        if (cancelled) return;
+
+        if (!response.ok || !Array.isArray(payload?.templates)) {
+          throw new Error('Template catalog unavailable.');
+        }
+
+        const templates = payload.templates;
+        setTemplateOptions(templates);
+        setDraft((prev) => {
+          const selected = templates.some((item) => item.templateId === prev.selectedTemplateId)
+            ? prev.selectedTemplateId
+            : templates[0]?.templateId || '';
+
+          return {
+            ...prev,
+            selectedTemplateId: selected,
+            newWebsiteData: {
+              ...prev.newWebsiteData,
+              selectedTemplateId: selected,
+            },
+          };
+        });
+
+        if (templates.length === 0) {
+          setTemplatesError('No templates are currently available for this plan and country.');
+        }
+      } catch {
+        if (cancelled) return;
+        setTemplateOptions([]);
+        setTemplatesError('Live template catalog is temporarily unavailable.');
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
+      }
+    }
+
+    void loadTemplateOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft.planId, draft.profile.country, draft.websiteType]);
 
   const supportNeeded = useMemo(() => {
     if (draft.websiteType === 'CUSTOM_HEADLESS') return true;
@@ -460,7 +666,6 @@ export default function SetupMvpPage() {
     }));
     setConnectionStatus('NOT_CONNECTED');
     setConnectorSiteMetadata(null);
-    setLastVerificationAt(null);
     setConnectorCheck({ status: 'idle' });
     setShowConnectorToken(false);
   }
@@ -480,7 +685,6 @@ export default function SetupMvpPage() {
 
     setConnectorCheck({ status: 'checking' });
     setConnectionStatus('PENDING_VERIFICATION');
-    setLastVerificationAt(new Date().toISOString());
 
     try {
       const response = await fetch('/api/cloud/connector/preflight', {
@@ -537,6 +741,11 @@ export default function SetupMvpPage() {
       return;
     }
 
+    if (draft.websiteType === 'NEW_WEBSITE' && !draft.selectedTemplateId) {
+      setError('Please select a template for new website setup.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setChecklist(null);
@@ -589,7 +798,7 @@ export default function SetupMvpPage() {
           planId: draft.planId,
           websiteType: draft.websiteType,
           businessProfile,
-          selectedTemplateId: draft.selectedTemplateId,
+          selectedTemplateId: draft.websiteType === 'NEW_WEBSITE' ? draft.selectedTemplateId : undefined,
           supportRequired: effectiveSupportNeeded,
         }),
       });
@@ -678,7 +887,6 @@ export default function SetupMvpPage() {
             siteOrigin?: string;
           }>(verifyRes);
 
-          setLastVerificationAt(new Date().toISOString());
 
           if (!verifyRes.ok || !verifyData?.verified) {
             effectiveSupportNeeded = true;
@@ -886,6 +1094,47 @@ export default function SetupMvpPage() {
     );
   }
 
+  if (entitlementState.status === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0a1020] to-[#101c2c]">
+        <GlassCard className="max-w-2xl w-full p-10 border-blue-900/30">
+          <p className="text-xs uppercase tracking-[0.3em] text-blue-400 font-semibold mb-2">Marveo OS Installation</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Checking your onboarding access</h1>
+          <p className="text-slate-300">Verifying trial/subscription entitlement and onboarding session.</p>
+        </GlassCard>
+      </div>
+    );
+  }
+
+  if (entitlementState.status === 'trial_expired') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0a1020] to-[#101c2c]">
+        <GlassCard className="max-w-2xl w-full p-10 border-amber-700/40">
+          <p className="text-xs uppercase tracking-[0.3em] text-amber-300 font-semibold mb-2">Subscription Required</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Trial expired</h1>
+          <p className="text-slate-300 mb-6">{entitlementState.message}</p>
+          <div className="flex gap-3">
+            <a href="/login" className="px-5 py-3 rounded-full bg-slate-800 text-white font-semibold">Sign in</a>
+            <a href={entitlementState.upgradeUrl || marketingPricingUrl} className="px-5 py-3 rounded-full bg-amber-500 text-slate-950 font-semibold">Upgrade plan</a>
+          </div>
+        </GlassCard>
+      </div>
+    );
+  }
+
+  if (entitlementState.status === 'blocked') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#0a1020] to-[#101c2c]">
+        <GlassCard className="max-w-2xl w-full p-10 border-blue-900/30">
+          <p className="text-xs uppercase tracking-[0.3em] text-blue-400 font-semibold mb-2">Marveo OS Installation</p>
+          <h1 className="text-3xl font-bold text-white mb-2">Start from pricing to continue</h1>
+          <p className="text-slate-300 mb-6">{entitlementState.message || 'You need an active trial or subscription to access onboarding.'}</p>
+          <a href={entitlementState.upgradeUrl || marketingPricingUrl} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold">Open pricing</a>
+        </GlassCard>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-[#0a1020] to-[#101c2c] relative overflow-hidden">
       <div className="pointer-events-none absolute -left-16 top-10 h-56 w-56 rounded-full bg-cyan-500/20 blur-3xl animate-float-slow" />
@@ -1032,7 +1281,17 @@ export default function SetupMvpPage() {
                 {WEBSITE_TYPE_OPTIONS.map((option) => (
                   <button
                     key={option.key}
-                    onClick={() => setDraft((prev) => ({ ...prev, websiteType: option.key }))}
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        websiteType: option.key,
+                        selectedTemplateId: option.key === 'NEW_WEBSITE' ? prev.selectedTemplateId : '',
+                        newWebsiteData: {
+                          ...prev.newWebsiteData,
+                          selectedTemplateId: option.key === 'NEW_WEBSITE' ? prev.newWebsiteData.selectedTemplateId : '',
+                        },
+                      }))
+                    }
                     className={`rounded-2xl border p-4 text-left ${
                       draft.websiteType === option.key
                         ? 'border-blue-400 bg-blue-900/40 text-white'
@@ -1104,14 +1363,30 @@ export default function SetupMvpPage() {
                     <input value={draft.newWebsiteData.domain} onChange={(e) => setDraft((prev) => ({ ...prev, newWebsiteData: { ...prev.newWebsiteData, domain: e.target.value, frontendDomain: e.target.value } }))} placeholder="Primary website domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
                     <input value={draft.newWebsiteData.contactInfo.email} onChange={(e) => setDraft((prev) => ({ ...prev, newWebsiteData: { ...prev.newWebsiteData, contactInfo: { ...prev.newWebsiteData.contactInfo, email: e.target.value } } }))} placeholder="Contact email" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
                   </div>
-                  <div className="grid md:grid-cols-3 gap-3">
-                    {TEMPLATE_OPTIONS.map((template) => (
-                      <button key={template.id} onClick={() => setDraft((prev) => ({ ...prev, selectedTemplateId: template.id, newWebsiteData: { ...prev.newWebsiteData, selectedTemplateId: template.id } }))} className={`rounded-2xl border p-4 text-left ${draft.selectedTemplateId === template.id ? 'border-blue-400 bg-blue-900/40 text-white' : 'border-slate-600 bg-slate-900/50 text-slate-200'}`}>
-                        <p className="font-semibold">{template.name}</p>
-                        <p className="text-xs opacity-80 mt-1">{template.description}</p>
-                      </button>
-                    ))}
-                  </div>
+                  {templatesLoading ? (
+                    <div className="rounded-2xl border border-slate-700 bg-slate-900/50 p-4 text-sm text-slate-300">Loading templates...</div>
+                  ) : templateOptions.length === 0 ? (
+                    <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+                      No publishable templates are currently available for this plan and country.
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-3 gap-3">
+                      {templateOptions.map((template) => (
+                        <button
+                          key={template.templateId}
+                          onClick={() => setDraft((prev) => ({ ...prev, selectedTemplateId: template.templateId, newWebsiteData: { ...prev.newWebsiteData, selectedTemplateId: template.templateId } }))}
+                          className={`rounded-2xl border p-4 text-left ${draft.selectedTemplateId === template.templateId ? 'border-blue-400 bg-blue-900/40 text-white' : 'border-slate-600 bg-slate-900/50 text-slate-200'}`}
+                        >
+                          <p className="font-semibold">{template.name}</p>
+                          <p className="text-xs opacity-80 mt-1">{template.description}</p>
+                          <p className="mt-2 text-[11px] uppercase tracking-wide opacity-70">{template.businessType}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {templatesError ? (
+                    <p className="text-xs text-amber-200">{templatesError}</p>
+                  ) : null}
                 </div>
               )}
 
@@ -1313,5 +1588,13 @@ export default function SetupMvpPage() {
         </GlassCard>
       </div>
     </div>
+  );
+}
+
+export default function SetupMvpPage() {
+  return (
+    <Suspense fallback={null}>
+      <SetupMvpPageContent />
+    </Suspense>
   );
 }

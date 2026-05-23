@@ -9,6 +9,77 @@ export type PortalAccess = 'b2c' | 'b2b';
 export interface ManagedUserState {
   active: boolean;
   portals: PortalAccess[];
+  masterRole?:
+    | 'SUPER_ADMIN'
+    | 'ADMIN'
+    | 'SUPPORT_OFFICER'
+    | 'DEPLOYMENT_MANAGER'
+    | 'BILLING_MANAGER'
+    | 'CLIENT_OWNER'
+    | 'CLIENT_STAFF'
+    | 'CONNECTED_WORDPRESS_ADMIN'
+    | 'CONNECTED_WOOCOMMERCE_MANAGER';
+  rawAuthRole?: string;
+  status?: 'ACTIVE' | 'INVITED' | 'DISABLED';
+  assignedWorkspaceId?: string;
+  assignedClientOrganizationId?: string;
+  invitePending?: boolean;
+}
+
+export type NativeRole =
+  | 'SUPER_ADMIN'
+  | 'ADMIN'
+  | 'SUPPORT_OFFICER'
+  | 'DEPLOYMENT_MANAGER'
+  | 'BILLING_MANAGER'
+  | 'CLIENT_OWNER'
+  | 'CLIENT_STAFF';
+
+export interface NativePlatformIdentity {
+  id: string;
+  email: string;
+  name: string;
+  userType: 'INTERNAL_USER' | 'CLIENT_USER';
+  status: 'ACTIVE' | 'INVITED' | 'DISABLED';
+  roles: NativeRole[];
+  source: 'NATIVE' | 'WORDPRESS_BRIDGE';
+  wordpressUserId?: number;
+  organizationId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NativePlatformSession {
+  id: string;
+  userId: string;
+  token: string;
+  source: 'NATIVE' | 'WORDPRESS_BRIDGE';
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PlatformSettings {
+  trialDurationDays: number;
+  pricingVisibility: 'PUBLIC' | 'INTERNAL';
+  regionalPricingEnabled: boolean;
+  paymentProvider: {
+    provider: 'NONE' | 'PAYSTACK' | 'STRIPE';
+    mode: 'sandbox' | 'live';
+    configured: boolean;
+  };
+  demoMode: {
+    enabled: boolean;
+    allowOperationalMutations: boolean;
+  };
+  templatePublishRules: {
+    requireArtifactValidation: boolean;
+    requireSupportApproval: boolean;
+  };
+  supportDefaults: {
+    defaultPriority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    defaultSetupType: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+    defaultAssigneeId: string | null;
+  };
 }
 
 export interface TrackingConfig {
@@ -183,7 +254,7 @@ export interface WorkspaceOrchestration {
     promotedAt?: string;
   };
   supportAssignment?: {
-    status: 'UNASSIGNED' | 'ASSIGNED';
+    status: 'UNASSIGNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'WAITING_FOR_CLIENT' | 'COMPLETED';
     assignedAt?: string;
     assignedBy?: string;
     supportOfficerId?: string;
@@ -258,6 +329,156 @@ export interface DeploymentLink {
   };
 }
 
+export type CommercialSubscriptionStatus = 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
+export type CommercialPaymentProvider = 'PAYSTACK' | 'STRIPE';
+export type CommercialPaymentVerificationStatus = 'NOT_REQUIRED' | 'PENDING' | 'VERIFIED' | 'FAILED' | 'SANDBOX_VERIFIED';
+export type CommercialBillingInterval = 'MONTHLY' | 'ANNUAL';
+export type CommercialTemplateStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+export type CommercialTemplateVisibility = 'INTERNAL' | 'PUBLIC';
+export type CommercialTemplateWebsiteType = 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
+export type CommercialTemplateStack = 'WORDPRESS_NEXTJS' | 'WORDPRESS_ONLY' | 'NEXTJS' | 'CUSTOM';
+export type CommercialTemplatePlanAvailability = 'starter' | 'business' | 'growth' | 'enterprise' | 'all';
+export type CommercialTemplateRepoSource = 'MARVEO_TEMPLATES' | 'MANUAL' | 'EXTERNAL';
+export type CommercialTemplateArtifactStatus = 'MISSING' | 'FOUND' | 'NOT_VALIDATED';
+
+export interface CommercialPlanIntervalPricing {
+  amount: number;
+  setupFee?: number;
+}
+
+export interface CommercialPlanRegionalPricing {
+  country: string;
+  currency: string;
+  monthly: CommercialPlanIntervalPricing;
+  annual: CommercialPlanIntervalPricing;
+  annualDiscountPercent?: number;
+}
+
+export interface CommercialPlanConfig {
+  id: string;
+  name: string;
+  description: string;
+  workspaceLimit: number;
+  featureEntitlements: string[];
+  trialEnabled: boolean;
+  trialDurationDays?: number;
+  regions: CommercialPlanRegionalPricing[];
+}
+
+export interface CommercialIdentity {
+  id: string;
+  email: string;
+  name?: string;
+  phone?: string;
+  company?: string;
+  wpUserId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommercialOrganization {
+  id: string;
+  name: string;
+  ownerIdentityId: string;
+  country: string;
+  preferredBillingInterval?: CommercialBillingInterval;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommercialSubscription {
+  id: string;
+  organizationId: string;
+  identityId: string;
+  planId: string;
+  country: string;
+  currency: string;
+  amount: number;
+  setupFee?: number;
+  billingInterval: CommercialBillingInterval;
+  intendedBillingInterval: CommercialBillingInterval;
+  status: CommercialSubscriptionStatus;
+  paymentReference?: string;
+  paymentProvider?: CommercialPaymentProvider;
+  paymentMode: 'TRIAL' | 'PAID';
+  paymentVerificationStatus: CommercialPaymentVerificationStatus;
+  paymentVerifiedAt?: string;
+  trialEnabled: boolean;
+  trialDurationDays?: number;
+  trialStartDate?: string;
+  trialEndDate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommercialOnboardingSession {
+  id: string;
+  identityId: string;
+  organizationId: string;
+  subscriptionId: string;
+  selectedPlanId: string;
+  selectedTemplateId?: string;
+  billingInterval: CommercialBillingInterval;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  source: 'marketing_website' | 'internal';
+}
+
+export interface CommercialTemplateConfig {
+  templateId: string;
+  name: string;
+  slug: string;
+  businessType: string;
+  sector?: string;
+  category?: string;
+  description: string;
+  previewImage: string;
+  status: CommercialTemplateStatus;
+  visibility: CommercialTemplateVisibility;
+  supportedWebsiteTypes: CommercialTemplateWebsiteType[];
+  supportedStacks: CommercialTemplateStack[];
+  planAvailability: CommercialTemplatePlanAvailability[];
+  countryAvailability?: string[];
+  featureModules: string[];
+  requiresSupport: boolean;
+  repoSource: CommercialTemplateRepoSource;
+  repoPath?: string;
+  version: string;
+  artifactStatus: CommercialTemplateArtifactStatus;
+  createdAt: string;
+  updatedAt: string;
+  preview?: {
+    tagline?: string;
+    palette?: {
+      primary: string;
+      secondary: string;
+      accent: string;
+      background: string;
+      text: string;
+    };
+    typography?: {
+      heading: string;
+      body: string;
+    };
+    routes?: Array<{ path: string; label: string; description: string }>;
+  };
+}
+
+export interface CommercialConfig {
+  countryCurrencyMap: Record<string, string>;
+  plans: CommercialPlanConfig[];
+  templates: CommercialTemplateConfig[];
+  trialDefaults: {
+    trialEnabled: boolean;
+    trialDurationDays: number;
+  };
+  identities: Record<string, CommercialIdentity>;
+  organizations: Record<string, CommercialOrganization>;
+  subscriptions: Record<string, CommercialSubscription>;
+  onboardingSessions: Record<string, CommercialOnboardingSession>;
+}
+
 export interface CloudOrchestrationStore {
   workspaces: Record<string, WorkspaceOrchestration>;
   pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
@@ -282,6 +503,7 @@ export interface CloudOrchestrationStore {
     businessModels: string[];
     countries: Array<{ code: string; name: string }>;
   };
+  commercial: CommercialConfig;
 }
 
 export const PLAN_WORKSPACE_LIMITS: Record<AccountPlan, number> = {
@@ -307,6 +529,12 @@ export type RoleModuleVisibility = Record<string, Partial<Record<AdminModuleKey,
 
 export interface AdminConfigStore {
   users: Record<string, ManagedUserState>;
+  nativeAuth: {
+    identities: Record<string, NativePlatformIdentity>;
+    sessions: Record<string, NativePlatformSession>;
+    permissions: Record<string, string[]>;
+  };
+  platformSettings: PlatformSettings;
   tracking: TrackingConfig;
   smtp: SmtpConfig;
   forms: FormRoutingRule[];
@@ -328,10 +556,9 @@ const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
   adminSettings: true,
 };
 
-// ─── WordPress persistence (production) ──────────────────────────────────────
-// When running on Vercel, adminStore reads/writes to WordPress via REST API
-// so all data survives deployments. Set WP_APP_USER and WP_APP_PASSWORD
-// (a WordPress Application Password) in your Vercel environment variables.
+// ─── Optional WordPress compatibility persistence ────────────────────────────
+// Native platform persistence is the operational source of truth.
+// Set MARVEO_STORE_BACKEND=wordpress_compat only when compatibility is required.
 import { getConfig } from '@/src/config/client';
 
 const getWpApiUrl = () => {
@@ -342,6 +569,7 @@ const getWpApiUrl = () => {
 export const WP_API_URL = getWpApiUrl();
 const WP_APP_USER = process.env.WP_APP_USER || '';
 const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD || '';
+const STORE_BACKEND = process.env.MARVEO_STORE_BACKEND || 'native_file';
 
 async function wpAuthHeader(): Promise<Record<string, string>> {
   try {
@@ -364,6 +592,34 @@ const STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-conf
 
 const DEFAULT_STORE: AdminConfigStore = {
   users: {},
+  nativeAuth: {
+    identities: {},
+    sessions: {},
+    permissions: {},
+  },
+  platformSettings: {
+    trialDurationDays: 14,
+    pricingVisibility: 'PUBLIC',
+    regionalPricingEnabled: true,
+    paymentProvider: {
+      provider: 'NONE',
+      mode: 'sandbox',
+      configured: false,
+    },
+    demoMode: {
+      enabled: process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true',
+      allowOperationalMutations: false,
+    },
+    templatePublishRules: {
+      requireArtifactValidation: true,
+      requireSupportApproval: false,
+    },
+    supportDefaults: {
+      defaultPriority: 'MEDIUM',
+      defaultSetupType: 'NEW_WEBSITE',
+      defaultAssigneeId: null,
+    },
+  },
   tracking: {
     ecommerceDomain: '',
     googleAnalyticsId: '',
@@ -464,6 +720,237 @@ const DEFAULT_STORE: AdminConfigStore = {
         { code: 'AU', name: 'Australia' },
       ],
     },
+    commercial: {
+      countryCurrencyMap: {
+        NG: 'NGN',
+        US: 'USD',
+        GB: 'GBP',
+        CA: 'CAD',
+        AE: 'AED',
+        AU: 'AUD',
+      },
+      plans: [
+        {
+          id: 'starter',
+          name: 'Starter Workspace',
+          description: 'For founders and growing businesses.',
+          workspaceLimit: 1,
+          featureEntitlements: ['workspace.basic', 'onboarding.guided', 'support.standard'],
+          trialEnabled: true,
+          trialDurationDays: 14,
+          regions: [
+            { country: 'NG', currency: 'NGN', monthly: { amount: 25000, setupFee: 0 }, annual: { amount: 250000, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'US', currency: 'USD', monthly: { amount: 49, setupFee: 0 }, annual: { amount: 490, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'GB', currency: 'GBP', monthly: { amount: 39, setupFee: 0 }, annual: { amount: 390, setupFee: 0 }, annualDiscountPercent: 17 },
+          ],
+        },
+        {
+          id: 'growth',
+          name: 'Growth Operations',
+          description: 'For teams operating across multiple workflows.',
+          workspaceLimit: 5,
+          featureEntitlements: ['workspace.multi', 'analytics.advanced', 'support.priority'],
+          trialEnabled: true,
+          trialDurationDays: 14,
+          regions: [
+            { country: 'NG', currency: 'NGN', monthly: { amount: 85000, setupFee: 0 }, annual: { amount: 850000, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'US', currency: 'USD', monthly: { amount: 149, setupFee: 0 }, annual: { amount: 1490, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'GB', currency: 'GBP', monthly: { amount: 119, setupFee: 0 }, annual: { amount: 1190, setupFee: 0 }, annualDiscountPercent: 17 },
+          ],
+        },
+        {
+          id: 'enterprise',
+          name: 'Enterprise Infrastructure',
+          description: 'For enterprise and agency operations at scale.',
+          workspaceLimit: 999,
+          featureEntitlements: ['workspace.unlimited', 'governance.advanced', 'support.dedicated'],
+          trialEnabled: false,
+          trialDurationDays: 0,
+          regions: [
+            { country: 'NG', currency: 'NGN', monthly: { amount: 0, setupFee: 0 }, annual: { amount: 0, setupFee: 0 } },
+            { country: 'US', currency: 'USD', monthly: { amount: 0, setupFee: 0 }, annual: { amount: 0, setupFee: 0 } },
+            { country: 'GB', currency: 'GBP', monthly: { amount: 0, setupFee: 0 }, annual: { amount: 0, setupFee: 0 } },
+          ],
+        },
+      ],
+      templates: [
+        {
+          templateId: 'template-business-pro',
+          name: 'Business Pro',
+          slug: 'business-pro',
+          businessType: 'Corporate',
+          sector: 'landing-pages',
+          category: 'business',
+          description: 'Professional services and company profile template for fast new-site launch.',
+          previewImage: '/images/templates/business-pro.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'NEXTJS'],
+          planAvailability: ['starter', 'growth', 'all'],
+          featureModules: ['lead.capture', 'pages.core', 'blog.basic'],
+          requiresSupport: false,
+          repoSource: 'MARVEO_TEMPLATES',
+          repoPath: 'landing-pages/business-pro/template.json',
+          version: '1.0.0',
+          artifactStatus: 'FOUND',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          preview: {
+            tagline: 'A professional, conversion-focused website for service brands.',
+            palette: {
+              primary: '#1A1A2E',
+              secondary: '#F4F4F8',
+              accent: '#4F6EF7',
+              background: '#FFFFFF',
+              text: '#111111',
+            },
+            typography: { heading: 'Inter', body: 'Inter' },
+            routes: [
+              { path: '/', label: 'Home', description: 'Hero, services overview and call to action' },
+              { path: '/about', label: 'About', description: 'Company story and team profiles' },
+              { path: '/services', label: 'Services', description: 'Service offerings with detail pages' },
+              { path: '/contact', label: 'Contact', description: 'Contact form and location details' },
+            ],
+          },
+        },
+        {
+          templateId: 'template-makeup-artist',
+          name: 'Makeup Artist Template',
+          slug: 'makeup-artist',
+          businessType: 'Beauty',
+          sector: 'beauty',
+          category: 'service-commerce',
+          description: 'Beauty service and commerce template for stylists, salons, and makeup artists.',
+          previewImage: '/images/templates/makeup-artist.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'WORDPRESS_ONLY'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          countryAvailability: ['NG', 'US', 'GB'],
+          featureModules: ['catalog.core', 'payments.checkout', 'campaign.landing'],
+          requiresSupport: false,
+          repoSource: 'MARVEO_TEMPLATES',
+          repoPath: 'beauty/makeup-artist/template.json',
+          version: '1.0.0',
+          artifactStatus: 'FOUND',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          preview: {
+            tagline: 'Luxury makeup artistry for brides, editorials, and special occasions.',
+            palette: {
+              primary: '#C2847A',
+              secondary: '#F7EDE9',
+              accent: '#8C5E57',
+              background: '#FDFAF9',
+              text: '#2A1A14',
+            },
+            typography: { heading: 'Cormorant Garamond', body: 'Nunito Sans' },
+            routes: [
+              { path: '/', label: 'Home', description: 'Hero, services preview, testimonials, booking CTA' },
+              { path: '/services', label: 'Services', description: 'Full service menu with pricing tiers' },
+              { path: '/gallery', label: 'Gallery', description: 'Portfolio showcase and work samples' },
+              { path: '/contact', label: 'Contact & Book', description: 'Booking enquiry form and contact information' },
+            ],
+          },
+        },
+        {
+          templateId: 'template-salon',
+          name: 'Salon Operations',
+          slug: 'salon',
+          businessType: 'Beauty',
+          sector: 'beauty',
+          category: 'service-commerce',
+          description: 'A modern salon experience built around craft, community, and care.',
+          previewImage: '/images/templates/salon.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'WORDPRESS_ONLY'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          featureModules: ['catalog.core', 'booking.basic', 'campaign.landing'],
+          requiresSupport: false,
+          repoSource: 'MARVEO_TEMPLATES',
+          repoPath: 'beauty/salon/template.json',
+          version: '1.0.0',
+          artifactStatus: 'FOUND',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          preview: {
+            tagline: 'A modern salon experience built around craft, community, and care.',
+            palette: {
+              primary: '#2B4E42',
+              secondary: '#EEF5F0',
+              accent: '#C8A96E',
+              background: '#F9FBF9',
+              text: '#192720',
+            },
+            typography: { heading: 'Playfair Display', body: 'Inter' },
+            routes: [
+              { path: '/', label: 'Home', description: 'Hero, services preview, team intro, booking CTA' },
+              { path: '/services', label: 'Services & Pricing', description: 'Full service list with pricing' },
+              { path: '/team', label: 'Our Team', description: 'Stylist profiles and specialties' },
+              { path: '/contact', label: 'Book Now', description: 'Booking enquiry form and salon details' },
+            ],
+          },
+        },
+        {
+          templateId: 'template-migration-redesign',
+          name: 'Migration Redesign Kit',
+          slug: 'migration-redesign-kit',
+          businessType: 'Migration',
+          sector: 'migration',
+          category: 'redesign',
+          description: 'Guided redesign starter used for existing website migration and structure cleanup.',
+          previewImage: '/images/templates/migration-redesign.jpg',
+          status: 'ACTIVE',
+          visibility: 'INTERNAL',
+          supportedWebsiteTypes: ['EXISTING_WEBSITE'],
+          supportedStacks: ['WORDPRESS_ONLY', 'CUSTOM'],
+          planAvailability: ['growth', 'enterprise'],
+          featureModules: ['migration.audit', 'ia.restructure'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          templateId: 'template-headless-slate',
+          name: 'Headless Slate',
+          slug: 'headless-slate',
+          businessType: 'Technology',
+          sector: 'headless',
+          category: 'starter',
+          description: 'Headless-first template skeleton for custom frontend deployments.',
+          previewImage: '/images/templates/headless-slate.jpg',
+          status: 'DRAFT',
+          visibility: 'INTERNAL',
+          supportedWebsiteTypes: ['CUSTOM_HEADLESS'],
+          supportedStacks: ['NEXTJS', 'CUSTOM'],
+          planAvailability: ['growth', 'enterprise'],
+          featureModules: ['headless.adapter', 'content.api'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '0.1.0',
+          artifactStatus: 'MISSING',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      trialDefaults: {
+        trialEnabled: true,
+        trialDurationDays: 14,
+      },
+      identities: {},
+      organizations: {},
+      subscriptions: {},
+      onboardingSessions: {},
+    },
   },
 };
 
@@ -506,10 +993,165 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
     ? sanitizePublications(pagePublicationsRaw)
     : sanitizePublications(legacyPageDrafts);
 
+  const normalizeCommercialRegions = (plans: CommercialConfig['plans'] | undefined) => {
+    if (!Array.isArray(plans)) return DEFAULT_STORE.cloud.commercial.plans;
+
+    return plans.map((plan) => ({
+      ...plan,
+      regions: Array.isArray(plan.regions)
+        ? plan.regions.map((region) => {
+            const legacyAmount = Number((region as { amount?: number }).amount ?? 0);
+            const monthly = region.monthly ?? { amount: legacyAmount, setupFee: (region as { setupFee?: number }).setupFee ?? 0 };
+            const annual = region.annual ?? { amount: legacyAmount > 0 ? legacyAmount * 10 : 0, setupFee: (region as { setupFee?: number }).setupFee ?? 0 };
+
+            return {
+              country: String(region.country ?? '').trim().toUpperCase(),
+              currency: String(region.currency ?? '').trim().toUpperCase(),
+              monthly: {
+                amount: Number(monthly.amount ?? 0),
+                setupFee: Number(monthly.setupFee ?? 0),
+              },
+              annual: {
+                amount: Number(annual.amount ?? 0),
+                setupFee: Number(annual.setupFee ?? 0),
+              },
+              annualDiscountPercent: typeof region.annualDiscountPercent === 'number' ? region.annualDiscountPercent : undefined,
+            };
+          })
+        : [],
+    }));
+  };
+
+  const normalizeCommercialSubscriptions = (subscriptions: CommercialConfig['subscriptions'] | undefined) => {
+    if (!subscriptions) return {};
+
+    return Object.fromEntries(
+      Object.entries(subscriptions).map(([key, subscription]) => [
+        key,
+        {
+          ...subscription,
+          billingInterval: subscription.billingInterval ?? 'MONTHLY',
+          intendedBillingInterval: subscription.intendedBillingInterval ?? subscription.billingInterval ?? 'MONTHLY',
+        },
+      ]),
+    );
+  };
+
+  const normalizeCommercialTemplates = (templates: CommercialConfig['templates'] | undefined) => {
+    if (!Array.isArray(templates) || templates.length === 0) return DEFAULT_STORE.cloud.commercial.templates;
+
+    const validStatuses = new Set(['DRAFT', 'ACTIVE', 'ARCHIVED']);
+    const validVisibility = new Set(['INTERNAL', 'PUBLIC']);
+    const validWebsiteTypes = new Set(['NEW_WEBSITE', 'EXISTING_WEBSITE', 'CUSTOM_HEADLESS']);
+    const validStacks = new Set(['WORDPRESS_NEXTJS', 'WORDPRESS_ONLY', 'NEXTJS', 'CUSTOM']);
+    const validPlans = new Set(['starter', 'business', 'growth', 'enterprise', 'all']);
+    const validRepoSources = new Set(['MARVEO_TEMPLATES', 'MANUAL', 'EXTERNAL']);
+    const validArtifactStatuses = new Set(['MISSING', 'FOUND', 'NOT_VALIDATED']);
+
+    return templates
+      .filter((template) => template && template.templateId && template.name)
+      .map((template) => {
+        const status = String(template.status || 'DRAFT').trim().toUpperCase();
+        const visibility = String(template.visibility || 'INTERNAL').trim().toUpperCase();
+        const supportedWebsiteTypes = Array.isArray(template.supportedWebsiteTypes)
+          ? template.supportedWebsiteTypes
+              .map((item) => String(item).trim().toUpperCase())
+              .filter((item) => validWebsiteTypes.has(item))
+          : [];
+        const supportedStacks = Array.isArray(template.supportedStacks)
+          ? template.supportedStacks
+              .map((item) => String(item).trim().toUpperCase())
+              .filter((item) => validStacks.has(item))
+          : [];
+        const planAvailability = Array.isArray(template.planAvailability)
+          ? template.planAvailability
+              .map((item) => String(item).trim().toLowerCase())
+              .filter((item) => validPlans.has(item))
+          : [];
+        const repoSource = String(template.repoSource || '').trim().toUpperCase();
+        const repoPath = String(template.repoPath || '').trim();
+        const version = String(template.version || '').trim() || '1.0.0';
+        const artifactStatus = String(template.artifactStatus || '').trim().toUpperCase();
+        const resolvedRepoSource = validRepoSources.has(repoSource) ? repoSource : (repoPath ? 'MARVEO_TEMPLATES' : 'MANUAL');
+        const resolvedArtifactStatus = validArtifactStatuses.has(artifactStatus)
+          ? artifactStatus
+          : (repoPath ? 'NOT_VALIDATED' : 'MISSING');
+
+        return {
+          templateId: String(template.templateId).trim(),
+          name: String(template.name).trim(),
+          slug: String(template.slug || template.templateId).trim().toLowerCase(),
+          businessType: String(template.businessType || 'General').trim(),
+          sector: String(template.sector || '').trim() || undefined,
+          category: String(template.category || '').trim() || undefined,
+          description: String(template.description || '').trim(),
+          previewImage: String(template.previewImage || '').trim(),
+          status: (validStatuses.has(status) ? status : 'DRAFT') as CommercialTemplateStatus,
+          visibility: (validVisibility.has(visibility) ? visibility : 'INTERNAL') as CommercialTemplateVisibility,
+          supportedWebsiteTypes: (supportedWebsiteTypes.length > 0 ? supportedWebsiteTypes : ['NEW_WEBSITE']) as CommercialTemplateWebsiteType[],
+          supportedStacks: (supportedStacks.length > 0 ? supportedStacks : ['WORDPRESS_NEXTJS']) as CommercialTemplateStack[],
+          planAvailability: (planAvailability.length > 0 ? planAvailability : ['all']) as CommercialTemplatePlanAvailability[],
+          countryAvailability: Array.isArray(template.countryAvailability)
+            ? template.countryAvailability.map((item) => String(item).trim().toUpperCase()).filter(Boolean)
+            : undefined,
+          featureModules: Array.isArray(template.featureModules)
+            ? template.featureModules.map((item) => String(item).trim()).filter(Boolean)
+            : [],
+          requiresSupport: Boolean(template.requiresSupport),
+          repoSource: resolvedRepoSource as CommercialTemplateRepoSource,
+          repoPath: repoPath || undefined,
+          version,
+          artifactStatus: resolvedArtifactStatus as CommercialTemplateArtifactStatus,
+          createdAt: String(template.createdAt || new Date().toISOString()),
+          updatedAt: String(template.updatedAt || new Date().toISOString()),
+          preview: template.preview ?? undefined,
+        };
+      });
+  };
+
+  const normalizeCommercialSessions = (sessions: CommercialConfig['onboardingSessions'] | undefined) => {
+    if (!sessions) return {};
+
+    return Object.fromEntries(
+      Object.entries(sessions).map(([key, session]) => [
+        key,
+        {
+          ...session,
+          billingInterval: session.billingInterval ?? 'MONTHLY',
+        },
+      ]),
+    );
+  };
+
   return {
     ...DEFAULT_STORE,
     ...parsed,
     users: parsed.users ?? {},
+    nativeAuth: {
+      identities: parsed.nativeAuth?.identities ?? {},
+      sessions: parsed.nativeAuth?.sessions ?? {},
+      permissions: parsed.nativeAuth?.permissions ?? {},
+    },
+    platformSettings: {
+      ...DEFAULT_STORE.platformSettings,
+      ...(parsed.platformSettings ?? {}),
+      paymentProvider: {
+        ...DEFAULT_STORE.platformSettings.paymentProvider,
+        ...(parsed.platformSettings?.paymentProvider ?? {}),
+      },
+      demoMode: {
+        ...DEFAULT_STORE.platformSettings.demoMode,
+        ...(parsed.platformSettings?.demoMode ?? {}),
+      },
+      templatePublishRules: {
+        ...DEFAULT_STORE.platformSettings.templatePublishRules,
+        ...(parsed.platformSettings?.templatePublishRules ?? {}),
+      },
+      supportDefaults: {
+        ...DEFAULT_STORE.platformSettings.supportDefaults,
+        ...(parsed.platformSettings?.supportDefaults ?? {}),
+      },
+    },
     tracking: { ...DEFAULT_STORE.tracking, ...(parsed.tracking ?? {}) },
     smtp: { ...DEFAULT_STORE.smtp, ...(parsed.smtp ?? {}) },
     forms: Array.isArray(parsed.forms) ? parsed.forms : DEFAULT_STORE.forms,
@@ -547,6 +1189,22 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
               }))
               .filter((item) => item.code && item.name)
           : DEFAULT_STORE.cloud.lookups.countries,
+      },
+      commercial: {
+        countryCurrencyMap: {
+          ...DEFAULT_STORE.cloud.commercial.countryCurrencyMap,
+          ...((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.countryCurrencyMap ?? {}),
+        },
+        plans: normalizeCommercialRegions((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.plans),
+        templates: normalizeCommercialTemplates((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.templates),
+        trialDefaults: {
+          ...DEFAULT_STORE.cloud.commercial.trialDefaults,
+          ...((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.trialDefaults ?? {}),
+        },
+        identities: (parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.identities ?? {},
+        organizations: (parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.organizations ?? {},
+        subscriptions: normalizeCommercialSubscriptions((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.subscriptions),
+        onboardingSessions: normalizeCommercialSessions((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.onboardingSessions),
       },
     },
   };
@@ -608,7 +1266,7 @@ async function writeToFile(data: AdminConfigStore): Promise<void> {
 
 export async function readAdminStore(): Promise<AdminConfigStore> {
   try {
-    if (process.env.VERCEL) {
+    if (STORE_BACKEND === 'wordpress_compat') {
       return await readFromWordPress();
     }
     return await readFromFile();
@@ -618,7 +1276,7 @@ export async function readAdminStore(): Promise<AdminConfigStore> {
 }
 
 export async function writeAdminStore(next: AdminConfigStore): Promise<void> {
-  if (process.env.VERCEL) {
+  if (STORE_BACKEND === 'wordpress_compat') {
     await writeToWordPress(next);
   } else {
     await writeToFile(next);

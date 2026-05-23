@@ -5,5 +5,6 @@ export async function POST() {
   const cookieStore = await cookies();
   cookieStore.delete('admin_token');
   cookieStore.delete('admin_user');
+  cookieStore.delete('marveo_native_session');
   return NextResponse.json({ success: true });
 }

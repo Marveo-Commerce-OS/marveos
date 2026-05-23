@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { readAdminStore } from '@/lib/adminStore';
-import { hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
+import { readAdminStore, updateAdminStore, type NativeRole } from '@/lib/adminStore';
+import {
+  hasClientMasterAccess,
+  hasInternalMasterAccess,
+  normalizeMarveoRoles,
+  normalizeRoles,
+} from '@/lib/auth';
 import { getConfig } from '@/src/config/client';
+import { randomUUID } from 'node:crypto';
 
 const getWpApiUrl = () => {
   const config = getConfig();
@@ -51,7 +57,46 @@ export async function POST(req: NextRequest) {
 
       const cookieStore = await cookies();
       const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
+      const nativeSessionToken = randomUUID();
+      const nativeIdentityId = 'native_demo_admin';
+      const nativeSessionId = `session_${Date.now()}`;
+      const nowIso = new Date().toISOString();
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+
+      await updateAdminStore((current) => ({
+        ...current,
+        nativeAuth: {
+          ...current.nativeAuth,
+          identities: {
+            ...current.nativeAuth.identities,
+            [nativeIdentityId]: {
+              id: nativeIdentityId,
+              email: 'demo@marveo.local',
+              name: 'Demo Admin',
+              userType: 'INTERNAL_USER',
+              status: 'ACTIVE',
+              roles: ['SUPER_ADMIN'],
+              source: 'NATIVE',
+              createdAt: current.nativeAuth.identities[nativeIdentityId]?.createdAt ?? nowIso,
+              updatedAt: nowIso,
+            },
+          },
+          sessions: {
+            ...current.nativeAuth.sessions,
+            [nativeSessionId]: {
+              id: nativeSessionId,
+              userId: nativeIdentityId,
+              token: nativeSessionToken,
+              source: 'NATIVE',
+              createdAt: nowIso,
+              expiresAt,
+            },
+          },
+        },
+      }));
+
       cookieStore.set('admin_token', `demo-token-${Date.now()}`, opts);
+      cookieStore.set('marveo_native_session', nativeSessionToken, opts);
       cookieStore.set('admin_user', JSON.stringify({
         id: 1,
         user_display_name: 'Demo Admin',
@@ -99,22 +144,73 @@ export async function POST(req: NextRequest) {
 
     const userData = await userRes.json();
     const roles = normalizeRoles(userData?.roles);
-    const internalAccess = hasInternalPlatformAccess(roles);
-    const clientAccess = hasClientWorkspaceAccess(roles);
+
+    const store = await readAdminStore();
+    const userState = store.users[String(userData.id)];
+
+    // Role normalization layer:
+    // - Marvéo-native masterRole (if assigned) is the platform source of truth.
+    // - WordPress roles are treated as compatibility inputs only.
+    const marveoRoles = normalizeMarveoRoles([
+      ...roles,
+      ...(userState?.masterRole ? [userState.masterRole] : []),
+    ]);
+    const nativeRoles = marveoRoles.filter((role): role is NativeRole => !role.startsWith('CONNECTED_'));
+
+    const internalAccess = hasInternalMasterAccess(marveoRoles);
+    const clientAccess = hasClientMasterAccess(marveoRoles);
 
     if (!internalAccess && !clientAccess) {
       return NextResponse.json({ error: 'Your account does not have access to Marveo platform surfaces.' }, { status: 403 });
     }
-
-    const store = await readAdminStore();
-    const userState = store.users[String(userData.id)];
     if (userState && !userState.active) {
       return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 });
     }
 
     const cookieStore = await cookies();
     const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
+
+    const nativeIdentityId = userData?.id ? `wp_${String(userData.id)}` : `bridge_${Date.now()}`;
+    const nativeSessionId = randomUUID();
+    const nativeSessionToken = randomUUID();
+    const nowIso = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+
+    await updateAdminStore((current) => ({
+      ...current,
+      nativeAuth: {
+        ...current.nativeAuth,
+        identities: {
+          ...current.nativeAuth.identities,
+          [nativeIdentityId]: {
+            id: nativeIdentityId,
+            email: data.user_email || `${username}@unknown.local`,
+            name: data.user_display_name || username,
+            userType: internalAccess ? 'INTERNAL_USER' : 'CLIENT_USER',
+            status: 'ACTIVE',
+            roles: nativeRoles,
+            source: 'WORDPRESS_BRIDGE',
+            wordpressUserId: typeof userData?.id === 'number' ? userData.id : undefined,
+            createdAt: current.nativeAuth.identities[nativeIdentityId]?.createdAt ?? nowIso,
+            updatedAt: nowIso,
+          },
+        },
+        sessions: {
+          ...current.nativeAuth.sessions,
+          [nativeSessionId]: {
+            id: nativeSessionId,
+            userId: nativeIdentityId,
+            token: nativeSessionToken,
+            source: 'WORDPRESS_BRIDGE',
+            createdAt: nowIso,
+            expiresAt,
+          },
+        },
+      },
+    }));
+
     cookieStore.set('admin_token', data.token, opts);
+    cookieStore.set('marveo_native_session', nativeSessionToken, opts);
     cookieStore.set('admin_user', JSON.stringify({
       id: userData.id,
       user_display_name: data.user_display_name,
