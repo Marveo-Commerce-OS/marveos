@@ -24,6 +24,12 @@ const getDemoCredentials = () => ({
   password: process.env.MARVEO_DEMO_PASSWORD || 'demo-pass-2026',
 });
 
+const getNativeSuperadminCredentials = () => ({
+  email: (process.env.MARVEO_SUPERADMIN_EMAIL || '').trim().toLowerCase(),
+  password: process.env.MARVEO_SUPERADMIN_PASSWORD || '',
+  name: (process.env.MARVEO_SUPERADMIN_NAME || 'Platform Owner').trim(),
+});
+
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 10000) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -42,17 +48,92 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutM
 
 export async function POST(req: NextRequest) {
   try {
-    const { username, password } = await req.json();
+    const payload = await req.json();
+    const username = payload?.username;
+    const password = payload?.password;
+    const requestedSurface = payload?.loginSurface === 'master' ? 'master' : 'portal';
     const WP_API_URL = getWpApiUrl();
     
     if (!username || !password) {
       return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
     }
 
+    const nativeBootstrap = getNativeSuperadminCredentials();
+    if (requestedSurface === 'master' && nativeBootstrap.email && nativeBootstrap.password) {
+      const normalizedUsername = String(username).trim().toLowerCase();
+      if (normalizedUsername === nativeBootstrap.email && password === nativeBootstrap.password) {
+        const cookieStore = await cookies();
+        const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
+        const nativeSessionToken = randomUUID();
+        const nativeIdentityId = 'native_owner_superadmin';
+        const nativeSessionId = `session_${Date.now()}`;
+        const nowIso = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+
+        await updateAdminStore((current) => ({
+          ...current,
+          users: {
+            ...current.users,
+            [nativeIdentityId]: {
+              active: true,
+              portals: ['b2c', 'b2b'],
+              masterRole: 'SUPER_ADMIN',
+              rawAuthRole: 'native_superadmin',
+              status: 'ACTIVE',
+              invitePending: false,
+            },
+          },
+          nativeAuth: {
+            ...current.nativeAuth,
+            identities: {
+              ...current.nativeAuth.identities,
+              [nativeIdentityId]: {
+                id: nativeIdentityId,
+                email: nativeBootstrap.email,
+                name: nativeBootstrap.name,
+                userType: 'INTERNAL_USER',
+                status: 'ACTIVE',
+                roles: ['SUPER_ADMIN'],
+                source: 'NATIVE',
+                createdAt: current.nativeAuth.identities[nativeIdentityId]?.createdAt ?? nowIso,
+                updatedAt: nowIso,
+              },
+            },
+            sessions: {
+              ...current.nativeAuth.sessions,
+              [nativeSessionId]: {
+                id: nativeSessionId,
+                userId: nativeIdentityId,
+                token: nativeSessionToken,
+                source: 'NATIVE',
+                createdAt: nowIso,
+                expiresAt,
+              },
+            },
+          },
+        }));
+
+        cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+        cookieStore.set('admin_user', JSON.stringify({
+          id: nativeIdentityId,
+          user_display_name: nativeBootstrap.name,
+          user_email: nativeBootstrap.email,
+          isAdmin: true,
+          roles: ['SUPER_ADMIN'],
+          portals: ['b2c', 'b2b'],
+        }), opts);
+
+        return NextResponse.json({ success: true, redirect: '/master' });
+      }
+    }
+
     if (isDemoAuthEnabled()) {
       const demo = getDemoCredentials();
       if (username !== demo.username || password !== demo.password) {
         return NextResponse.json({ error: 'Invalid demo credentials' }, { status: 401 });
+      }
+      if (requestedSurface !== 'master') {
+        return NextResponse.json({ error: 'Internal team access is only available on /master-login.' }, { status: 403 });
       }
 
       const cookieStore = await cookies();
@@ -163,6 +244,12 @@ export async function POST(req: NextRequest) {
     if (!internalAccess && !clientAccess) {
       return NextResponse.json({ error: 'Your account does not have access to Marveo platform surfaces.' }, { status: 403 });
     }
+    if (requestedSurface === 'portal' && internalAccess) {
+      return NextResponse.json({ error: 'Internal team accounts must sign in via /master-login.' }, { status: 403 });
+    }
+    if (requestedSurface === 'master' && !internalAccess) {
+      return NextResponse.json({ error: 'Client accounts must sign in via /login.' }, { status: 403 });
+    }
     if (userState && !userState.active) {
       return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 });
     }
@@ -220,7 +307,7 @@ export async function POST(req: NextRequest) {
       portals: userState?.portals ?? ['b2c'],
     }), opts);
 
-    return NextResponse.json({ success: true, redirect: internalAccess ? '/master' : '/portal' });
+    return NextResponse.json({ success: true, redirect: requestedSurface === 'master' ? '/master' : '/portal' });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 });
