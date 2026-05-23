@@ -53,6 +53,15 @@ export async function POST(req: NextRequest) {
     const password = payload?.password;
     const requestedSurface = payload?.loginSurface === 'master' ? 'master' : 'portal';
     const WP_API_URL = getWpApiUrl();
+    const persistNativeSession = async (mutate: Parameters<typeof updateAdminStore>[0]) => {
+      try {
+        await updateAdminStore(mutate);
+        return true;
+      } catch (error) {
+        console.error('Native auth persistence failed; falling back to cookie-backed auth:', error);
+        return false;
+      }
+    };
     
     if (!username || !password) {
       return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
@@ -70,7 +79,7 @@ export async function POST(req: NextRequest) {
         const nowIso = new Date().toISOString();
         const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
 
-        await updateAdminStore((current) => ({
+        const persistedNative = await persistNativeSession((current) => ({
           ...current,
           users: {
             ...current.users,
@@ -113,7 +122,10 @@ export async function POST(req: NextRequest) {
           },
         }));
 
-        cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+        cookieStore.set('admin_token', `native-superadmin-${Date.now()}`, opts);
+        if (persistedNative) {
+          cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+        }
         cookieStore.set('admin_user', JSON.stringify({
           id: nativeIdentityId,
           user_display_name: nativeBootstrap.name,
@@ -144,7 +156,7 @@ export async function POST(req: NextRequest) {
       const nowIso = new Date().toISOString();
       const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
 
-      await updateAdminStore((current) => ({
+      const persistedNative = await persistNativeSession((current) => ({
         ...current,
         nativeAuth: {
           ...current.nativeAuth,
@@ -177,7 +189,9 @@ export async function POST(req: NextRequest) {
       }));
 
       cookieStore.set('admin_token', `demo-token-${Date.now()}`, opts);
-      cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+      if (persistedNative) {
+        cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+      }
       cookieStore.set('admin_user', JSON.stringify({
         id: 1,
         user_display_name: 'Demo Admin',
@@ -263,7 +277,7 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
 
-    await updateAdminStore((current) => ({
+    const persistedNative = await persistNativeSession((current) => ({
       ...current,
       nativeAuth: {
         ...current.nativeAuth,
@@ -297,7 +311,9 @@ export async function POST(req: NextRequest) {
     }));
 
     cookieStore.set('admin_token', data.token, opts);
-    cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+    if (persistedNative) {
+      cookieStore.set('marveo_native_session', nativeSessionToken, opts);
+    }
     cookieStore.set('admin_user', JSON.stringify({
       id: userData.id,
       user_display_name: data.user_display_name,
