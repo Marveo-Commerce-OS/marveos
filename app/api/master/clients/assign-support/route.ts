@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -103,6 +104,17 @@ export async function POST(req: NextRequest) {
       action: 'master.support.assigned',
       target: workspace.id,
       details: `client=${clientEmail};officer=${supportOfficerId}`,
+    });
+
+    await sendPlatformEmailNotification({
+      templateKey: 'SUPPORT_ASSIGNED',
+      to: clientEmail,
+      variables: {
+        clientName: String(workspace.businessProfile?.businessName || clientEmail),
+        workspaceName: workspace.name,
+        supportOfficerName,
+        workspaceId: workspace.id,
+      },
     });
   }
 

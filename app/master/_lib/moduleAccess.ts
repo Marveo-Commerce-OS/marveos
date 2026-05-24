@@ -1,0 +1,32 @@
+import type { ControlCenterModuleKey } from '@/lib/adminStore';
+
+const MODULE_ROUTE_PREFIXES: Array<{ module: ControlCenterModuleKey; prefixes: string[] }> = [
+  { module: 'clients', prefixes: ['/master/clients'] },
+  { module: 'workspaces', prefixes: ['/master/workspaces'] },
+  { module: 'deploymentQueue', prefixes: ['/master/mvp-deployments', '/master/deployment'] },
+  { module: 'supportQueue', prefixes: ['/master/support'] },
+  { module: 'launchReadiness', prefixes: ['/master/launch-readiness'] },
+  { module: 'connectors', prefixes: ['/master/connectors'] },
+  { module: 'templates', prefixes: ['/master/templates'] },
+  { module: 'team', prefixes: ['/master/team'] },
+  { module: 'plansBilling', prefixes: ['/master/billing'] },
+  { module: 'reports', prefixes: ['/master/reports'] },
+  { module: 'analytics', prefixes: ['/master/analytics'] },
+  { module: 'auditLogs', prefixes: ['/master/audit-logs'] },
+  { module: 'systemSettings', prefixes: ['/master/system-settings', '/master/settings', '/master/admin-settings'] },
+];
+
+export function resolveRequiredModuleForPath(pathname: string): ControlCenterModuleKey | null {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (normalized === '/master') return 'overview';
+
+  for (const { module, prefixes } of MODULE_ROUTE_PREFIXES) {
+    for (const prefix of prefixes) {
+      if (normalized === prefix || normalized.startsWith(`${prefix}/`)) {
+        return module;
+      }
+    }
+  }
+
+  return null;
+}

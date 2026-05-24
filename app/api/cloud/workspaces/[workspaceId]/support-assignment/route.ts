@@ -7,6 +7,7 @@ import {
   setWorkspaceSupportAssignment,
 } from '@/lib/adminStore';
 import type { SupportAssignmentContract } from '@/src/contexts/support/support-assignment.contract';
+import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -133,6 +134,22 @@ export async function POST(
     details: `priority=${priority} setupType=${setupType} officer=${supportOfficerId}`,
   });
 
+  const refreshedAfterAssign = await readAdminStore();
+  const workspaceAfterAssign = refreshedAfterAssign.cloud.workspaces[workspaceId];
+  const contactEmail = String(workspaceAfterAssign?.businessProfile?.contactEmail || '').trim().toLowerCase();
+  if (contactEmail) {
+    await sendPlatformEmailNotification({
+      templateKey: 'SUPPORT_ASSIGNED',
+      to: contactEmail,
+      variables: {
+        clientName: String(workspaceAfterAssign?.businessProfile?.businessName || contactEmail),
+        workspaceName: workspaceAfterAssign?.name || workspaceId,
+        supportOfficerName,
+        workspaceId,
+      },
+    });
+  }
+
   return NextResponse.json({
     workspaceId,
     assignment: nextAssignment,
@@ -224,6 +241,24 @@ export async function PATCH(
     target: workspaceId,
     details: `status=${nextStatus} officer=${nextAssignment.supportOfficerId || 'none'} priority=${nextPriority}`,
   });
+
+  if (nextStatus === 'ASSIGNED') {
+    const refreshedAfterPatch = await readAdminStore();
+    const workspaceAfterPatch = refreshedAfterPatch.cloud.workspaces[workspaceId];
+    const contactEmail = String(workspaceAfterPatch?.businessProfile?.contactEmail || '').trim().toLowerCase();
+    if (contactEmail) {
+      await sendPlatformEmailNotification({
+        templateKey: 'SUPPORT_ASSIGNED',
+        to: contactEmail,
+        variables: {
+          clientName: String(workspaceAfterPatch?.businessProfile?.businessName || contactEmail),
+          workspaceName: workspaceAfterPatch?.name || workspaceId,
+          supportOfficerName: nextAssignment.supportOfficerName || 'Support Team',
+          workspaceId,
+        },
+      });
+    }
+  }
 
   return NextResponse.json({
     workspaceId,

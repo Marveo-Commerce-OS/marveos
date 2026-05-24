@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getConfig } from '@/src/config/client';
-import nodemailer from 'nodemailer';
+import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { sendPlatformEmailNotification, sendPlatformFailureAlert } from '@/lib/emailNotifications';
+import { generateTempPassword, upsertPasswordEntries } from '@/lib/nativePasswords';
 
 const getWpApiUrl = () => {
   const config = getConfig();
@@ -18,6 +20,47 @@ export async function POST(req: NextRequest) {
     
     if (!email) {
       return NextResponse.json({ error: 'Email address required' }, { status: 400 });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const store = await readAdminStore();
+    const nativeEntry = Object.entries(store.nativeAuth.identities).find(([, identity]) => identity.email.trim().toLowerCase() === normalizedEmail);
+    const configuredAppBaseUrl = String(store.platformSettings.email.appBaseUrl || process.env.MARVEO_APP_BASE_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`).trim();
+
+    if (nativeEntry) {
+      const [identityId, identity] = nativeEntry;
+      const tempPassword = generateTempPassword();
+      const loginUrl = new URL('/master-login', configuredAppBaseUrl).toString();
+      const changePasswordUrl = new URL('/master/profile', configuredAppBaseUrl).toString();
+
+      await updateAdminStore((current) => ({
+        ...current,
+        nativeAuth: {
+          ...current.nativeAuth,
+          permissions: {
+            ...current.nativeAuth.permissions,
+            [identityId]: upsertPasswordEntries(current.nativeAuth.permissions[identityId], tempPassword),
+          },
+        },
+      }));
+
+      await sendPlatformEmailNotification({
+        templateKey: 'PASSWORD_RESET_REQUESTED',
+        to: identity.email,
+        variables: {
+          userName: identity.name || identity.email,
+          appBaseUrl: configuredAppBaseUrl,
+          loginUrl,
+          changePasswordUrl,
+          tempPassword,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: 'If an account exists with that email, a reset email has been sent.',
+        redirect: '/login',
+      });
     }
 
     const WP_API_URL = getWpApiUrl();
@@ -67,6 +110,21 @@ export async function POST(req: NextRequest) {
 
     if (lostPasswordRes && lostPasswordRes.status >= 500) {
       console.error(`Lost password request failed with status ${lostPasswordRes.status} for user ${user.id}`);
+      await sendPlatformFailureAlert({
+        failureType: 'PASSWORD_RESET_REQUEST_FAILED',
+        errorMessage: `WordPress lost-password endpoint returned ${lostPasswordRes.status}`,
+        operationName: 'auth.forgot-password',
+      });
+    } else {
+      await sendPlatformEmailNotification({
+        templateKey: 'PASSWORD_RESET_REQUESTED',
+        to: user.email,
+        variables: {
+          userName: user?.name || user.email,
+          appBaseUrl: configuredAppBaseUrl,
+          loginUrl: new URL('/login', configuredAppBaseUrl).toString(),
+        },
+      });
     }
 
     return NextResponse.json({ 
@@ -76,6 +134,11 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('Password reset error:', error);
+    await sendPlatformFailureAlert({
+      failureType: 'PASSWORD_RESET_REQUEST_ERROR',
+      errorMessage: error instanceof Error ? error.message : 'Unknown error',
+      operationName: 'auth.forgot-password',
+    });
     return NextResponse.json({ error: 'An error occurred. Please try again.' }, { status: 500 });
   }
 }

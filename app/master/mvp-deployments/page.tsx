@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { copyTextToClipboard } from '@/lib/client/clipboard';
 
 type Workspace = {
 	id: string;
@@ -100,8 +101,8 @@ function prettyWebsiteType(type?: string) {
 	return 'Custom / Headless';
 }
 
-function copyText(value: string) {
-	void navigator.clipboard.writeText(value);
+async function copyText(value: string) {
+	return copyTextToClipboard(value);
 }
 
 export default function MasterDeploymentsPage() {
@@ -226,13 +227,16 @@ export default function MasterDeploymentsPage() {
 
 	async function copyWorkspaceId(workspaceId: string) {
 		try {
-			copyText(workspaceId);
+			const copied = await copyText(workspaceId);
+			if (!copied) {
+				throw new Error('copy-failed');
+			}
 			setCopiedWorkspaceId(workspaceId);
 			window.setTimeout(() => {
 				setCopiedWorkspaceId((current) => (current === workspaceId ? null : current));
 			}, 1800);
 		} catch {
-			setError('Could not copy workspace ID. Please copy it manually.');
+			setError('Could not copy workspace ID. Click inside the page and try again.');
 		}
 	}
 

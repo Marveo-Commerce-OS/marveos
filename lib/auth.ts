@@ -9,6 +9,7 @@ interface AuthUser {
   email?: string;
   user_display_name?: string;
   roles?: string[];
+  requirePasswordChange?: boolean;
   [key: string]: unknown;
 }
 
@@ -205,6 +206,7 @@ export async function getSession(): Promise<AuthSession | null> {
           user_display_name: resolved.identity.name,
           roles: resolved.identity.roles,
           source: resolved.identity.source,
+          requirePasswordChange: Boolean(resolved.userState?.invitePending),
         },
       };
     }

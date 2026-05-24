@@ -6,6 +6,8 @@ import type { AccountPlan, DeploymentLink } from '@/lib/adminStore';
 import { createWorkspace } from '@/lib/cloudOrchestration';
 import { v4 as uuid } from 'uuid';
 
+const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
+
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
@@ -37,7 +39,7 @@ export async function GET() {
   return NextResponse.json({
     accountPlan: store.cloud.accountPlan,
     workspaceCount: Object.keys(store.cloud.workspaces).length,
-    workspaceLimit: PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan],
+    workspaceLimit: OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan],
     links,
   });
 }
@@ -68,10 +70,10 @@ export async function POST(req: NextRequest) {
   const store = await readAdminStore();
   const currentPlan = store.cloud.accountPlan;
   const workspaceCount = Object.keys(store.cloud.workspaces).length;
-  const workspaceLimit = PLAN_WORKSPACE_LIMITS[currentPlan];
+  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[currentPlan];
 
   // Check if workspace limit exceeded
-  if (workspaceCount >= workspaceLimit) {
+  if (!OWNER_UNLIMITED_WORKSPACES && workspaceCount >= workspaceLimit) {
     return NextResponse.json(
       {
         error: `Workspace limit reached (${currentPlan}: ${workspaceLimit} workspace${workspaceLimit === 1 ? '' : 's'} max)`,

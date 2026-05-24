@@ -15,12 +15,14 @@ export async function POST(req: NextRequest) {
   const billingIntervalRaw = body?.billingInterval ? String(body.billingInterval).trim().toUpperCase() : undefined;
   const billingInterval = billingIntervalRaw === 'ANNUAL' ? 'ANNUAL' : billingIntervalRaw === 'MONTHLY' ? 'MONTHLY' : undefined;
   const providerRaw = body?.provider ? String(body.provider).trim().toUpperCase() : undefined;
-  const provider = providerRaw === 'PAYSTACK' || providerRaw === 'STRIPE' ? providerRaw : undefined;
+  const provider = providerRaw && ['PAYSTACK', 'FLUTTERWAVE', 'CUSTOM', 'STRIPE', 'PAYPAL'].includes(providerRaw)
+    ? providerRaw as 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL'
+    : undefined;
   const paymentReference = body?.paymentReference ? String(body.paymentReference).trim() : undefined;
 
   if (!sessionId && !email) return badRequest('sessionId or email is required');
   if (billingIntervalRaw && !billingInterval) return badRequest('billingInterval must be MONTHLY or ANNUAL');
-  if (providerRaw && !provider) return badRequest('provider must be PAYSTACK or STRIPE');
+  if (providerRaw && !provider) return badRequest('provider must be one of PAYSTACK, FLUTTERWAVE, CUSTOM, STRIPE, PAYPAL');
 
   const appBaseUrl = process.env.MARVEO_APP_BASE_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`;
   const result = await prepareSubscriptionUpgrade({

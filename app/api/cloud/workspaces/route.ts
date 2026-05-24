@@ -4,6 +4,7 @@ import { appendAuditLog, readAdminStore, updateAdminStore, PLAN_WORKSPACE_LIMITS
 import { createWorkspace, deriveClientOwnershipContext } from '@/lib/cloudOrchestration';
 
 const WEBSITE_TYPES = new Set(['NEW_WEBSITE', 'EXISTING_WEBSITE', 'CUSTOM_HEADLESS']);
+const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -32,7 +33,7 @@ export async function GET() {
   const store = await readAdminStore();
   const workspaces = Object.values(store.cloud.workspaces).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const workspaceCount = workspaces.length;
-  const workspaceLimit = PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan];
+  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan];
   const remainingWorkspaces = Math.max(0, workspaceLimit - workspaceCount);
 
   return NextResponse.json({
@@ -96,9 +97,9 @@ export async function POST(req: NextRequest) {
     const sameSubscription = workspace.clientSubscriptionId === ownership.clientSubscriptionId;
     return sameOrganization || sameSubscription;
   }).length;
-  const workspaceLimit = PLAN_WORKSPACE_LIMITS[currentPlan];
+  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[currentPlan];
 
-  if (workspaceCount >= workspaceLimit) {
+  if (!OWNER_UNLIMITED_WORKSPACES && workspaceCount >= workspaceLimit) {
     return NextResponse.json(
       {
         error: `Workspace limit reached for this client subscription (${currentPlan}: ${workspaceLimit} workspace${workspaceLimit === 1 ? '' : 's'} max)`,

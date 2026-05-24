@@ -20,7 +20,7 @@ Phase: SAFE 3G
 - [x] Demo state exposed as explicit setting (platformSettings.demoMode)
 
 ## Persistence Hardening
-- [x] Default persistence backend switched to native_file
+- [x] Persistence switched to Postgres-only (DATABASE_URL)
 - [x] WordPress persistence made explicit compatibility mode only
 - [x] Support assignment persistence retained
 - [x] Subscription status persistence retained

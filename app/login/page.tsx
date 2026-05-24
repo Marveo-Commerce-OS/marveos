@@ -1,11 +1,18 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getConfig } from '@/src/config/client';
+
+type PublicBranding = {
+  brandName: string;
+  brandByline: string;
+  primaryColor: string;
+  portalLoginLogoUrl: string;
+};
 
 function LoginPageContent() {
   const router = useRouter();
@@ -16,7 +23,17 @@ function LoginPageContent() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [branding, setBranding] = useState<PublicBranding>({
+    brandName: config.clientName,
+    brandByline: config.brandByline,
+    primaryColor: config.clientPrimaryColor,
+    portalLoginLogoUrl: config.clientLogo || '',
+  });
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const debugInfo = process.env.NODE_ENV !== 'production'
     ? {
@@ -25,10 +42,27 @@ function LoginPageContent() {
         roles: searchParams.get('roles') || 'n/a',
       }
     : null;
-
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/branding', { cache: 'no-store' });
+        const body = (await res.json().catch(() => null)) as Partial<PublicBranding> | null;
+        if (!res.ok || !body || cancelled) return;
+        setBranding((prev) => ({
+          brandName: body.brandName || prev.brandName,
+          brandByline: body.brandByline || prev.brandByline,
+          primaryColor: body.primaryColor || prev.primaryColor,
+          portalLoginLogoUrl: body.portalLoginLogoUrl || prev.portalLoginLogoUrl,
+        }));
+      } catch {
+        // ignore branding fetch failures and fall back to env config
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [config.brandByline, config.clientLogo, config.clientName, config.clientPrimaryColor]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,124 +92,118 @@ function LoginPageContent() {
   if (!mounted) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Animated background elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-20 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-20 right-10 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
-      </div>
+    <div className="relative min-h-screen overflow-hidden bg-slate-950 text-white">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_18%,rgba(79,142,247,0.22),transparent_45%),radial-gradient(circle_at_80%_35%,rgba(30,64,175,0.14),transparent_42%)]" />
+      <div className="pointer-events-none absolute inset-0 [background:linear-gradient(to_right,rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:56px_56px]" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-gradient-to-b from-blue-500/10 to-transparent" />
 
-      <div className="w-full max-w-md relative z-10">
-        {/* Logo Section */}
-        <div className="flex flex-col items-center mb-12">
-          <div className="relative w-16 h-16 mb-6 rounded-2xl backdrop-blur-xl bg-white/10 border border-white/20 flex items-center justify-center shadow-2xl">
-            {config.clientLogo ? (
-              <Image 
-                src={config.clientLogo} 
-                alt={config.clientName} 
-                width={48}
-                height={48}
-                className="object-contain" 
-                priority 
-              />
-            ) : (
-              <h1 className="text-2xl font-bold" style={{ color: config.clientPrimaryColor }}>
-                {config.appName[0]}
+      <div className="relative mx-auto flex min-h-screen w-full max-w-7xl items-center px-4 py-10 sm:px-8">
+        <div className="grid w-full gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <section className="max-w-2xl space-y-6 text-center md:text-left">
+            <div className="inline-flex items-center rounded-full border border-blue-400/40 bg-blue-500/10 px-4 py-1.5 text-xs font-medium tracking-[0.12em] text-blue-200">
+              Marveo Operational Ecosystem
+            </div>
+
+            <div className="space-y-5">
+              {branding.portalLoginLogoUrl ? (
+                <div className="relative mx-auto h-16 w-48 sm:h-20 sm:w-60 md:mx-0">
+                  <Image
+                    src={branding.portalLoginLogoUrl}
+                    alt={branding.brandName}
+                    fill
+                    className="object-contain object-center md:object-left"
+                    priority
+                    unoptimized
+                  />
+                </div>
+              ) : null}
+              <h1 className="font-[family-name:var(--font-sora)] bg-gradient-to-br from-blue-50 via-blue-200 to-blue-400 bg-clip-text text-5xl font-extrabold leading-[0.95] tracking-[-0.03em] text-transparent sm:text-6xl lg:text-7xl">
+                One Workspace.
+                <br />
+                Every Operation.
               </h1>
-            )}
-          </div>
-          <h1 className="text-3xl font-bold text-white text-center mb-2">{config.clientName}</h1>
-          <p className="text-gray-400 text-sm text-center">{config.brandByline}</p>
-        </div>
-
-        {/* Login Card - Glassmorphism */}
-        <div className="backdrop-blur-2xl bg-white/10 rounded-3xl shadow-2xl border border-white/20 p-8 hover:bg-white/[0.15] transition-all duration-300">
-          <h2 className="text-2xl font-bold text-white mb-2">Operations Portal</h2>
-          <p className="text-gray-300 text-sm mb-8">Secure access for authorized managers</p>
-
-          <div className="mb-6 rounded-2xl border border-blue-300/30 bg-blue-500/15 p-3 text-xs text-blue-100">
-            Internal team? Use <Link href="/master-login" className="font-semibold underline">/master-login</Link>.
-          </div>
-
-          {demoMode && (
-            <div className="mb-6 p-4 bg-emerald-500/15 backdrop-blur-xl border border-emerald-300/30 rounded-2xl text-emerald-100 text-sm">
-              <p className="font-semibold">Demo mode enabled</p>
-              <p className="mt-1 text-xs">Username: {demoUsername}</p>
+              <p className="mx-auto max-w-xl text-base leading-7 text-slate-300 sm:text-lg md:mx-0">
+                Marveo centralizes operations, communication, and deployment workflows into one connected workspace.
+              </p>
             </div>
-          )}
+          </section>
 
-          {debugInfo && (debugInfo.reason !== 'n/a' || debugInfo.from !== 'n/a') && (
-            <div className="mb-6 rounded-2xl border border-amber-300/40 bg-amber-500/15 p-3 text-xs text-amber-100">
-              <p className="font-semibold">Dev debug</p>
-              <p>from: {debugInfo.from}</p>
-              <p>reason: {debugInfo.reason}</p>
-              <p>roles: {debugInfo.roles}</p>
-            </div>
-          )}
+          <section className="relative lg:justify-self-end lg:w-full lg:max-w-md">
+            <div className="pointer-events-none absolute -right-4 -top-6 hidden h-24 w-44 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl lg:block" />
+            <div className="pointer-events-none absolute -left-6 bottom-10 hidden h-14 w-14 rounded-full bg-emerald-400/35 blur-xl lg:block" />
+            <div className="relative rounded-3xl border border-white/15 bg-white/10 p-6 shadow-2xl backdrop-blur-2xl sm:p-8">
+              <h2 className="font-[family-name:var(--font-sora)] text-2xl font-bold text-white">Portal Login</h2>
+              <p className="mt-2 text-sm text-slate-300">Secure access for authorized managers.</p>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-500/20 backdrop-blur-xl border border-red-400/30 rounded-2xl text-red-200 text-sm font-medium animate-in fade-in">
-              <div className="flex items-start gap-3">
-                <span className="text-lg mt-0.5">⚠️</span>
-                <span>{error}</span>
-              </div>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-sm font-semibold text-white/90 mb-2">Username or Email</label>
-              <input
-                type="text"
-                required
-                value={form.username}
-                onChange={(e) => setForm(p => ({ ...p, username: e.target.value }))}
-                disabled={loading}
-                className="w-full h-12 px-4 rounded-xl backdrop-blur-xl bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all text-white placeholder-gray-400/60 disabled:opacity-50"
-                placeholder="your username"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-white/90 mb-2">Password</label>
-              <input
-                type="password"
-                required
-                value={form.password}
-                onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))}
-                disabled={loading}
-                className="w-full h-12 px-4 rounded-xl backdrop-blur-xl bg-white/10 border border-white/20 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all text-white placeholder-gray-400/60 disabled:opacity-50"
-                placeholder="••••••••"
-              />
-              <div className="flex justify-end mt-2">
-                <Link href="/login/forgot-password" className="text-xs text-gray-400 hover:text-gray-300 transition-colors">
-                  Forgot password?
-                </Link>
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              style={{ 
-                backgroundColor: config.clientPrimaryColor,
-              }}
-              className="w-full h-12 text-white rounded-xl font-semibold hover:shadow-lg hover:shadow-blue-500/50 transition-all disabled:opacity-60 disabled:cursor-not-allowed mt-6 transform hover:scale-[1.02] active:scale-95"
-            >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Verifying...
-                </span>
-              ) : (
-                'Sign In to Portal'
+              {demoMode && (
+                <div className="mt-4 rounded-2xl border border-emerald-300/30 bg-emerald-500/15 p-4 text-sm text-emerald-100">
+                  <p className="font-semibold">Demo mode enabled</p>
+                  <p className="mt-1 text-xs">Username: {demoUsername}</p>
+                </div>
               )}
-            </button>
-          </form>
 
-          <div className="mt-6 pt-6 border-t border-white/10">
-            <p className="text-xs text-gray-400 text-center">
-              Need help? Contact your administrator
-            </p>
-          </div>
+              {debugInfo && (debugInfo.reason !== 'n/a' || debugInfo.from !== 'n/a') && (
+                <div className="mt-4 rounded-2xl border border-amber-300/40 bg-amber-500/15 p-3 text-xs text-amber-100">
+                  <p className="font-semibold">Dev debug</p>
+                  <p>from: {debugInfo.from}</p>
+                  <p>reason: {debugInfo.reason}</p>
+                  <p>roles: {debugInfo.roles}</p>
+                </div>
+              )}
+
+              {error && (
+                <div className="mt-4 rounded-2xl border border-red-400/30 bg-red-500/20 p-4 text-sm text-red-100">
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-white/90">Username or Email</label>
+                  <input
+                    type="text"
+                    required
+                    value={form.username}
+                    onChange={(e) => setForm(p => ({ ...p, username: e.target.value }))}
+                    disabled={loading}
+                    className="h-12 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-white placeholder-gray-400/60"
+                    placeholder="your username"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-white/90">Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={form.password}
+                    onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))}
+                    disabled={loading}
+                    className="h-12 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-white placeholder-gray-400/60"
+                    placeholder="••••••••"
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <Link href="/login/forgot-password" className="text-xs text-gray-300 hover:text-white">
+                      Forgot password?
+                    </Link>
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    backgroundColor: branding.primaryColor,
+                  }}
+                  className="mt-2 h-12 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {loading ? 'Verifying...' : 'Sign In to Portal'}
+                </button>
+              </form>
+
+              <p className="mt-6 text-center text-xs text-gray-300">
+                Need help? Contact your administrator
+              </p>
+            </div>
+          </section>
         </div>
       </div>
     </div>

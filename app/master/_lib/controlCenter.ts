@@ -1,5 +1,7 @@
 import { readAdminStore, type WorkspaceOrchestration } from '@/lib/adminStore';
 
+const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
+
 export interface ControlCenterClient {
   id: string;
   name: string;
@@ -37,6 +39,9 @@ function hasDeploymentBlocker(workspace: WorkspaceOrchestration): boolean {
 export async function getControlCenterSnapshot() {
   const store = await readAdminStore();
   const workspaces = Object.values(store.cloud.workspaces).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const identities = Object.values(store.nativeAuth.identities);
+  const commercialPlans = store.cloud.commercial?.plans ?? [];
+  const subscriptions = Object.values(store.cloud.commercial?.subscriptions ?? {});
 
   const clientMap = new Map<string, ControlCenterClient>();
   for (const workspace of workspaces) {
@@ -75,6 +80,15 @@ export async function getControlCenterSnapshot() {
   const failedDeployments = workspaces.filter((workspace) => {
     return workspace.status === 'blocked' || workspace.onboardingStatus === 'FAILED' || workspace.connectorStatus === 'FAILED';
   }).length;
+  const internalTeamMembers = identities.filter((identity) => {
+    return identity.userType === 'INTERNAL_USER' && identity.status !== 'DISABLED';
+  }).length;
+  const plansAvailable = commercialPlans.length;
+  const plansSold = subscriptions.filter((subscription) => {
+    return subscription.status !== 'CANCELLED' && subscription.status !== 'EXPIRED';
+  }).length;
+  const complaints = openSupportAssignments;
+  const systemStatus = store.maintenance.site_under_construction ? 'Degraded' : 'Operational';
 
   const connectorCounts = {
     connected: workspaces.filter((workspace) => workspace.connectorStatus === 'CONNECTED').length,
@@ -85,7 +99,7 @@ export async function getControlCenterSnapshot() {
 
   return {
     accountPlan: store.cloud.accountPlan,
-    workspaceLimit: store.cloud.accountPlan === 'starter' ? 1 : store.cloud.accountPlan === 'business' ? 3 : 999,
+    workspaceLimit: OWNER_UNLIMITED_WORKSPACES ? 999 : (store.cloud.accountPlan === 'starter' ? 1 : store.cloud.accountPlan === 'business' ? 3 : 999),
     workspaces,
     clients,
     metrics: {
@@ -96,10 +110,15 @@ export async function getControlCenterSnapshot() {
       launchBlockers,
       connectedWebsites,
       failedDeployments,
+      internalTeamMembers,
+      plansAvailable,
+      plansSold,
+      complaints,
+      systemStatus,
     },
     audit: store.audit,
     maintenance: store.maintenance,
-    roleVisibility: store.roleModuleVisibility,
+    roleVisibility: store.controlCenterRoleVisibility,
     connectorCounts,
     templatesInUse: workspaces.filter((workspace) => Boolean(normalize(workspace.selectedTemplateId))).length,
     websiteTypeBreakdown: {
@@ -107,6 +126,10 @@ export async function getControlCenterSnapshot() {
       existingWebsite: workspaces.filter((workspace) => workspace.websiteType === 'EXISTING_WEBSITE').length,
       customHeadless: workspaces.filter((workspace) => workspace.websiteType === 'CUSTOM_HEADLESS').length,
     },
+    countryCatalog: (store.cloud.lookups.countries || []).map((entry) => ({
+      code: entry.code,
+      name: entry.name,
+    })),
     websiteTypeLabel,
   };
 }

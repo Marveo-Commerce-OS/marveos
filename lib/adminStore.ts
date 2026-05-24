@@ -1,7 +1,5 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { cookies } from 'next/headers';
-import { getWordPressApiBase } from '@/src/lib/endpoints';
 import type { MaintenanceSettings } from '@/lib/types';
 
 export type PortalAccess = 'b2c' | 'b2b';
@@ -39,6 +37,7 @@ export interface NativePlatformIdentity {
   id: string;
   email: string;
   name: string;
+  avatarUrl?: string;
   userType: 'INTERNAL_USER' | 'CLIENT_USER';
   status: 'ACTIVE' | 'INVITED' | 'DISABLED';
   roles: NativeRole[];
@@ -58,6 +57,12 @@ export interface NativePlatformSession {
   expiresAt: string;
 }
 
+export interface NativePasswordChangeOtp {
+  code: string;
+  requestedAt: string;
+  expiresAt: string;
+}
+
 export interface PlatformSettings {
   trialDurationDays: number;
   pricingVisibility: 'PUBLIC' | 'INTERNAL';
@@ -66,6 +71,38 @@ export interface PlatformSettings {
     provider: 'NONE' | 'PAYSTACK' | 'STRIPE';
     mode: 'sandbox' | 'live';
     configured: boolean;
+    publishableKeyRef: string;
+    secretKeyRef: string;
+    webhookSecretRef: string;
+    webhookUrl: string;
+    webhookConfigured: boolean;
+    merchantDisplayName: string;
+    settlementCurrency: string;
+    autoCapture: boolean;
+    require3DS: boolean;
+  };
+  paymentProviders: Record<'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL', {
+    enabled: boolean;
+    configured: boolean;
+    mode: 'sandbox' | 'live';
+    priority: number;
+    applicableMarkets: string[];
+    settlementCurrencies: string[];
+    publishableKeyRef: string;
+    secretKeyRef: string;
+    webhookSecretRef: string;
+    webhookUrl: string;
+    customEndpoint: string;
+  }>;
+  billingCurrencyPolicy: {
+    basePricingCurrency: 'USD' | 'GBP' | 'NGN';
+    autoConvertFromBase: boolean;
+    countryCurrencyMap: Record<string, 'USD' | 'GBP' | 'NGN'>;
+    fxRates: {
+      USD: number;
+      GBP: number;
+      NGN: number;
+    };
   };
   demoMode: {
     enabled: boolean;
@@ -79,6 +116,88 @@ export interface PlatformSettings {
     defaultPriority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     defaultSetupType: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
     defaultAssigneeId: string | null;
+  };
+  branding: {
+    brandName: string;
+    brandByline: string;
+    logoUrl: string;
+    dashboardLogoUrl: string;
+    portalLoginLogoUrl: string;
+    faviconUrl: string;
+    footerLogoUrl: string;
+    primaryColor: string;
+    secondaryColor: string;
+    websiteUrl: string;
+    footerAddressLine: string;
+    footerDescription: string;
+    footerBadgeText: string;
+    footerStatusLabel: string;
+    footerStatusUrl: string;
+    footerDocsLabel: string;
+    footerDocsUrl: string;
+    footerGdprLabel: string;
+    footerGdprUrl: string;
+    footerUnsubscribeLabel: string;
+    footerUnsubscribeUrl: string;
+  };
+  email: {
+    enabled: boolean;
+    provider: 'SMTP' | 'WORDPRESS_MAILER';
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password: string;
+    fromEmail: string;
+    fromName: string;
+    replyToEmail: string;
+    appBaseUrl: string;
+    apiBaseUrl: string;
+    supportPortalUrl: string;
+    supportEmail: string;
+    billingEmail: string;
+    deploymentEmail: string;
+    userOpsEmail: string;
+    sendFailureAlerts: boolean;
+    failureAlertRecipients: string[];
+  };
+  emailTemplates: Record<
+    | 'CLIENT_SIGNUP'
+    | 'CLIENT_DEPLOYED'
+    | 'DEPLOYMENT_FAILED'
+    | 'PASSWORD_RESET_REQUESTED'
+    | 'PASSWORD_CHANGED'
+    | 'PAYMENT_RECEIVED'
+    | 'PAYMENT_FAILED'
+    | 'BILLING_NOTICE'
+    | 'BILLING_SUSPENDED'
+    | 'BILLING_REACTIVATED'
+    | 'USER_INVITE'
+    | 'USER_STATUS_CHANGED'
+    | 'SUPPORT_ASSIGNED'
+    | 'CONNECTOR_FAILED'
+    | 'SYSTEM_FAILURE_ALERT',
+    {
+      enabled: boolean;
+      subject: string;
+      preheader: string;
+      html: string;
+      text: string;
+    }
+  >;
+  reporting: {
+    scheduleEnabled: boolean;
+    frequency: 'WEEKLY' | 'MONTHLY';
+    dayOfWeek: number;
+    dayOfMonth: number;
+    hourUTC: number;
+    recipients: string[];
+    includeIncidents: boolean;
+    includeComplaints: boolean;
+    includeAnalytics: boolean;
+    updatedAt: string;
+    lastRunAt?: string;
+    lastRunStatus?: 'success' | 'failed';
   };
 }
 
@@ -226,6 +345,7 @@ export interface WorkspaceOrchestration {
     | 'LIVE'
     | 'FAILED';
   businessProfile?: Record<string, unknown>;
+  state?: string;
   selectedTemplateId?: string;
   collectedBusinessData?: Record<string, unknown>;
   supportRequired?: boolean;
@@ -330,7 +450,7 @@ export interface DeploymentLink {
 }
 
 export type CommercialSubscriptionStatus = 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED' | 'CANCELLED' | 'EXPIRED';
-export type CommercialPaymentProvider = 'PAYSTACK' | 'STRIPE';
+export type CommercialPaymentProvider = 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL';
 export type CommercialPaymentVerificationStatus = 'NOT_REQUIRED' | 'PENDING' | 'VERIFIED' | 'FAILED' | 'SANDBOX_VERIFIED';
 export type CommercialBillingInterval = 'MONTHLY' | 'ANNUAL';
 export type CommercialTemplateStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
@@ -524,8 +644,46 @@ export const ADMIN_MODULE_KEYS = [
   'adminSettings',
 ] as const;
 
+export const CONTROL_CENTER_MODULE_KEYS = [
+  'overview',
+  'clients',
+  'workspaces',
+  'deploymentQueue',
+  'supportQueue',
+  'launchReadiness',
+  'connectors',
+  'templates',
+  'team',
+  'plansBilling',
+  'reports',
+  'analytics',
+  'auditLogs',
+  'systemSettings',
+] as const;
+
+export const PLATFORM_EMAIL_TEMPLATE_KEYS = [
+  'CLIENT_SIGNUP',
+  'CLIENT_DEPLOYED',
+  'DEPLOYMENT_FAILED',
+  'PASSWORD_RESET_REQUESTED',
+  'PASSWORD_CHANGED',
+  'PAYMENT_RECEIVED',
+  'PAYMENT_FAILED',
+  'BILLING_NOTICE',
+  'BILLING_SUSPENDED',
+  'BILLING_REACTIVATED',
+  'USER_INVITE',
+  'USER_STATUS_CHANGED',
+  'SUPPORT_ASSIGNED',
+  'CONNECTOR_FAILED',
+  'SYSTEM_FAILURE_ALERT',
+] as const;
+
 export type AdminModuleKey = (typeof ADMIN_MODULE_KEYS)[number];
+export type ControlCenterModuleKey = (typeof CONTROL_CENTER_MODULE_KEYS)[number];
+export type PlatformEmailTemplateKey = (typeof PLATFORM_EMAIL_TEMPLATE_KEYS)[number];
 export type RoleModuleVisibility = Record<string, Partial<Record<AdminModuleKey, boolean>>>;
+export type ControlCenterRoleModuleVisibility = Record<string, Partial<Record<ControlCenterModuleKey, boolean>>>;
 
 export interface AdminConfigStore {
   users: Record<string, ManagedUserState>;
@@ -533,12 +691,14 @@ export interface AdminConfigStore {
     identities: Record<string, NativePlatformIdentity>;
     sessions: Record<string, NativePlatformSession>;
     permissions: Record<string, string[]>;
+    passwordChangeOtps: Record<string, NativePasswordChangeOtp>;
   };
   platformSettings: PlatformSettings;
   tracking: TrackingConfig;
   smtp: SmtpConfig;
   forms: FormRoutingRule[];
   roleModuleVisibility: RoleModuleVisibility;
+  controlCenterRoleVisibility: ControlCenterRoleModuleVisibility;
   maintenance: MaintenanceSettings;
   audit: AuditRecord[];
   cloud: CloudOrchestrationStore;
@@ -556,39 +716,269 @@ const FULL_ACCESS: Record<AdminModuleKey, boolean> = {
   adminSettings: true,
 };
 
-// ─── Optional WordPress compatibility persistence ────────────────────────────
-// Native platform persistence is the operational source of truth.
-// Set MARVEO_STORE_BACKEND=wordpress_compat only when compatibility is required.
-import { getConfig } from '@/src/config/client';
-
-const getWpApiUrl = () => {
-  const config = getConfig();
-  return config.wordpressApiUrl || getWordPressApiBase();
+const FULL_CONTROL_CENTER_ACCESS: Record<ControlCenterModuleKey, boolean> = {
+  overview: true,
+  clients: true,
+  workspaces: true,
+  deploymentQueue: true,
+  supportQueue: true,
+  launchReadiness: true,
+  connectors: true,
+  templates: true,
+  team: true,
+  plansBilling: true,
+  reports: true,
+  analytics: true,
+  auditLogs: true,
+  systemSettings: true,
 };
 
-export const WP_API_URL = getWpApiUrl();
-const WP_APP_USER = process.env.WP_APP_USER || '';
-const WP_APP_PASSWORD = process.env.WP_APP_PASSWORD || '';
-const STORE_BACKEND = process.env.MARVEO_STORE_BACKEND || 'native_file';
+const DEFAULT_EMAIL_TEMPLATES: Record<PlatformEmailTemplateKey, {
+  enabled: boolean;
+  subject: string;
+  preheader: string;
+  html: string;
+  text: string;
+}> = {
+  CLIENT_SIGNUP: {
+    enabled: true,
+    subject: 'Welcome to Marveo',
+    preheader: 'Your Marveo account is ready to use.',
+    html: '<p>Hello {{clientName}},</p><p>Your Marveo account has been created successfully.</p><p>Login: {{appBaseUrl}}</p>',
+    text: 'Hello {{clientName}}, your Marveo account has been created. Login: {{appBaseUrl}}',
+  },
+  CLIENT_DEPLOYED: {
+    enabled: true,
+    subject: 'Your website is now live',
+    preheader: 'Deployment completed successfully.',
+    html: '<p>Hello {{clientName}},</p><p>Your deployment for {{workspaceName}} is complete.</p><p>URL: {{siteUrl}}</p>',
+    text: 'Hello {{clientName}}, your deployment for {{workspaceName}} is complete. URL: {{siteUrl}}',
+  },
+  DEPLOYMENT_FAILED: {
+    enabled: true,
+    subject: 'Deployment failed for {{workspaceName}}',
+    preheader: 'A deployment action needs your attention.',
+    html: '<p>Hello {{clientName}},</p><p>Your deployment for {{workspaceName}} failed.</p><p>Error: {{errorMessage}}</p><p>Support: {{supportEmail}}</p>',
+    text: 'Hello {{clientName}}, your deployment for {{workspaceName}} failed. Error: {{errorMessage}}. Support: {{supportEmail}}',
+  },
+  PASSWORD_RESET_REQUESTED: {
+    enabled: true,
+    subject: 'Password reset requested',
+    preheader: 'A password reset request was initiated.',
+    html: '<p>Hello {{userName}},</p><p>A password reset was requested for your account.</p><p>If this was not you, contact support immediately.</p>',
+    text: 'Hello {{userName}}, a password reset was requested for your account. If this was not you, contact support immediately.',
+  },
+  PASSWORD_CHANGED: {
+    enabled: true,
+    subject: 'Password changed successfully',
+    preheader: 'Your account password was updated.',
+    html: '<p>Hello {{userName}},</p><p>Your password was changed successfully.</p><p>If this was not you, contact support immediately.</p>',
+    text: 'Hello {{userName}}, your password was changed successfully. If this was not you, contact support immediately.',
+  },
+  PAYMENT_RECEIVED: {
+    enabled: true,
+    subject: 'Payment received',
+    preheader: 'We have confirmed your latest payment.',
+    html: '<p>Hello {{clientName}},</p><p>We received your payment of {{amount}} {{currency}}.</p><p>Reference: {{paymentReference}}</p>',
+    text: 'Hello {{clientName}}, we received your payment of {{amount}} {{currency}}. Reference: {{paymentReference}}',
+  },
+  PAYMENT_FAILED: {
+    enabled: true,
+    subject: 'Payment verification failed',
+    preheader: 'Payment verification did not complete successfully.',
+    html: '<p>Hello {{clientName}},</p><p>Your payment could not be verified.</p><p>Reference: {{paymentReference}}</p><p>Reason: {{errorMessage}}</p>',
+    text: 'Hello {{clientName}}, your payment could not be verified. Reference: {{paymentReference}}. Reason: {{errorMessage}}',
+  },
+  BILLING_NOTICE: {
+    enabled: true,
+    subject: 'Billing notification',
+    preheader: 'Important billing information for your subscription.',
+    html: '<p>Hello {{clientName}},</p><p>This is a billing notice for your subscription {{subscriptionId}}.</p>',
+    text: 'Hello {{clientName}}, this is a billing notice for your subscription {{subscriptionId}}.',
+  },
+  BILLING_SUSPENDED: {
+    enabled: true,
+    subject: 'Subscription suspended',
+    preheader: 'Your subscription status changed to suspended.',
+    html: '<p>Hello {{clientName}},</p><p>Your subscription {{subscriptionId}} is now suspended.</p><p>Please contact billing support at {{billingEmail}}.</p>',
+    text: 'Hello {{clientName}}, your subscription {{subscriptionId}} is now suspended. Contact billing support at {{billingEmail}}.',
+  },
+  BILLING_REACTIVATED: {
+    enabled: true,
+    subject: 'Subscription reactivated',
+    preheader: 'Your subscription has been reactivated successfully.',
+    html: '<p>Hello {{clientName}},</p><p>Your subscription {{subscriptionId}} has been reactivated.</p>',
+    text: 'Hello {{clientName}}, your subscription {{subscriptionId}} has been reactivated.',
+  },
+  USER_INVITE: {
+    enabled: true,
+    subject: 'You have been invited to Marveo Control Center',
+    preheader: 'Your Marveo access invitation is ready.',
+    html: '<p>Hello {{userName}},</p><p>You have been invited as {{roleName}}.</p><p><strong>Temporary password:</strong> {{tempPassword}}</p><p>Login: {{loginUrl}}</p><p>After signing in, change your password here: {{changePasswordUrl}}</p>',
+    text: 'Hello {{userName}}, you have been invited as {{roleName}}. Temporary password: {{tempPassword}}. Login: {{loginUrl}}. Change password: {{changePasswordUrl}}',
+  },
+  USER_STATUS_CHANGED: {
+    enabled: true,
+    subject: 'Account status updated',
+    preheader: 'Your account role or status has changed.',
+    html: '<p>Hello {{userName}},</p><p>Your Marveo account status is now {{status}}.</p><p>Role: {{roleName}}</p>',
+    text: 'Hello {{userName}}, your Marveo account status is now {{status}}. Role: {{roleName}}',
+  },
+  SUPPORT_ASSIGNED: {
+    enabled: true,
+    subject: 'Support assigned for {{workspaceName}}',
+    preheader: 'A support officer has been assigned to your workspace.',
+    html: '<p>Hello {{clientName}},</p><p>{{supportOfficerName}} has been assigned to support your workspace {{workspaceName}}.</p>',
+    text: 'Hello {{clientName}}, {{supportOfficerName}} has been assigned to support your workspace {{workspaceName}}.',
+  },
+  CONNECTOR_FAILED: {
+    enabled: true,
+    subject: 'Connector verification failed for {{workspaceName}}',
+    preheader: 'Connector verification needs attention.',
+    html: '<p>Hello {{clientName}},</p><p>Connector verification failed for {{workspaceName}}.</p><p>Error: {{errorMessage}}</p>',
+    text: 'Hello {{clientName}}, connector verification failed for {{workspaceName}}. Error: {{errorMessage}}',
+  },
+  SYSTEM_FAILURE_ALERT: {
+    enabled: true,
+    subject: 'System failure alert: {{failureType}}',
+    preheader: 'Operational failure alert from Marveo.',
+    html: '<p>Failure type: {{failureType}}</p><p>Workspace: {{workspaceId}}</p><p>Error: {{errorMessage}}</p>',
+    text: 'Failure type: {{failureType}} | Workspace: {{workspaceId}} | Error: {{errorMessage}}',
+  },
+};
 
-async function wpAuthHeader(): Promise<Record<string, string>> {
+// ─── Database persistence ─────────────────────────────────────────────────────
+type StoreBackend = 'vercel_postgres';
+
+function normalizePostgresUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get('admin_token')?.value;
-    if (token) {
-      return { Authorization: `Bearer ${token}` };
+    const parsed = new URL(rawUrl);
+    const sslMode = parsed.searchParams.get('sslmode');
+    if (sslMode && ['prefer', 'require', 'verify-ca'].includes(sslMode)) {
+      parsed.searchParams.set('uselibpqcompat', 'true');
     }
+    return parsed.toString();
   } catch {
-    // No request cookie context available; fall back to app credentials.
+    return rawUrl;
   }
-
-  if (!WP_APP_USER || !WP_APP_PASSWORD) return {};
-  const encoded = Buffer.from(`${WP_APP_USER}:${WP_APP_PASSWORD}`).toString('base64');
-  return { Authorization: `Basic ${encoded}` };
 }
 
-// ─── Local filesystem (development) ──────────────────────────────────────────
-const STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-config.json');
+const POSTGRES_URL = normalizePostgresUrl(process.env.DATABASE_URL || '');
+const STORE_BACKEND: StoreBackend = 'vercel_postgres';
+
+const POSTGRES_TABLE = ((process.env.MARVEO_ADMIN_CONFIG_TABLE || 'marveo_admin_config').trim().match(/^[A-Za-z_][A-Za-z0-9_]*$/)?.[0]) || 'marveo_admin_config';
+const POSTGRES_KEY = (process.env.MARVEO_ADMIN_CONFIG_KEY || 'global').trim() || 'global';
+
+export function getAdminStoreBackendDiagnostics() {
+  let postgresHost = '';
+  if (POSTGRES_URL) {
+    try {
+      postgresHost = new URL(POSTGRES_URL).host;
+    } catch {
+      postgresHost = '';
+    }
+  }
+
+  return {
+    backend: STORE_BACKEND,
+    postgresConfigured: Boolean(POSTGRES_URL),
+    postgresHost,
+    postgresTable: POSTGRES_TABLE,
+    postgresKey: POSTGRES_KEY,
+  };
+}
+
+type PostgresClient = import('pg').Client;
+
+let pgClientPromise: Promise<PostgresClient> | null = null;
+
+function isRecoverablePostgresError(error: unknown): boolean {
+  const message = String((error as { message?: unknown })?.message || error || '').toLowerCase();
+  return [
+    'not queryable',
+    'connection terminated',
+    'connection ended unexpectedly',
+    'connection error',
+    'socket hang up',
+    'econnreset',
+    'etimedout',
+    'terminating connection',
+  ].some((fragment) => message.includes(fragment));
+}
+
+async function resetPostgresClient() {
+  const current = pgClientPromise;
+  pgClientPromise = null;
+
+  if (!current) return;
+
+  try {
+    const client = await current;
+    if (typeof client.end === 'function') {
+      await client.end();
+    }
+  } catch {
+    // Ignore cleanup errors when resetting broken client state.
+  }
+}
+
+async function getPostgresClient() {
+  if (!POSTGRES_URL) {
+    throw new Error('DATABASE_URL is required. Admin store is Postgres-only.');
+  }
+
+  if (!pgClientPromise) {
+    pgClientPromise = (async () => {
+      const { Client } = await import('pg');
+      const client = new Client({
+        connectionString: POSTGRES_URL,
+        ssl: POSTGRES_URL.includes('localhost') ? false : { rejectUnauthorized: false },
+      });
+      if (typeof client.on === 'function') {
+        client.on('error', () => {
+          pgClientPromise = null;
+        });
+        client.on('end', () => {
+          pgClientPromise = null;
+        });
+      }
+      await client.connect();
+      return client;
+    })();
+  }
+
+  return pgClientPromise;
+}
+
+async function executePostgresQuery(text: string, params?: unknown[]) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const client = await getPostgresClient();
+      return await client.query(text, params);
+    } catch (error) {
+      if (attempt === 0 && isRecoverablePostgresError(error)) {
+        await resetPostgresClient();
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error('Postgres query failed after retry.');
+}
+
+async function ensurePostgresStoreTable() {
+  await executePostgresQuery(
+    `CREATE TABLE IF NOT EXISTS ${POSTGRES_TABLE} (
+      id TEXT PRIMARY KEY,
+      data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+  );
+}
+
+const LEGACY_STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-config.json');
 
 const DEFAULT_STORE: AdminConfigStore = {
   users: {},
@@ -596,6 +986,7 @@ const DEFAULT_STORE: AdminConfigStore = {
     identities: {},
     sessions: {},
     permissions: {},
+    passwordChangeOtps: {},
   },
   platformSettings: {
     trialDurationDays: 14,
@@ -605,6 +996,99 @@ const DEFAULT_STORE: AdminConfigStore = {
       provider: 'NONE',
       mode: 'sandbox',
       configured: false,
+      publishableKeyRef: '',
+      secretKeyRef: '',
+      webhookSecretRef: '',
+      webhookUrl: '',
+      webhookConfigured: false,
+      merchantDisplayName: 'Marveo',
+      settlementCurrency: 'USD',
+      autoCapture: true,
+      require3DS: false,
+    },
+    paymentProviders: {
+      PAYSTACK: {
+        enabled: true,
+        configured: false,
+        mode: 'sandbox',
+        priority: 1,
+        applicableMarkets: ['NG'],
+        settlementCurrencies: ['NGN'],
+        publishableKeyRef: '',
+        secretKeyRef: '',
+        webhookSecretRef: '',
+        webhookUrl: '',
+        customEndpoint: '',
+      },
+      FLUTTERWAVE: {
+        enabled: false,
+        configured: false,
+        mode: 'sandbox',
+        priority: 2,
+        applicableMarkets: ['NG', 'AE', 'AFRICA_OTHER'],
+        settlementCurrencies: ['NGN', 'USD'],
+        publishableKeyRef: '',
+        secretKeyRef: '',
+        webhookSecretRef: '',
+        webhookUrl: '',
+        customEndpoint: '',
+      },
+      CUSTOM: {
+        enabled: false,
+        configured: false,
+        mode: 'sandbox',
+        priority: 5,
+        applicableMarkets: ['NG', 'GB', 'AE', 'CA', 'US', 'AFRICA_OTHER'],
+        settlementCurrencies: ['USD', 'GBP', 'NGN'],
+        publishableKeyRef: '',
+        secretKeyRef: '',
+        webhookSecretRef: '',
+        webhookUrl: '',
+        customEndpoint: '',
+      },
+      STRIPE: {
+        enabled: true,
+        configured: false,
+        mode: 'sandbox',
+        priority: 3,
+        applicableMarkets: ['GB', 'AE', 'CA', 'US'],
+        settlementCurrencies: ['USD', 'GBP'],
+        publishableKeyRef: '',
+        secretKeyRef: '',
+        webhookSecretRef: '',
+        webhookUrl: '',
+        customEndpoint: '',
+      },
+      PAYPAL: {
+        enabled: false,
+        configured: false,
+        mode: 'sandbox',
+        priority: 4,
+        applicableMarkets: ['GB', 'AE', 'CA', 'US', 'AFRICA_OTHER'],
+        settlementCurrencies: ['USD', 'GBP'],
+        publishableKeyRef: '',
+        secretKeyRef: '',
+        webhookSecretRef: '',
+        webhookUrl: '',
+        customEndpoint: '',
+      },
+    },
+    billingCurrencyPolicy: {
+      basePricingCurrency: 'USD',
+      autoConvertFromBase: true,
+      countryCurrencyMap: {
+        NG: 'NGN',
+        GB: 'GBP',
+        AE: 'USD',
+        CA: 'USD',
+        US: 'USD',
+        AFRICA_OTHER: 'USD',
+      },
+      fxRates: {
+        USD: 1,
+        GBP: 0.79,
+        NGN: 1550,
+      },
     },
     demoMode: {
       enabled: process.env.MARVEO_DEMO_MODE === 'true' || process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true',
@@ -619,6 +1103,65 @@ const DEFAULT_STORE: AdminConfigStore = {
       defaultSetupType: 'NEW_WEBSITE',
       defaultAssigneeId: null,
     },
+    branding: {
+      brandName: 'Marveo',
+      brandByline: 'Commerce Operations Cloud',
+      logoUrl: '',
+      dashboardLogoUrl: '',
+      portalLoginLogoUrl: '',
+      faviconUrl: '',
+      footerLogoUrl: '',
+      primaryColor: '#0f172a',
+      secondaryColor: '#0ea5e9',
+      websiteUrl: '',
+      footerAddressLine: '',
+      footerDescription: 'Marveo unifies WordPress, headless CMS, and commerce orchestration.',
+      footerBadgeText: 'Built for developers and agencies',
+      footerStatusLabel: 'Status',
+      footerStatusUrl: '',
+      footerDocsLabel: 'Documentation',
+      footerDocsUrl: '',
+      footerGdprLabel: 'GDPR',
+      footerGdprUrl: '',
+      footerUnsubscribeLabel: 'Unsubscribe',
+      footerUnsubscribeUrl: '',
+    },
+    email: {
+      enabled: true,
+      provider: 'SMTP',
+      host: '',
+      port: 587,
+      secure: false,
+      username: '',
+      password: '',
+      fromEmail: '',
+      fromName: 'Marveo Operations',
+      replyToEmail: '',
+      appBaseUrl: process.env.NEXT_PUBLIC_BASE_URL || '',
+      apiBaseUrl: process.env.NEXT_PUBLIC_WORDPRESS_API_URL || '',
+      supportPortalUrl: '/master/support',
+      supportEmail: '',
+      billingEmail: '',
+      deploymentEmail: '',
+      userOpsEmail: '',
+      sendFailureAlerts: true,
+      failureAlertRecipients: [],
+    },
+    reporting: {
+      scheduleEnabled: false,
+      frequency: 'WEEKLY',
+      dayOfWeek: 1,
+      dayOfMonth: 1,
+      hourUTC: 8,
+      recipients: [],
+      includeIncidents: true,
+      includeComplaints: true,
+      includeAnalytics: true,
+      updatedAt: new Date().toISOString(),
+      lastRunAt: '',
+      lastRunStatus: undefined,
+    },
+    emailTemplates: { ...DEFAULT_EMAIL_TEMPLATES },
   },
   tracking: {
     ecommerceDomain: '',
@@ -637,7 +1180,7 @@ const DEFAULT_STORE: AdminConfigStore = {
   smtp: {
     provider: 'microsoft365',
     useWordPressMailer: false,
-    host: 'smtp.office365.com',
+    host: '',
     port: 587,
     secure: false,
     username: '',
@@ -669,11 +1212,23 @@ const DEFAULT_STORE: AdminConfigStore = {
     },
   ],
   roleModuleVisibility: {
-    administrator: { ...FULL_ACCESS },
-    shop_manager: {
+    SUPER_ADMIN: { ...FULL_ACCESS },
+    ADMIN: { ...FULL_ACCESS },
+    SUPPORT_OFFICER: {
+      dashboard: true,
+      products: false,
+      orders: true,
+      reports: true,
+      customers: true,
+      blog: false,
+      stores: true,
+      siteSettings: false,
+      adminSettings: false,
+    },
+    DEPLOYMENT_MANAGER: {
       dashboard: true,
       products: true,
-      orders: true,
+      orders: false,
       reports: true,
       customers: true,
       blog: true,
@@ -681,16 +1236,94 @@ const DEFAULT_STORE: AdminConfigStore = {
       siteSettings: true,
       adminSettings: false,
     },
-    editor: {
+    BILLING_MANAGER: {
       dashboard: true,
+      products: false,
+      orders: true,
+      reports: true,
+      customers: true,
+      blog: false,
+      stores: false,
+      siteSettings: false,
+      adminSettings: false,
+    },
+    CLIENT_OWNER: {
+      dashboard: false,
       products: false,
       orders: false,
       reports: false,
       customers: false,
-      blog: true,
+      blog: false,
       stores: false,
       siteSettings: false,
       adminSettings: false,
+    },
+    CLIENT_STAFF: {
+      dashboard: false,
+      products: false,
+      orders: false,
+      reports: false,
+      customers: false,
+      blog: false,
+      stores: false,
+      siteSettings: false,
+      adminSettings: false,
+    },
+  },
+  controlCenterRoleVisibility: {
+    SUPER_ADMIN: { ...FULL_CONTROL_CENTER_ACCESS },
+    ADMIN: {
+      ...FULL_CONTROL_CENTER_ACCESS,
+      auditLogs: false,
+      systemSettings: false,
+    },
+    SUPPORT_OFFICER: {
+      overview: true,
+      clients: true,
+      workspaces: true,
+      deploymentQueue: true,
+      supportQueue: true,
+      launchReadiness: true,
+      connectors: true,
+      templates: false,
+      team: false,
+      plansBilling: false,
+      reports: true,
+      analytics: true,
+      auditLogs: false,
+      systemSettings: false,
+    },
+    DEPLOYMENT_MANAGER: {
+      overview: true,
+      clients: true,
+      workspaces: true,
+      deploymentQueue: true,
+      supportQueue: true,
+      launchReadiness: true,
+      connectors: true,
+      templates: true,
+      team: false,
+      plansBilling: false,
+      reports: true,
+      analytics: true,
+      auditLogs: false,
+      systemSettings: false,
+    },
+    BILLING_MANAGER: {
+      overview: true,
+      clients: true,
+      workspaces: true,
+      deploymentQueue: false,
+      supportQueue: false,
+      launchReadiness: false,
+      connectors: false,
+      templates: false,
+      team: false,
+      plansBilling: true,
+      reports: true,
+      analytics: true,
+      auditLogs: true,
+      systemSettings: false,
     },
   },
   maintenance: {
@@ -713,10 +1346,12 @@ const DEFAULT_STORE: AdminConfigStore = {
       businessModels: ['B2C', 'B2B'],
       countries: [
         { code: 'NG', name: 'Nigeria' },
-        { code: 'US', name: 'United States' },
-        { code: 'GB', name: 'United Kingdom' },
-        { code: 'CA', name: 'Canada' },
         { code: 'AE', name: 'United Arab Emirates' },
+        { code: 'GB', name: 'United Kingdom' },
+        { code: 'US', name: 'United States' },
+        { code: 'CA', name: 'Canada' },
+        { code: 'KE', name: 'Kenya' },
+        { code: 'ZA', name: 'South Africa' },
         { code: 'AU', name: 'Australia' },
       ],
     },
@@ -1131,6 +1766,7 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       identities: parsed.nativeAuth?.identities ?? {},
       sessions: parsed.nativeAuth?.sessions ?? {},
       permissions: parsed.nativeAuth?.permissions ?? {},
+      passwordChangeOtps: parsed.nativeAuth?.passwordChangeOtps ?? {},
     },
     platformSettings: {
       ...DEFAULT_STORE.platformSettings,
@@ -1138,6 +1774,22 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       paymentProvider: {
         ...DEFAULT_STORE.platformSettings.paymentProvider,
         ...(parsed.platformSettings?.paymentProvider ?? {}),
+      },
+      paymentProviders: {
+        ...DEFAULT_STORE.platformSettings.paymentProviders,
+        ...(parsed.platformSettings?.paymentProviders ?? {}),
+      },
+      billingCurrencyPolicy: {
+        ...DEFAULT_STORE.platformSettings.billingCurrencyPolicy,
+        ...(parsed.platformSettings?.billingCurrencyPolicy ?? {}),
+        countryCurrencyMap: {
+          ...DEFAULT_STORE.platformSettings.billingCurrencyPolicy.countryCurrencyMap,
+          ...(parsed.platformSettings?.billingCurrencyPolicy?.countryCurrencyMap ?? {}),
+        },
+        fxRates: {
+          ...DEFAULT_STORE.platformSettings.billingCurrencyPolicy.fxRates,
+          ...(parsed.platformSettings?.billingCurrencyPolicy?.fxRates ?? {}),
+        },
       },
       demoMode: {
         ...DEFAULT_STORE.platformSettings.demoMode,
@@ -1151,6 +1803,52 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
         ...DEFAULT_STORE.platformSettings.supportDefaults,
         ...(parsed.platformSettings?.supportDefaults ?? {}),
       },
+      branding: {
+        ...DEFAULT_STORE.platformSettings.branding,
+        ...(parsed.platformSettings?.branding ?? {}),
+      },
+      email: {
+        ...DEFAULT_STORE.platformSettings.email,
+        ...(parsed.platformSettings?.email ?? {}),
+        // One-time migration: if host is empty but legacy smtp section has data, promote it.
+        host: parsed.platformSettings?.email?.host?.trim() || parsed.smtp?.host?.trim() || DEFAULT_STORE.platformSettings.email.host,
+        port: parsed.platformSettings?.email?.port || parsed.smtp?.port || DEFAULT_STORE.platformSettings.email.port,
+        secure: typeof parsed.platformSettings?.email?.secure === 'boolean'
+          ? parsed.platformSettings.email.secure
+          : typeof parsed.smtp?.secure === 'boolean'
+            ? parsed.smtp.secure
+            : DEFAULT_STORE.platformSettings.email.secure,
+        username: parsed.platformSettings?.email?.username?.trim() || parsed.smtp?.username?.trim() || DEFAULT_STORE.platformSettings.email.username,
+        password: parsed.platformSettings?.email?.password || parsed.smtp?.password || DEFAULT_STORE.platformSettings.email.password,
+        fromEmail: parsed.platformSettings?.email?.fromEmail?.trim() || parsed.smtp?.fromEmail?.trim() || DEFAULT_STORE.platformSettings.email.fromEmail,
+        fromName: parsed.platformSettings?.email?.fromName?.trim() || parsed.smtp?.fromName?.trim() || DEFAULT_STORE.platformSettings.email.fromName,
+        failureAlertRecipients: Array.isArray(parsed.platformSettings?.email?.failureAlertRecipients)
+          ? parsed.platformSettings.email.failureAlertRecipients.map((item) => String(item).trim()).filter(Boolean)
+          : DEFAULT_STORE.platformSettings.email.failureAlertRecipients,
+      },
+      reporting: {
+        ...DEFAULT_STORE.platformSettings.reporting,
+        ...(parsed.platformSettings?.reporting ?? {}),
+        recipients: Array.isArray(parsed.platformSettings?.reporting?.recipients)
+          ? parsed.platformSettings.reporting.recipients.map((item) => String(item).trim().toLowerCase()).filter(Boolean)
+          : DEFAULT_STORE.platformSettings.reporting.recipients,
+        lastRunAt: typeof parsed.platformSettings?.reporting?.lastRunAt === 'string'
+          ? parsed.platformSettings.reporting.lastRunAt
+          : DEFAULT_STORE.platformSettings.reporting.lastRunAt,
+        lastRunStatus:
+          parsed.platformSettings?.reporting?.lastRunStatus === 'success' || parsed.platformSettings?.reporting?.lastRunStatus === 'failed'
+            ? parsed.platformSettings.reporting.lastRunStatus
+            : DEFAULT_STORE.platformSettings.reporting.lastRunStatus,
+      },
+      emailTemplates: Object.fromEntries(
+        PLATFORM_EMAIL_TEMPLATE_KEYS.map((templateKey) => [
+          templateKey,
+          {
+            ...DEFAULT_STORE.platformSettings.emailTemplates[templateKey],
+            ...(parsed.platformSettings?.emailTemplates?.[templateKey] ?? {}),
+          },
+        ]),
+      ) as PlatformSettings['emailTemplates'],
     },
     tracking: { ...DEFAULT_STORE.tracking, ...(parsed.tracking ?? {}) },
     smtp: { ...DEFAULT_STORE.smtp, ...(parsed.smtp ?? {}) },
@@ -1158,6 +1856,10 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
     roleModuleVisibility: {
       ...DEFAULT_STORE.roleModuleVisibility,
       ...(parsed.roleModuleVisibility ?? {}),
+    },
+    controlCenterRoleVisibility: {
+      ...DEFAULT_STORE.controlCenterRoleVisibility,
+      ...(parsed.controlCenterRoleVisibility ?? {}),
     },
     maintenance: { ...DEFAULT_STORE.maintenance, ...(parsed.maintenance ?? {}) },
     audit: Array.isArray(parsed.audit) ? parsed.audit : [],
@@ -1210,77 +1912,130 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
   };
 }
 
-// ─── WordPress-backed read/write ──────────────────────────────────────────────
+// ─── Vercel Postgres read/write ──────────────────────────────────────────────
 
-async function readFromWordPress(): Promise<AdminConfigStore> {
-  const endpoint = process.env.MARVEO_ADMIN_CONFIG_ENDPOINT || '/wp-json/marveo-core/v1/admin-config';
-  const res = await fetch(`${WP_API_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
-    cache: 'no-store',
-  });
-  if (res.status === 204 || res.status === 404) return DEFAULT_STORE;
-  if (!res.ok) throw new Error(`WP admin-config GET failed: ${res.status}`);
-  const parsed = (await res.json()) as Partial<AdminConfigStore>;
+async function readFromPostgres(): Promise<AdminConfigStore> {
+  await ensurePostgresStoreTable();
+  const res = await executePostgresQuery(
+    `SELECT data FROM ${POSTGRES_TABLE} WHERE id = $1 LIMIT 1`,
+    [POSTGRES_KEY],
+  );
+
+  if (!res.rows[0]?.data) {
+    return DEFAULT_STORE;
+  }
+
+  const raw = res.rows[0].data;
+  const parsed = typeof raw === 'string'
+    ? (JSON.parse(raw) as Partial<AdminConfigStore>)
+    : (raw as Partial<AdminConfigStore>);
+
   return mergeWithDefaults(parsed);
 }
 
-async function writeToWordPress(data: AdminConfigStore): Promise<void> {
-  const endpoint = process.env.MARVEO_ADMIN_CONFIG_ENDPOINT || '/wp-json/marveo-core/v1/admin-config';
-  const res = await fetch(`${WP_API_URL}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await wpAuthHeader()) },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error(`WP admin-config POST failed: ${res.status}`);
+async function writeToPostgres(data: AdminConfigStore): Promise<void> {
+  await ensurePostgresStoreTable();
+  await executePostgresQuery(
+    `INSERT INTO ${POSTGRES_TABLE} (id, data, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (id)
+     DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`,
+    [POSTGRES_KEY, JSON.stringify(data)],
+  );
 }
 
-// ─── Local filesystem read/write (dev) ───────────────────────────────────────
-
-async function ensureStoreFile() {
+async function readLegacyStoreFile(): Promise<Partial<AdminConfigStore> | null> {
   try {
-    const dir = path.dirname(STORE_PATH);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.access(STORE_PATH);
+    const raw = await fs.readFile(LEGACY_STORE_PATH, 'utf8');
+    return JSON.parse(raw) as Partial<AdminConfigStore>;
   } catch {
-    try {
-      await fs.writeFile(STORE_PATH, JSON.stringify(DEFAULT_STORE, null, 2), 'utf8');
-    } catch {
-      // Read-only env — skip initialization.
-    }
+    return null;
   }
 }
 
-async function readFromFile(): Promise<AdminConfigStore> {
-  await ensureStoreFile();
-  const raw = await fs.readFile(STORE_PATH, 'utf8');
-  const parsed = JSON.parse(raw) as Partial<AdminConfigStore>;
-  return mergeWithDefaults(parsed);
-}
+let legacyMigrationPromise: Promise<void> | null = null;
 
-async function writeToFile(data: AdminConfigStore): Promise<void> {
-  await ensureStoreFile();
-  await fs.writeFile(STORE_PATH, JSON.stringify(data, null, 2), 'utf8');
+async function migrateLegacyFileToPostgresIfNeeded() {
+  if (legacyMigrationPromise) {
+    await legacyMigrationPromise;
+    return;
+  }
+
+  legacyMigrationPromise = (async () => {
+    await ensurePostgresStoreTable();
+
+    const existing = await executePostgresQuery(
+      `SELECT id FROM ${POSTGRES_TABLE} WHERE id = $1 LIMIT 1`,
+      [POSTGRES_KEY],
+    );
+    if (existing.rows[0]?.id) {
+      return;
+    }
+
+    const legacy = await readLegacyStoreFile();
+    if (!legacy) {
+      return;
+    }
+
+    const merged = mergeWithDefaults(legacy);
+    await writeToPostgres(merged);
+  })();
+
+  await legacyMigrationPromise;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export async function readAdminStore(): Promise<AdminConfigStore> {
-  try {
-    if (STORE_BACKEND === 'wordpress_compat') {
-      return await readFromWordPress();
-    }
-    return await readFromFile();
-  } catch {
-    return DEFAULT_STORE;
+let cachedStore: AdminConfigStore | null = null;
+let cachedAtMs = 0;
+let cachedReadPromise: Promise<AdminConfigStore> | null = null;
+
+function getStoreCacheTtlMs(): number {
+  const raw = process.env.MARVEO_STORE_CACHE_MS;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
   }
+  // Small TTL to collapse bursts of reads during a single request/render cycle.
+  return 750;
+}
+
+function cacheStore(value: AdminConfigStore) {
+  cachedStore = value;
+  cachedAtMs = Date.now();
+  cachedReadPromise = null;
+}
+
+function clearStoreCache() {
+  cachedStore = null;
+  cachedAtMs = 0;
+  cachedReadPromise = null;
+}
+
+export async function readAdminStore(): Promise<AdminConfigStore> {
+  const ttl = getStoreCacheTtlMs();
+  if (ttl > 0 && cachedStore && Date.now() - cachedAtMs < ttl) {
+    return cachedStore;
+  }
+  if (ttl > 0 && cachedReadPromise) {
+    return await cachedReadPromise;
+  }
+
+  const readPromise = (async () => {
+    await migrateLegacyFileToPostgresIfNeeded();
+    return await readFromPostgres();
+  })();
+
+  if (ttl > 0) cachedReadPromise = readPromise;
+  const store = await readPromise;
+  if (ttl > 0) cacheStore(store);
+  return store;
 }
 
 export async function writeAdminStore(next: AdminConfigStore): Promise<void> {
-  if (STORE_BACKEND === 'wordpress_compat') {
-    await writeToWordPress(next);
-  } else {
-    await writeToFile(next);
-  }
+  await writeToPostgres(next);
+
+  cacheStore(next);
 }
 
 export async function updateAdminStore(
@@ -1400,4 +2155,3 @@ export async function setWorkspaceConnectorState(
 
   return updated;
 }
-

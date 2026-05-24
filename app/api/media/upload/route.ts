@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
+import { put } from '@vercel/blob';
 
-import { getConfig } from '@/src/config/client';
-
-const getWpApiUrl = () => {
-  const config = getConfig();
-  return config.wordpressApiUrl || 'https://localhost/wp-json';
-};
+function toSafeFilename(name: string): string {
+  const raw = String(name || 'upload').trim();
+  const sanitized = raw.replace(/[^\w.\-]+/g, '-');
+  return sanitized.length ? sanitized : 'upload';
+}
 
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -16,38 +16,22 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file');
   if (!(file instanceof File)) return NextResponse.json({ error: 'Missing file' }, { status: 400 });
 
-  const WP = `${getWpApiUrl()}/wp/v2`;
-  const wpFormData = new FormData();
-  wpFormData.append('file', file, file.name);
+  const token = (process.env.BLOB_READ_WRITE_TOKEN || '').trim();
 
-  let res = await fetch(`${WP}/media`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${session.token}`,
-      Accept: 'application/json',
-    },
-    body: wpFormData,
-  });
-
-  // Some WP setups still expect raw binary uploads. Keep a fallback for those.
-  if (!res.ok) {
-    res = await fetch(`${WP}/media`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session.token}`,
-        Accept: 'application/json',
-        'Content-Type': file.type || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${file.name}"`,
-      },
-      body: await file.arrayBuffer(),
+  try {
+    const key = `uploads/${Date.now()}-${toSafeFilename(file.name)}`;
+    const result = await put(key, file, {
+      // Our Vercel Blob store is configured as private, so access must be private here.
+      access: 'private',
+      contentType: file.type || 'application/octet-stream',
+      ...(token ? { token } : {}),
     });
-  }
 
-  if (!res.ok) {
-    const detail = await res.text();
-    return NextResponse.json({ error: detail || 'Upload failed' }, { status: res.status });
+    // Return a same-origin URL that can stream private blobs via the server.
+    const proxyUrl = `/api/media/file?pathname=${encodeURIComponent(result.pathname)}`;
+    return NextResponse.json({ ok: true, key, blob_url: result.url, source_url: proxyUrl });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Upload failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const media = await res.json();
-  return NextResponse.json({ id: media.id, source_url: media.source_url });
 }

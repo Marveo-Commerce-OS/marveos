@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findTemplateForPublicOnboarding, startPublicOnboarding } from '@/lib/commercialOnboarding';
+import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -60,6 +61,19 @@ export async function POST(req: NextRequest) {
     paymentReference,
     source,
     appBaseUrl,
+  });
+
+  await sendPlatformEmailNotification({
+    templateKey: 'CLIENT_SIGNUP',
+    to: email,
+    variables: {
+      clientName: name || company || email,
+      company: company || '',
+      appBaseUrl,
+      onboardingSessionId: result.onboardingSessionId || '',
+      selectedPlanId,
+      country,
+    },
   });
 
   return NextResponse.json(result, { status: 201 });

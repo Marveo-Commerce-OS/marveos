@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, FileText, LogOut, ExternalLink, Menu, X, BarChart3, Shield, BookOpen, Image as ImageIcon, CloudCog, FileStack } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, ShoppingCart, Users, Settings, LogOut, ExternalLink, Menu, X, BarChart3, Shield, BookOpen, CloudCog, FileStack } from 'lucide-react';
 import { getConfig } from '@/src/config/client';
 import { shouldShowInNavigation } from '@/src/lib/modules';
 
@@ -38,6 +38,36 @@ export default function Sidebar({
   const pathname = usePathname();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
+  const [profile, setProfile] = useState<{ displayName: string; email: string; avatarUrl?: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
+        const body = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          user?: { displayName?: string; email?: string; avatarUrl?: string; id?: string };
+        } | null;
+        if (!res.ok || !body?.ok || !body.user) return;
+        if (cancelled) return;
+        setProfile({
+          displayName: body.user.displayName || displayName,
+          email: body.user.email || email,
+          avatarUrl: body.user.avatarUrl || undefined,
+        });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [displayName, email]);
+
+  const resolvedName = profile?.displayName ?? displayName;
+  const resolvedEmail = profile?.email ?? email;
+  const resolvedAvatarUrl = profile?.avatarUrl;
   
   const allowed = new Set(allowedModules ?? []);
   const navWithHrefs = NAV.map((item) => ({
@@ -133,15 +163,20 @@ export default function Sidebar({
             </a>
           )}
           <div className="flex items-center gap-3 px-3 py-2.5">
-            <div 
-              className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-bold shrink-0"
-              style={{ backgroundColor: config.clientPrimaryColor }}
+            <div
+              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden relative"
+              style={!resolvedAvatarUrl ? { backgroundColor: 'transparent' } : undefined}
             >
-              {displayName?.[0]?.toUpperCase() ?? 'A'}
+              {resolvedAvatarUrl ? (
+                <Image src={resolvedAvatarUrl} alt={resolvedName || 'User avatar'} fill className="object-cover" sizes="28px" />
+              ) : (
+                <Image src="/images/avatar-placeholder.svg" alt="User avatar placeholder" fill className="object-cover" sizes="28px" />
+              )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-gray-900 truncate">{displayName}</p>
-              <p className="text-xs text-gray-400 truncate">{email}</p>
+              <p className="text-xs font-semibold text-gray-900 truncate">{resolvedName}</p>
+              <p className="text-xs text-gray-400 truncate">{resolvedEmail}</p>
+              <Link href="/password/change?surface=portal&next=/portal" className="text-[11px] font-medium text-gray-500 underline">Security settings</Link>
             </div>
           </div>
           <button onClick={logout}

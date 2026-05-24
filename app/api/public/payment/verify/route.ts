@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPayment } from '@/lib/commercialOnboarding';
+import { sendPlatformEmailNotification, sendPlatformFailureAlert } from '@/lib/emailNotifications';
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const paymentReference = body?.paymentReference ? String(body.paymentReference).trim() : '';
-  const provider = body?.provider ? String(body.provider).trim().toUpperCase() : '';
+  const providerRaw = body?.provider ? String(body.provider).trim().toUpperCase() : '';
+  const provider = ['PAYSTACK', 'FLUTTERWAVE', 'CUSTOM', 'STRIPE', 'PAYPAL'].includes(providerRaw)
+    ? providerRaw as 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL'
+    : null;
   const selectedPlanId = body?.selectedPlanId ? String(body.selectedPlanId).trim() : undefined;
   const billingIntervalRaw = body?.billingInterval ? String(body.billingInterval).trim().toUpperCase() : undefined;
   const billingInterval = billingIntervalRaw === 'ANNUAL' ? 'ANNUAL' : billingIntervalRaw === 'MONTHLY' ? 'MONTHLY' : undefined;
@@ -18,8 +22,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'paymentReference is required' }, { status: 400 });
   }
 
-  if (provider !== 'PAYSTACK' && provider !== 'STRIPE') {
-    return NextResponse.json({ ok: false, error: 'provider must be PAYSTACK or STRIPE' }, { status: 400 });
+  if (!provider) {
+    return NextResponse.json({ ok: false, error: 'provider must be one of PAYSTACK, FLUTTERWAVE, CUSTOM, STRIPE, PAYPAL' }, { status: 400 });
   }
 
   if (billingIntervalRaw && !billingInterval) {
@@ -41,7 +45,39 @@ export async function POST(req: NextRequest) {
     appBaseUrl,
   });
   if (!result.ok) {
+    if (customerEmail) {
+      await sendPlatformEmailNotification({
+        templateKey: 'PAYMENT_FAILED',
+        to: customerEmail,
+        variables: {
+          clientName: customerEmail,
+          paymentReference,
+          errorMessage: result.reason,
+        },
+      });
+    }
+
+    await sendPlatformFailureAlert({
+      failureType: 'PAYMENT_VERIFICATION_FAILED',
+      errorMessage: result.reason || 'Payment verification failed',
+      operationName: 'public.payment.verify',
+    });
+
     return NextResponse.json({ ok: false, error: result.reason }, { status: 404 });
+  }
+
+  if (customerEmail) {
+    await sendPlatformEmailNotification({
+      templateKey: 'PAYMENT_RECEIVED',
+      to: customerEmail,
+      variables: {
+        clientName: customerEmail,
+        amount: typeof amount === 'number' ? amount : '',
+        currency: currency || '',
+        paymentReference,
+        subscriptionId: result.subscriptionId,
+      },
+    });
   }
 
   return NextResponse.json({

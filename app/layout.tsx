@@ -1,24 +1,31 @@
 import type { Metadata } from 'next';
-import { Space_Grotesk } from 'next/font/google';
-import { getConfig } from '@/src/config/client';
+import { Manrope, Sora } from 'next/font/google';
+import { readAdminStore } from '@/lib/adminStore';
 import './globals.css';
 
-const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' });
+const sora = Sora({ subsets: ['latin'], variable: '--font-sora', weight: ['400', '500', '600', '700', '800'] });
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' });
 
-export const metadata: Metadata = {
-  title: 'Marvéo',
-  description: 'Marvéo — Modern commerce operations built for businesses using WordPress, WooCommerce, and headless commerce stacks.',
-  icons: {
-    icon: '/icon',
-    shortcut: '/icon',
-    apple: '/icon',
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const store = await readAdminStore();
+  const brandName = store.platformSettings.branding.brandName || 'Marvéo';
+  const faviconUrl = store.platformSettings.branding.faviconUrl || '/icon';
+
+  return {
+    title: brandName,
+    description: 'Marvéo — Modern commerce operations built for businesses using WordPress, WooCommerce, and headless commerce stacks.',
+    icons: {
+      icon: faviconUrl,
+      shortcut: faviconUrl,
+      apple: faviconUrl,
+    },
+  };
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${spaceGrotesk.variable} font-['Space_Grotesk'] antialiased bg-gray-50`}>
+      <body className={`${sora.variable} ${manrope.variable} font-[family-name:var(--font-manrope)] antialiased bg-gray-50`}>
         {children}
       </body>
     </html>

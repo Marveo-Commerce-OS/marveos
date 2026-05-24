@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
 import {
   getSession,
   hasClientMasterAccess,
@@ -6,8 +7,33 @@ import {
   isAdmin,
   isSuperAdmin,
   resolveSessionMarveoRoles,
+  type MarveoRole,
 } from '@/lib/auth';
 import MasterSidebar from '@/components/MasterSidebar';
+import { CONTROL_CENTER_MODULE_KEYS, readAdminStore, type ControlCenterModuleKey } from '@/lib/adminStore';
+import { resolveRequiredModuleForPath } from './_lib/moduleAccess';
+
+const INTERNAL_ROLE_PRIORITY: MarveoRole[] = [
+  'SUPER_ADMIN',
+  'ADMIN',
+  'DEPLOYMENT_MANAGER',
+  'SUPPORT_OFFICER',
+  'BILLING_MANAGER',
+];
+
+function resolveEffectiveInternalRole(masterRole: MarveoRole | null, marveoRoles: MarveoRole[]): MarveoRole | null {
+  if (masterRole && INTERNAL_ROLE_PRIORITY.includes(masterRole)) {
+    return masterRole;
+  }
+
+  for (const role of INTERNAL_ROLE_PRIORITY) {
+    if (marveoRoles.includes(role)) {
+      return role;
+    }
+  }
+
+  return null;
+}
 
 export default async function MasterLayout({ children }: { children: React.ReactNode }) {
   const isDev = process.env.NODE_ENV !== 'production';
@@ -15,6 +41,9 @@ export default async function MasterLayout({ children }: { children: React.React
   if (!session) {
     const target = isDev ? '/master-login?error=auth_required&from=/master' : '/master-login';
     redirect(target);
+  }
+  if ((session.user as { requirePasswordChange?: boolean } | null)?.requirePasswordChange) {
+    redirect('/password/change?surface=master&firstLogin=1');
   }
 
   const roleContext = await resolveSessionMarveoRoles(session.user);
@@ -34,22 +63,66 @@ export default async function MasterLayout({ children }: { children: React.React
   }
 
   const superAdmin = await isSuperAdmin(session.token);
+  const store = await readAdminStore();
+  const effectiveRole = resolveEffectiveInternalRole(roleContext.masterRole, roles);
+
+  const allowedModules: ControlCenterModuleKey[] = superAdmin
+    ? [...CONTROL_CENTER_MODULE_KEYS]
+    : (effectiveRole
+        ? CONTROL_CENTER_MODULE_KEYS.filter((moduleKey) => Boolean(store.controlCenterRoleVisibility[effectiveRole]?.[moduleKey]))
+        : []);
+
+  const requestHeaders = await headers();
+  const currentPath = requestHeaders.get('x-marveo-pathname') ?? '/master';
+  const requiredModule = resolveRequiredModuleForPath(currentPath);
+  const notifications: Array<{ id: string; tone: 'amber' | 'blue'; text: string }> = [];
+
+  if (requiredModule && !allowedModules.includes(requiredModule)) {
+    redirect('/master?error=module_access_denied');
+  }
+
+  if (store.maintenance.site_under_construction) {
+    notifications.push({
+      id: 'maintenance',
+      tone: 'amber',
+      text: store.maintenance.under_construction_title || 'System maintenance mode is active.',
+    });
+  }
+
+  if (currentPath.includes('error=module_access_denied')) {
+    notifications.push({
+      id: 'module-access',
+      tone: 'amber',
+      text: 'Access denied for this module based on your internal role permissions.',
+    });
+  }
+
+  if (!superAdmin) {
+    notifications.push({
+      id: 'limited-role',
+      tone: 'blue',
+      text: 'Limited internal role detected: some sections may be read-only.',
+    });
+  }
 
   return (
     <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-gray-50">
       <MasterSidebar
         displayName={session.user?.user_display_name ?? 'Admin'}
         email={session.user?.user_email ?? ''}
+        allowedModules={allowedModules}
+        dashboardLogoUrl={store.platformSettings.branding.dashboardLogoUrl || store.platformSettings.branding.logoUrl || ''}
+        brandName={store.platformSettings.branding.brandName || 'Marveo'}
       />
       <main className="flex-1 overflow-auto pt-16 md:pt-0">
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900 md:px-8">
-          Control Center is now the canonical internal surface. Legacy /dashboard routes remain available during migration.
-        </div>
-        {!superAdmin && (
-          <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-900 md:px-8">
-            Limited internal role detected: some sections may be read-only.
+        {notifications.map((notice) => (
+          <div
+            key={notice.id}
+            className={`border-b px-4 py-2 text-xs md:px-8 ${notice.tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-blue-200 bg-blue-50 text-blue-900'}`}
+          >
+            {notice.text}
           </div>
-        )}
+        ))}
         <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>

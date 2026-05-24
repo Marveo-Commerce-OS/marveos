@@ -3,6 +3,7 @@ import { getSession, isAdmin, getCurrentWpUser } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, setWorkspaceConnectorState, getWorkspaceConnectorState } from '@/lib/adminStore';
 import type { ConnectorSiteMetadata } from '@/lib/adminStore';
 import { normalizeSiteUrl, probeConnectorSite } from '@/lib/connectorProbe';
+import { sendPlatformEmailNotification, sendPlatformFailureAlert } from '@/lib/emailNotifications';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -51,6 +52,26 @@ export async function POST(
         connectorVerificationError: 'Provided connector token does not match generated workspace token.',
       });
 
+      const contactEmail = String(workspace.businessProfile?.contactEmail || '').trim().toLowerCase();
+      if (contactEmail) {
+        await sendPlatformEmailNotification({
+          templateKey: 'CONNECTOR_FAILED',
+          to: contactEmail,
+          variables: {
+            clientName: String(workspace.businessProfile?.businessName || contactEmail),
+            workspaceName: workspace.name,
+            errorMessage: 'Provided connector token does not match generated workspace token.',
+          },
+        });
+      }
+
+      await sendPlatformFailureAlert({
+        failureType: 'CONNECTOR_VERIFICATION_FAILED',
+        errorMessage: 'Provided connector token does not match generated workspace token.',
+        operationName: 'cloud.connector.verify',
+        workspaceId,
+      });
+
       return NextResponse.json(
         {
           workspaceId,
@@ -91,6 +112,26 @@ export async function POST(
       details: `Connector verification failed: ${verificationError}`,
     });
 
+    const contactEmail = String(workspace.businessProfile?.contactEmail || '').trim().toLowerCase();
+    if (contactEmail) {
+      await sendPlatformEmailNotification({
+        templateKey: 'CONNECTOR_FAILED',
+        to: contactEmail,
+        variables: {
+          clientName: String(workspace.businessProfile?.businessName || contactEmail),
+          workspaceName: workspace.name,
+          errorMessage: verificationError,
+        },
+      });
+    }
+
+    await sendPlatformFailureAlert({
+      failureType: 'CONNECTOR_VERIFICATION_FAILED',
+      errorMessage: verificationError,
+      operationName: 'cloud.connector.verify',
+      workspaceId,
+    });
+
     return NextResponse.json({
       workspaceId,
       connectorStatus: 'FAILED',
@@ -124,6 +165,26 @@ export async function POST(
       action: 'cloud.connector.verification_failed',
       target: workspaceId,
       details: verificationError,
+    });
+
+    const contactEmail = String(workspace.businessProfile?.contactEmail || '').trim().toLowerCase();
+    if (contactEmail) {
+      await sendPlatformEmailNotification({
+        templateKey: 'CONNECTOR_FAILED',
+        to: contactEmail,
+        variables: {
+          clientName: String(workspace.businessProfile?.businessName || contactEmail),
+          workspaceName: workspace.name,
+          errorMessage: verificationError,
+        },
+      });
+    }
+
+    await sendPlatformFailureAlert({
+      failureType: 'CONNECTOR_DOMAIN_MISMATCH',
+      errorMessage: verificationError,
+      operationName: 'cloud.connector.verify',
+      workspaceId,
     });
 
     return NextResponse.json({

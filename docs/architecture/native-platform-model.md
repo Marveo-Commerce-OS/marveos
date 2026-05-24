@@ -51,12 +51,15 @@ Session priority:
 Native sessions are persisted in nativeAuth.sessions with expiry and source tagging.
 
 ## Persistence Model
-Default backend: native_file
-Optional compatibility backend: wordpress_compat
+Default backend: vercel_postgres (database-only)
 
 Environment:
-- MARVEO_STORE_BACKEND=native_file (default)
-- MARVEO_STORE_BACKEND=wordpress_compat (temporary compatibility only)
+- DATABASE_URL must be set
+- MARVEO_ADMIN_CONFIG_TABLE is optional (default: marveo_admin_config)
+- MARVEO_ADMIN_CONFIG_KEY is optional (default: global)
+
+Legacy migration:
+- On first read, if no admin store row exists yet and `.admin-data/ecommerce-admin-config.json` is present, Marveo imports it into Postgres once.
 
 ## Demo Isolation
 Demo mode is represented by platformSettings.demoMode and must not drive operational state transitions in Master APIs.

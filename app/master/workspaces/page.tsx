@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { copyTextToClipboard } from '@/lib/client/clipboard';
 
 type SupportStatus = 'UNASSIGNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'WAITING_FOR_CLIENT' | 'COMPLETED';
 
@@ -198,11 +199,14 @@ export default function MasterWorkspacesPage() {
 
   async function copyWorkspaceId(workspaceId: string) {
     try {
-      await navigator.clipboard.writeText(workspaceId);
+      const copied = await copyTextToClipboard(workspaceId);
+      if (!copied) {
+        throw new Error('copy-failed');
+      }
       setMessage('Workspace ID copied.');
       window.setTimeout(() => setMessage(''), 1500);
     } catch {
-      setError('Could not copy workspace ID.');
+      setError('Could not copy workspace ID. Click inside the page and try again.');
     }
   }
 

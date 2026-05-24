@@ -50,14 +50,14 @@ Classification:
 - future migration: native auth endpoint replacing WordPress JWT flow
 
 ### Persistence assumptions
-- lib/adminStore.ts now defaults to native_file backend.
-- WordPress persistence backend is opt-in only via MARVEO_STORE_BACKEND=wordpress_compat.
+- lib/adminStore.ts now uses Postgres-only persistence via DATABASE_URL.
+- A one-time legacy import copies existing `.admin-data/ecommerce-admin-config.json` into Postgres when no row exists.
 
 Classification:
 - remove now: implicit Vercel => WordPress persistence assumption
-- compatibility only: wordpress_compat backend mode
+- remove now: native_file backend mode
 - optional integration: connector metadata persistence from WP handshake
-- future migration: move native_file to database backend (Postgres/managed store)
+- future migration: move from JSONB blob storage to normalized relational tables if needed
 
 ## High-Risk Remaining Couplings
 - Bridge login still requires WordPress JWT endpoint when native credentials are not provisioned.

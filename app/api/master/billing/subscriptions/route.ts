@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore, type CommercialSubscriptionStatus } from '@/lib/adminStore';
+import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 
 type SubscriptionRow = {
   id: string;
@@ -139,6 +140,27 @@ export async function PATCH(req: NextRequest) {
   });
 
   const refreshed = await readAdminStore();
+  const targetSub = refreshed.cloud.commercial.subscriptions[subscriptionId];
+  const targetIdentity = targetSub ? refreshed.cloud.commercial.identities[targetSub.identityId] : null;
+  if (targetSub && targetIdentity?.email) {
+    const templateKey = action === 'SUSPEND'
+      ? 'BILLING_SUSPENDED'
+      : action === 'REACTIVATE'
+        ? 'BILLING_REACTIVATED'
+        : 'BILLING_NOTICE';
+
+    await sendPlatformEmailNotification({
+      templateKey,
+      to: targetIdentity.email,
+      variables: {
+        clientName: targetIdentity.name || targetIdentity.email,
+        subscriptionId,
+        status: targetSub.status,
+        billingEmail: refreshed.platformSettings.email.billingEmail || '',
+      },
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     subscriptionId,

@@ -21,9 +21,9 @@ export default async function MasterBillingPage() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Current Plan</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Default New-Workspace Plan</p>
           <p className="mt-2 text-2xl font-bold capitalize text-slate-900">{snapshot.accountPlan}</p>
-          <p className="mt-2 text-xs text-slate-500">Live data</p>
+          <p className="mt-2 text-xs text-slate-500">Client onboarding default</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workspace Usage</p>
@@ -31,9 +31,9 @@ export default async function MasterBillingPage() {
           <p className="mt-2 text-xs text-slate-500">Live data</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Revenue Summary</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client Subscription Summary</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{Object.keys(commercial.subscriptions).length} subscriptions</p>
-          <p className="mt-2 text-xs text-slate-500">Live platform records</p>
+          <p className="mt-2 text-xs text-slate-500">Live client billing records</p>
         </div>
       </div>
 

@@ -27,8 +27,32 @@ function normalizeCountry(country: string): string {
   return String(country || '').trim().toUpperCase() || 'US';
 }
 
+function normalizeMarket(country: string): 'NG' | 'GB' | 'AE' | 'CA' | 'US' | 'AFRICA_OTHER' {
+  const normalized = normalizeCountry(country);
+  if (normalized === 'NG') return 'NG';
+  if (normalized === 'GB') return 'GB';
+  if (normalized === 'AE') return 'AE';
+  if (normalized === 'CA') return 'CA';
+  if (normalized === 'US') return 'US';
+  return 'AFRICA_OTHER';
+}
+
 function getCurrencyForCountry(country: string, countryCurrencyMap: Record<string, string>): string {
-  return countryCurrencyMap[normalizeCountry(country)] || 'USD';
+  const normalized = normalizeCountry(country);
+  const market = normalizeMarket(normalized);
+  return countryCurrencyMap[normalized] || countryCurrencyMap[market] || 'USD';
+}
+
+function convertAmount(value: number, fromCurrency: string, toCurrency: string, fxRates: { USD: number; GBP: number; NGN: number }): number {
+  if (fromCurrency === toCurrency) return value;
+
+  const fromRate = fxRates[fromCurrency as 'USD' | 'GBP' | 'NGN'];
+  const toRate = fxRates[toCurrency as 'USD' | 'GBP' | 'NGN'];
+  if (!fromRate || !toRate) return value;
+
+  const valueInUsd = value / fromRate;
+  const converted = valueInUsd * toRate;
+  return Number(converted.toFixed(2));
 }
 
 function addDaysIso(baseIso: string, days: number): string {
@@ -41,7 +65,15 @@ function normalizeBillingInterval(interval?: string): CommercialBillingInterval 
   return interval === 'ANNUAL' ? 'ANNUAL' : 'MONTHLY';
 }
 
-function pickRegionalPlanPrice(plan: CommercialPlanConfig, country: string, fallbackCurrency: string) {
+function pickRegionalPlanPrice(
+  plan: CommercialPlanConfig,
+  country: string,
+  fallbackCurrency: string,
+  conversionPolicy?: {
+    basePricingCurrency: 'USD' | 'GBP' | 'NGN';
+    fxRates: { USD: number; GBP: number; NGN: number };
+  },
+) {
   const normalizedCountry = normalizeCountry(country);
   const exact = plan.regions.find((item) => item.country === normalizedCountry);
   if (exact) return exact;
@@ -49,7 +81,29 @@ function pickRegionalPlanPrice(plan: CommercialPlanConfig, country: string, fall
   const sameCurrency = plan.regions.find((item) => item.currency === fallbackCurrency);
   if (sameCurrency) return sameCurrency;
 
-  return plan.regions[0] || {
+  const baseRegion = plan.regions.find((item) => item.currency === fallbackCurrency)
+    || (conversionPolicy
+      ? plan.regions.find((item) => item.currency === conversionPolicy.basePricingCurrency)
+      : undefined)
+    || plan.regions[0];
+
+  if (baseRegion && conversionPolicy && baseRegion.currency !== fallbackCurrency) {
+    return {
+      ...baseRegion,
+      country: normalizedCountry,
+      currency: fallbackCurrency,
+      monthly: {
+        amount: convertAmount(baseRegion.monthly.amount, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+        setupFee: convertAmount(baseRegion.monthly.setupFee || 0, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+      },
+      annual: {
+        amount: convertAmount(baseRegion.annual.amount, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+        setupFee: convertAmount(baseRegion.annual.setupFee || 0, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+      },
+    };
+  }
+
+  return baseRegion || {
     country: normalizedCountry,
     currency: fallbackCurrency,
     monthly: { amount: 0, setupFee: 0 },
@@ -164,7 +218,20 @@ function isSandboxPaymentReference(paymentReference: string): boolean {
   return normalized.startsWith('sandbox_') || normalized.startsWith('test_') || normalized.startsWith('demo_');
 }
 
-function expectedProviderForCountry(country: string): CommercialPaymentProvider {
+function expectedProviderForCountry(country: string, store?: Awaited<ReturnType<typeof readAdminStore>>): CommercialPaymentProvider {
+  if (!store) {
+    return normalizeCountry(country) === 'NG' ? 'PAYSTACK' : 'STRIPE';
+  }
+
+  const market = normalizeMarket(country);
+  const configured = Object.entries(store.platformSettings.paymentProviders)
+    .filter(([, config]) => config.enabled && config.configured && config.applicableMarkets.includes(market))
+    .sort((a, b) => a[1].priority - b[1].priority);
+
+  if (configured.length > 0) {
+    return configured[0][0] as CommercialPaymentProvider;
+  }
+
   return normalizeCountry(country) === 'NG' ? 'PAYSTACK' : 'STRIPE';
 }
 
@@ -188,8 +255,17 @@ function buildRedirectUrl(appBaseUrl: string, sessionId: string): string {
   return `${appBaseUrl.replace(/\/$/, '')}/setup/mvp?session=${encodeURIComponent(sessionId)}`;
 }
 
-function getIntervalPrice(plan: CommercialPlanConfig, country: string, fallbackCurrency: string, billingInterval: CommercialBillingInterval) {
-  const pricing = pickRegionalPlanPrice(plan, country, fallbackCurrency);
+function getIntervalPrice(
+  plan: CommercialPlanConfig,
+  country: string,
+  fallbackCurrency: string,
+  billingInterval: CommercialBillingInterval,
+  conversionPolicy?: {
+    basePricingCurrency: 'USD' | 'GBP' | 'NGN';
+    fxRates: { USD: number; GBP: number; NGN: number };
+  },
+) {
+  const pricing = pickRegionalPlanPrice(plan, country, fallbackCurrency, conversionPolicy);
   return {
     region: pricing,
     intervalPrice: billingInterval === 'ANNUAL' ? pricing.annual : pricing.monthly,
@@ -199,18 +275,23 @@ function getIntervalPrice(plan: CommercialPlanConfig, country: string, fallbackC
 export async function getPublicPlans(country: string) {
   const store = await readAdminStore();
   const normalizedCountry = normalizeCountry(country);
-  const currency = getCurrencyForCountry(normalizedCountry, store.cloud.commercial.countryCurrencyMap);
+  const effectiveCountryCurrencyMap = {
+    ...store.cloud.commercial.countryCurrencyMap,
+    ...store.platformSettings.billingCurrencyPolicy.countryCurrencyMap,
+  };
+  const conversionPolicy = store.platformSettings.billingCurrencyPolicy;
+  const currency = getCurrencyForCountry(normalizedCountry, effectiveCountryCurrencyMap);
 
   return {
     country: normalizedCountry,
     currency,
     plans: store.cloud.commercial.plans.map((plan) => {
-      const pricing = pickRegionalPlanPrice(plan, normalizedCountry, currency);
+      const pricing = pickRegionalPlanPrice(plan, normalizedCountry, currency, conversionPolicy);
       return {
         planId: plan.id,
         name: plan.name,
         description: plan.description,
-        paymentProvider: expectedProviderForCountry(normalizedCountry),
+        paymentProvider: expectedProviderForCountry(normalizedCountry, store),
         pricing: {
           country: pricing.country,
           currency: pricing.currency,
@@ -314,12 +395,17 @@ export async function startPublicOnboarding(payload: {
 
     const selectedPlan = current.cloud.commercial.plans.find((plan) => plan.id === payload.selectedPlanId)
       || current.cloud.commercial.plans[0];
-    const fallbackCurrency = payload.currency || getCurrencyForCountry(normalizedCountry, current.cloud.commercial.countryCurrencyMap);
+    const effectiveCountryCurrencyMap = {
+      ...current.cloud.commercial.countryCurrencyMap,
+      ...current.platformSettings.billingCurrencyPolicy.countryCurrencyMap,
+    };
+    const fallbackCurrency = payload.currency || getCurrencyForCountry(normalizedCountry, effectiveCountryCurrencyMap);
     const { region: selectedPrice, intervalPrice: selectedIntervalPrice } = getIntervalPrice(
       selectedPlan,
       normalizedCountry,
       fallbackCurrency,
       billingInterval,
+      current.platformSettings.billingCurrencyPolicy,
     );
 
     let identity = findIdentityByEmail(current.cloud.commercial.identities, email);
@@ -371,7 +457,7 @@ export async function startPublicOnboarding(payload: {
     const trialAllowed = selectedPlan.trialEnabled && current.cloud.commercial.trialDefaults.trialEnabled;
     const useTrial = payload.paymentMode === 'TRIAL' && trialAllowed;
     const paymentProvider = payload.paymentMode === 'PAID'
-      ? (payload.paymentProvider || expectedProviderForCountry(normalizedCountry))
+      ? (payload.paymentProvider || expectedProviderForCountry(normalizedCountry, current))
       : undefined;
 
     const subscription: CommercialSubscription = {
@@ -603,9 +689,19 @@ export async function prepareSubscriptionUpgrade(payload: {
       || current.cloud.commercial.plans[0];
 
     const billingInterval = requestedInterval || existingSubscription.intendedBillingInterval || existingSubscription.billingInterval;
-    const fallbackCurrency = getCurrencyForCountry(existingSubscription.country, current.cloud.commercial.countryCurrencyMap);
-    const { region, intervalPrice } = getIntervalPrice(selectedPlan, existingSubscription.country, fallbackCurrency, billingInterval);
-    const paymentProvider = payload.provider || expectedProviderForCountry(existingSubscription.country);
+    const effectiveCountryCurrencyMap = {
+      ...current.cloud.commercial.countryCurrencyMap,
+      ...current.platformSettings.billingCurrencyPolicy.countryCurrencyMap,
+    };
+    const fallbackCurrency = getCurrencyForCountry(existingSubscription.country, effectiveCountryCurrencyMap);
+    const { region, intervalPrice } = getIntervalPrice(
+      selectedPlan,
+      existingSubscription.country,
+      fallbackCurrency,
+      billingInterval,
+      current.platformSettings.billingCurrencyPolicy,
+    );
+    const paymentProvider = payload.provider || expectedProviderForCountry(existingSubscription.country, current);
 
     const upgradedSubscription: CommercialSubscription = {
       ...existingSubscription,

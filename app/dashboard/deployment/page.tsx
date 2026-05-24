@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Copy, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { copyTextToClipboard } from '@/lib/client/clipboard';
 
 interface DeploymentLink {
   id: string;
@@ -148,8 +149,13 @@ export default function DeploymentPage() {
     }
   }
 
-  function copyToClipboard(text: string, id: string) {
-    navigator.clipboard.writeText(text);
+  async function copyToClipboard(text: string, id: string) {
+    const copied = await copyTextToClipboard(text);
+    if (!copied) {
+      setError('Could not copy text. Click inside the page and try again.');
+      return;
+    }
+
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   }
@@ -381,7 +387,7 @@ export default function DeploymentPage() {
                       <td className="px-6 py-4 text-sm text-gray-600">{expiresDate}</td>
                       <td className="px-6 py-4">
                         <button
-                          onClick={() => copyToClipboard(link.id, link.id)}
+                          onClick={() => void copyToClipboard(link.id, link.id)}
                           className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700"
                           title="Copy link ID"
                         >

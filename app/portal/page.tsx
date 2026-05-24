@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { getConfig } from '@/src/config/client';
 
 type HealthStatus = 'pass' | 'warn' | 'fail' | 'unknown';
@@ -22,6 +23,14 @@ interface WorkspaceHealth {
   generatedAt: string;
   checks: HealthCheck[];
 }
+
+type PublicBranding = {
+  brandName: string;
+  brandByline: string;
+  primaryColor: string;
+  logoUrl: string;
+  dashboardLogoUrl: string;
+};
 
 const HEALTH_AUTO_REFRESH_MS = 60000;
 
@@ -49,6 +58,13 @@ function statusLabel(status: HealthStatus): string {
 export default function PortalPage() {
   const router = useRouter();
   const config = getConfig();
+  const [branding, setBranding] = useState<PublicBranding>({
+    brandName: config.clientName || config.appName,
+    brandByline: config.brandByline,
+    primaryColor: config.clientPrimaryColor,
+    logoUrl: config.clientLogo || '',
+    dashboardLogoUrl: config.clientLogo || '',
+  });
   const [showComingSoon, setShowComingSoon] = useState(false);
   const [workspaceHealth, setWorkspaceHealth] = useState<WorkspaceHealth[]>([]);
   const [healthLoading, setHealthLoading] = useState(true);
@@ -73,6 +89,23 @@ export default function PortalPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/branding', { cache: 'no-store' });
+        const body = (await res.json().catch(() => null)) as Partial<PublicBranding> | null;
+        if (!res.ok || !body || cancelled) return;
+        setBranding((prev) => ({
+          brandName: body.brandName || prev.brandName,
+          brandByline: body.brandByline || prev.brandByline,
+          primaryColor: body.primaryColor || prev.primaryColor,
+          logoUrl: body.logoUrl || prev.logoUrl,
+          dashboardLogoUrl: body.dashboardLogoUrl || prev.dashboardLogoUrl,
+        }));
+      } catch {
+        // keep fallback branding from config
+      }
+    })();
 
     async function loadWebsiteHealth(silent = false) {
       if (!silent) {
@@ -147,16 +180,29 @@ export default function PortalPage() {
       {/* Top bar */}
       <header className="w-full px-8 py-5 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div 
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: config.clientPrimaryColor }}
-          >
-            <span className="text-white text-xs font-bold">
-              {(config.clientName || config.appName)[0].toUpperCase()}
-            </span>
-          </div>
+          {branding.logoUrl || branding.dashboardLogoUrl ? (
+            <div className="relative h-9 w-32">
+              <Image
+                src={branding.logoUrl || branding.dashboardLogoUrl}
+                alt={branding.brandName}
+                fill
+                className="object-contain object-left"
+                priority
+                unoptimized
+              />
+            </div>
+          ) : (
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ backgroundColor: branding.primaryColor }}
+            >
+              <span className="text-white text-xs font-bold">
+                {(branding.brandName || config.appName)[0].toUpperCase()}
+              </span>
+            </div>
+          )}
           <span className="text-gray-900 font-bold text-lg font-['Space_Grotesk']">
-            {config.clientName || config.appName}
+            {branding.brandName || config.appName}
           </span>
         </div>
         <button
@@ -174,7 +220,7 @@ export default function PortalPage() {
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-16">
 
         <div className="text-center mb-12">
-          <p className="text-xs font-semibold uppercase tracking-widest mb-3 font-['Space_Grotesk']" style={{ color: config.clientPrimaryColor }}>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-3 font-['Space_Grotesk']" style={{ color: branding.primaryColor }}>
             Client Workspace
           </p>
           <h1 className="text-4xl font-bold text-gray-900 font-['Space_Grotesk']">
@@ -202,7 +248,7 @@ export default function PortalPage() {
               type="button"
               onClick={() => setShowComingSoon(true)}
               className="rounded-full px-4 py-2 text-sm font-semibold text-white font-['Space_Grotesk']"
-              style={{ backgroundColor: config.clientPrimaryColor }}
+              style={{ backgroundColor: branding.primaryColor }}
             >
               Open workspace modules
             </button>
@@ -321,7 +367,7 @@ export default function PortalPage() {
 
       {/* Footer */}
       <footer className="px-8 py-5 border-t border-gray-100 text-center">
-        <p className="text-xs text-gray-500/50 font-['Space_Grotesk']">{config.appName} · {config.brandByline}</p>
+        <p className="text-xs text-gray-500/50 font-['Space_Grotesk']">{branding.brandName || config.appName} · {branding.brandByline || config.brandByline}</p>
       </footer>
 
     </div>

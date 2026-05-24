@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getSession, hasClientWorkspaceAccess, isAdmin, isSuperAdmin, normalizeRoles } from '@/lib/auth';
+import { getSession, hasClientWorkspaceAccess, isAdmin, isSuperAdmin, normalizeRoles, resolveSessionMarveoRoles, MARVEO_INTERNAL_ROLES } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import Sidebar from '@/components/Sidebar';
 import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
@@ -23,11 +23,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let allowedModules: string[] | undefined;
   if (!superAdmin) {
     const store = await readAdminStore();
-    const primaryRole = roles[0] ?? 'shop_manager';
-    const roleVisibility = store.roleModuleVisibility[primaryRole] ?? {};
-    allowedModules = Object.entries(roleVisibility)
-      .filter(([, enabled]) => Boolean(enabled))
-      .map(([module]) => module);
+    const resolvedRoles = await resolveSessionMarveoRoles(session.user);
+    const primaryRole = resolvedRoles.marveoRoles.find((role) =>
+      MARVEO_INTERNAL_ROLES.includes(role as (typeof MARVEO_INTERNAL_ROLES)[number]),
+    );
+    if (!primaryRole) {
+      allowedModules = [];
+    } else {
+      const roleVisibility = store.roleModuleVisibility[primaryRole] ?? {};
+      allowedModules = Object.entries(roleVisibility)
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([module]) => module);
+    }
   }
 
   return (
