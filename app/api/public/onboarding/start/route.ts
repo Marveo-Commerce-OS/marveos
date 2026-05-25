@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findTemplateForPublicOnboarding, startPublicOnboarding } from '@/lib/commercialOnboarding';
-import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { sendPlatformDirectEmail, sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { buildBillingInvoicePdfBuffer, buildInvoiceEmailHtml } from '@/lib/billing/invoice';
+import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { recoverOnboardingByEmail } from '@/lib/onboarding/sessionRecovery';
 import {
   asOptionalTrimmedString,
@@ -102,6 +104,83 @@ export async function POST(req: NextRequest) {
     source,
     appBaseUrl,
   });
+
+  const store = await readAdminStore();
+  const subscription = result.subscriptionId ? store.cloud.commercial.subscriptions[result.subscriptionId] : null;
+  const plan = subscription ? store.cloud.commercial.plans.find((item) => item.id === subscription.planId) : null;
+  const invoiceNumber = `MRV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+
+  if (subscription && plan) {
+    const pdfBuffer = await buildBillingInvoicePdfBuffer({
+      invoiceNumber,
+      customerName: name || company || email,
+      customerEmail: email,
+      organizationName: company || name || undefined,
+      planName: plan.name,
+      currency: subscription.currency,
+      firstBillAmount: subscription.firstBillAmount ?? subscription.amount,
+      firstBillSetupFee: subscription.firstBillSetupFee ?? subscription.setupFee,
+      renewalAmount: subscription.renewalAmount,
+      renewalSetupFee: subscription.renewalSetupFee,
+      billingInterval: subscription.billingInterval,
+      issuedAt: new Date().toISOString(),
+      note: 'Your first bill may include an introductory offer. Future renewals use the standard renewal price shown here.',
+      invoiceTitle: 'Marveo onboarding invoice',
+    });
+
+    await updateAdminStore((current) => {
+      const now = new Date().toISOString();
+      current.cloud.commercial.invoices[invoiceNumber] = {
+        id: invoiceNumber,
+        invoiceNumber,
+        subscriptionId: subscription.id,
+        organizationId: subscription.organizationId,
+        identityId: subscription.identityId,
+        planId: subscription.planId,
+        customerEmail: email,
+        customerName: name || company || undefined,
+        currency: subscription.currency,
+        amount: subscription.amount,
+        billingInterval: subscription.billingInterval,
+        billingType: subscription.paymentMode === 'TRIAL' ? 'FIRST_BILL' : 'FIRST_BILL',
+        issuedAt: now,
+        pdfFileName: `${invoiceNumber}.pdf`,
+      };
+
+      const nextSubscription = current.cloud.commercial.subscriptions[subscription.id];
+      if (nextSubscription) {
+        current.cloud.commercial.subscriptions[subscription.id] = {
+          ...nextSubscription,
+          lastInvoiceId: invoiceNumber,
+          updatedAt: now,
+        };
+      }
+
+      return current;
+    });
+
+    await sendPlatformDirectEmail({
+      to: email,
+      subject: `Marveo invoice ${invoiceNumber}`,
+      html: buildInvoiceEmailHtml({
+        invoiceNumber,
+        planName: plan.name,
+        firstBillAmount: subscription.firstBillAmount ?? subscription.amount,
+        renewalAmount: subscription.renewalAmount,
+        currency: subscription.currency,
+        billingInterval: subscription.billingInterval,
+        customerName: name || company || undefined,
+      }),
+      text: `Your Marveo invoice ${invoiceNumber} is attached. First bill: ${subscription.currency} ${subscription.firstBillAmount ?? subscription.amount}. Renewal price: ${subscription.currency} ${subscription.renewalAmount}.`,
+      attachments: [
+        {
+          filename: `${invoiceNumber}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+  }
 
   await sendPlatformEmailNotification({
     templateKey: 'CLIENT_SIGNUP',

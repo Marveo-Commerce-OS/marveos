@@ -44,7 +44,9 @@ export default async function MasterBillingPage() {
         </ul>
       </div>
 
-      <BillingPlansManagerClient />
+          <section id="plans">
+            <BillingPlansManagerClient />
+          </section>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
         <h2 className="text-lg font-semibold text-slate-900">Regional pricing and trial controls</h2>
@@ -108,7 +110,9 @@ export default async function MasterBillingPage() {
         </div>
       </div>
 
-      <BillingSubscriptionsClient />
+          <section id="subscriptions">
+            <BillingSubscriptionsClient />
+          </section>
     </div>
   );
 }

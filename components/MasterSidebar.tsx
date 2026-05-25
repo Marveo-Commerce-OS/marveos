@@ -20,6 +20,7 @@ import {
   ScrollText,
   Settings,
   LogOut,
+  ChevronDown,
 } from 'lucide-react';
 import { getConfig } from '@/src/config/client';
 import type { ControlCenterModuleKey } from '@/lib/adminStore';
@@ -58,8 +59,10 @@ export default function MasterSidebar({
   const router = useRouter();
   const config = getConfig();
   const [profile, setProfile] = useState<{ displayName: string; email: string; avatarUrl?: string } | null>(null);
+  const [billingMenuOpen, setBillingMenuOpen] = useState(false);
   const allowedModuleSet = new Set(allowedModules);
   const visibleNav = MASTER_NAV.filter((item) => allowedModuleSet.has(item.moduleKey));
+  const plansBillingVisible = allowedModuleSet.has('plansBilling');
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +120,52 @@ export default function MasterSidebar({
       </div>
 
       <nav className="space-y-1 p-3">
-        {visibleNav.map(({ href, label, icon: Icon, exact }) => {
+        {visibleNav.map(({ href, label, icon: Icon, exact, moduleKey }) => {
+          if (moduleKey === 'plansBilling') {
+            const active = pathname.startsWith('/master/billing');
+            return (
+              <div
+                key={href}
+                className="relative"
+                onMouseEnter={() => setBillingMenuOpen(true)}
+                onMouseLeave={() => setBillingMenuOpen(false)}
+              >
+                <button
+                  type="button"
+                  onClick={() => setBillingMenuOpen((current) => !current)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                    active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className="flex items-center gap-3">
+                    <Icon size={16} />
+                    {label}
+                  </span>
+                  <ChevronDown size={14} className={billingMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                </button>
+
+                {billingMenuOpen ? (
+                  <div className="absolute left-[calc(100%+10px)] top-0 z-20 w-60 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                    <Link
+                      href="/master/billing#plans"
+                      className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      Plans
+                      <span className="mt-0.5 block text-[11px] font-normal text-slate-500">All plans and setup</span>
+                    </Link>
+                    <Link
+                      href="/master/billing#subscriptions"
+                      className="mt-1 block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      Billing
+                      <span className="mt-0.5 block text-[11px] font-normal text-slate-500">Commercial subscriptions only</span>
+                    </Link>
+                  </div>
+                ) : null}
+              </div>
+            );
+          }
+
           const active = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link

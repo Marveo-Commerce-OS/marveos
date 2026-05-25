@@ -22,10 +22,29 @@ type SubscriptionRow = {
   updatedAt: string;
 };
 
+type BillingCycleChangeRequestRow = {
+  id: string;
+  subscriptionId: string;
+  organizationName: string;
+  ownerEmail: string;
+  currentBillingInterval: string;
+  targetBillingInterval: string;
+  proratedAmount: number;
+  status: string;
+  requestedAt: string;
+  requestedByRole: string;
+};
+
 type BillingResponse = {
   safeBillingActionsEnabled: boolean;
   canMutateBillingRecords?: boolean;
   subscriptions: SubscriptionRow[];
+  billingCycleChangeRequests?: BillingCycleChangeRequestRow[];
+  billingCycleCapabilities?: {
+    canRequestChange: boolean;
+    canApproveChange: boolean;
+    canApplyDirectly: boolean;
+  };
   error?: string;
 };
 
@@ -122,8 +141,49 @@ export default function BillingSubscriptionsClient() {
     }
   }
 
+  async function applyBillingCycleAction(params: {
+    action: 'REQUEST_BILLING_CYCLE_CHANGE' | 'APPROVE_BILLING_CYCLE_CHANGE' | 'REJECT_BILLING_CYCLE_CHANGE' | 'APPLY_BILLING_CYCLE_CHANGE';
+    subscriptionId?: string;
+    requestId?: string;
+    targetBillingInterval?: 'MONTHLY' | 'ANNUAL';
+    reason?: string;
+    rejectionReason?: string;
+  }) {
+    setBusyId(params.subscriptionId || params.requestId || '__cycle__');
+    setError('');
+    setMessage('');
+
+    try {
+      const res = await fetch('/api/master/billing/subscriptions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        subscriptions?: SubscriptionRow[];
+        billingCycleChangeRequests?: BillingCycleChangeRequestRow[];
+      } | null;
+      if (!res.ok || !data?.ok) throw new Error(data?.error || 'Billing cycle change failed.');
+
+      setPayload((prev) => prev ? ({
+        ...prev,
+        subscriptions: Array.isArray(data.subscriptions) ? data.subscriptions : prev.subscriptions,
+        billingCycleChangeRequests: Array.isArray(data.billingCycleChangeRequests) ? data.billingCycleChangeRequests : prev.billingCycleChangeRequests,
+      }) : prev);
+
+      setMessage('Billing cycle request updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Billing cycle change failed.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const safeActions = Boolean(payload?.safeBillingActionsEnabled);
   const canMutateBillingRecords = Boolean(payload?.canMutateBillingRecords ?? safeActions);
+  const cycleCapabilities = payload?.billingCycleCapabilities;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -255,6 +315,45 @@ export default function BillingSubscriptionsClient() {
                         >
                           Delete trial
                         </button>
+                        {cycleCapabilities?.canApplyDirectly ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void applyBillingCycleAction({ action: 'APPLY_BILLING_CYCLE_CHANGE', subscriptionId: subscription.id, targetBillingInterval: 'MONTHLY' })}
+                              disabled={busy}
+                              className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-900 disabled:opacity-60"
+                            >
+                              Set monthly
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void applyBillingCycleAction({ action: 'APPLY_BILLING_CYCLE_CHANGE', subscriptionId: subscription.id, targetBillingInterval: 'ANNUAL' })}
+                              disabled={busy}
+                              className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-900 disabled:opacity-60"
+                            >
+                              Set annual
+                            </button>
+                          </>
+                        ) : cycleCapabilities?.canRequestChange ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => void applyBillingCycleAction({ action: 'REQUEST_BILLING_CYCLE_CHANGE', subscriptionId: subscription.id, targetBillingInterval: 'MONTHLY' })}
+                              disabled={busy}
+                              className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-900 disabled:opacity-60"
+                            >
+                              Request monthly
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void applyBillingCycleAction({ action: 'REQUEST_BILLING_CYCLE_CHANGE', subscriptionId: subscription.id, targetBillingInterval: 'ANNUAL' })}
+                              disabled={busy}
+                              className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-900 disabled:opacity-60"
+                            >
+                              Request annual
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                       {busy ? <p className="mt-1 text-xs text-slate-500">Updating…</p> : null}
                     </td>
@@ -265,6 +364,66 @@ export default function BillingSubscriptionsClient() {
           </tbody>
         </table>
       </div>
+
+      {payload?.billingCycleChangeRequests?.length ? (
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">Billing cycle change requests</h3>
+              <p className="mt-1 text-xs text-slate-500">Pending approvals and applied cycle updates with proration estimates.</p>
+            </div>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500">
+                  {['Organization', 'Owner', 'Current', 'Target', 'Proration', 'Status', 'Requested by', 'Actions'].map((header) => (
+                    <th key={header} className="px-3 py-2 font-semibold">{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {payload.billingCycleChangeRequests.map((request) => {
+                  const busy = busyId === request.id;
+                  const canApprove = Boolean(cycleCapabilities?.canApproveChange && request.status === 'PENDING_APPROVAL');
+                  const canReject = Boolean(cycleCapabilities?.canApproveChange && request.status === 'PENDING_APPROVAL');
+                  return (
+                    <tr key={request.id} className="border-b border-slate-100 last:border-b-0 align-top">
+                      <td className="px-3 py-2 text-slate-700">{request.organizationName}</td>
+                      <td className="px-3 py-2 text-slate-700">{request.ownerEmail}</td>
+                      <td className="px-3 py-2 text-slate-700">{toLabel(request.currentBillingInterval)}</td>
+                      <td className="px-3 py-2 text-slate-700">{toLabel(request.targetBillingInterval)}</td>
+                      <td className="px-3 py-2 text-slate-700">{request.proratedAmount >= 0 ? '+' : ''}{request.proratedAmount}</td>
+                      <td className="px-3 py-2 text-slate-700">{toLabel(request.status)}</td>
+                      <td className="px-3 py-2 text-slate-700">{request.requestedByRole}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void applyBillingCycleAction({ action: 'APPROVE_BILLING_CYCLE_CHANGE', requestId: request.id })}
+                            disabled={!canApprove || busy}
+                            className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-900 disabled:opacity-60"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void applyBillingCycleAction({ action: 'REJECT_BILLING_CYCLE_CHANGE', requestId: request.id, rejectionReason: 'Rejected from admin billing queue.' })}
+                            disabled={!canReject || busy}
+                            className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-900 disabled:opacity-60"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -471,6 +471,8 @@ export interface CommercialPlanRegionalPricing {
   currency: string;
   monthly: CommercialPlanIntervalPricing;
   annual: CommercialPlanIntervalPricing;
+  introductoryMonthly?: CommercialPlanIntervalPricing;
+  introductoryAnnual?: CommercialPlanIntervalPricing;
   annualDiscountPercent?: number;
 }
 
@@ -516,8 +518,14 @@ export interface CommercialSubscription {
   currency: string;
   amount: number;
   setupFee?: number;
+  renewalAmount: number;
+  renewalSetupFee?: number;
+  firstBillAmount?: number;
+  firstBillSetupFee?: number;
   billingInterval: CommercialBillingInterval;
   intendedBillingInterval: CommercialBillingInterval;
+  billingPeriodStartAt?: string;
+  billingPeriodEndAt?: string;
   status: CommercialSubscriptionStatus;
   paymentReference?: string;
   paymentProvider?: CommercialPaymentProvider;
@@ -528,8 +536,47 @@ export interface CommercialSubscription {
   trialDurationDays?: number;
   trialStartDate?: string;
   trialEndDate?: string;
+  lastInvoiceId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CommercialInvoiceRecord {
+  id: string;
+  invoiceNumber: string;
+  subscriptionId: string;
+  organizationId: string;
+  identityId: string;
+  planId: string;
+  customerEmail: string;
+  customerName?: string;
+  currency: string;
+  amount: number;
+  billingInterval: CommercialBillingInterval;
+  billingType: 'FIRST_BILL' | 'RENEWAL' | 'CYCLE_CHANGE';
+  issuedAt: string;
+  dueAt?: string;
+  pdfFileName?: string;
+  pdfSentAt?: string;
+}
+
+export interface CommercialBillingCycleChangeRequest {
+  id: string;
+  subscriptionId: string;
+  organizationId: string;
+  requestedBy: string;
+  requestedByRole: string;
+  currentBillingInterval: CommercialBillingInterval;
+  targetBillingInterval: CommercialBillingInterval;
+  proratedAmount: number;
+  reason?: string;
+  status: 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'APPLIED';
+  requestedAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  appliedAt?: string;
+  appliedBy?: string;
+  rejectionReason?: string;
 }
 
 export interface CommercialOnboardingSession {
@@ -598,6 +645,8 @@ export interface CommercialConfig {
   organizations: Record<string, CommercialOrganization>;
   subscriptions: Record<string, CommercialSubscription>;
   onboardingSessions: Record<string, CommercialOnboardingSession>;
+  invoices: Record<string, CommercialInvoiceRecord>;
+  billingCycleChangeRequests: Record<string, CommercialBillingCycleChangeRequest>;
 }
 
 export interface CloudOrchestrationStore {
@@ -1376,9 +1425,9 @@ const DEFAULT_STORE: AdminConfigStore = {
           trialEnabled: true,
           trialDurationDays: 14,
           regions: [
-            { country: 'NG', currency: 'NGN', monthly: { amount: 25000, setupFee: 0 }, annual: { amount: 250000, setupFee: 0 }, annualDiscountPercent: 17 },
-            { country: 'US', currency: 'USD', monthly: { amount: 49, setupFee: 0 }, annual: { amount: 490, setupFee: 0 }, annualDiscountPercent: 17 },
-            { country: 'GB', currency: 'GBP', monthly: { amount: 39, setupFee: 0 }, annual: { amount: 390, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'NG', currency: 'NGN', monthly: { amount: 25000, setupFee: 0 }, annual: { amount: 250000, setupFee: 0 }, introductoryMonthly: { amount: 19999, setupFee: 0 }, introductoryAnnual: { amount: 199999, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'US', currency: 'USD', monthly: { amount: 49, setupFee: 0 }, annual: { amount: 490, setupFee: 0 }, introductoryMonthly: { amount: 39, setupFee: 0 }, introductoryAnnual: { amount: 390, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'GB', currency: 'GBP', monthly: { amount: 39, setupFee: 0 }, annual: { amount: 390, setupFee: 0 }, introductoryMonthly: { amount: 29, setupFee: 0 }, introductoryAnnual: { amount: 290, setupFee: 0 }, annualDiscountPercent: 17 },
           ],
         },
         {
@@ -1391,9 +1440,9 @@ const DEFAULT_STORE: AdminConfigStore = {
           trialEnabled: true,
           trialDurationDays: 14,
           regions: [
-            { country: 'NG', currency: 'NGN', monthly: { amount: 85000, setupFee: 0 }, annual: { amount: 850000, setupFee: 0 }, annualDiscountPercent: 17 },
-            { country: 'US', currency: 'USD', monthly: { amount: 149, setupFee: 0 }, annual: { amount: 1490, setupFee: 0 }, annualDiscountPercent: 17 },
-            { country: 'GB', currency: 'GBP', monthly: { amount: 119, setupFee: 0 }, annual: { amount: 1190, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'NG', currency: 'NGN', monthly: { amount: 85000, setupFee: 0 }, annual: { amount: 850000, setupFee: 0 }, introductoryMonthly: { amount: 65000, setupFee: 0 }, introductoryAnnual: { amount: 650000, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'US', currency: 'USD', monthly: { amount: 149, setupFee: 0 }, annual: { amount: 1490, setupFee: 0 }, introductoryMonthly: { amount: 129, setupFee: 0 }, introductoryAnnual: { amount: 1290, setupFee: 0 }, annualDiscountPercent: 17 },
+            { country: 'GB', currency: 'GBP', monthly: { amount: 119, setupFee: 0 }, annual: { amount: 1190, setupFee: 0 }, introductoryMonthly: { amount: 99, setupFee: 0 }, introductoryAnnual: { amount: 990, setupFee: 0 }, annualDiscountPercent: 17 },
           ],
         },
         {
@@ -1589,6 +1638,8 @@ const DEFAULT_STORE: AdminConfigStore = {
       organizations: {},
       subscriptions: {},
       onboardingSessions: {},
+      invoices: {},
+      billingCycleChangeRequests: {},
     },
   },
 };
@@ -1652,6 +1703,8 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
             const legacyAmount = Number((region as { amount?: number }).amount ?? 0);
             const monthly = region.monthly ?? { amount: legacyAmount, setupFee: (region as { setupFee?: number }).setupFee ?? 0 };
             const annual = region.annual ?? { amount: legacyAmount > 0 ? legacyAmount * 10 : 0, setupFee: (region as { setupFee?: number }).setupFee ?? 0 };
+            const introductoryMonthly = region.introductoryMonthly ?? monthly;
+            const introductoryAnnual = region.introductoryAnnual ?? annual;
 
             return {
               country: String(region.country ?? '').trim().toUpperCase(),
@@ -1663,6 +1716,14 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
               annual: {
                 amount: Math.max(0, Number(annual.amount ?? 0)),
                 setupFee: Math.max(0, Number(annual.setupFee ?? 0)),
+              },
+              introductoryMonthly: {
+                amount: Math.max(0, Number(introductoryMonthly.amount ?? 0)),
+                setupFee: Math.max(0, Number(introductoryMonthly.setupFee ?? 0)),
+              },
+              introductoryAnnual: {
+                amount: Math.max(0, Number(introductoryAnnual.amount ?? 0)),
+                setupFee: Math.max(0, Number(introductoryAnnual.setupFee ?? 0)),
               },
               annualDiscountPercent: typeof region.annualDiscountPercent === 'number' ? region.annualDiscountPercent : undefined,
             };
@@ -1681,6 +1742,10 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
           ...subscription,
           billingInterval: subscription.billingInterval ?? 'MONTHLY',
           intendedBillingInterval: subscription.intendedBillingInterval ?? subscription.billingInterval ?? 'MONTHLY',
+          renewalAmount: Number(subscription.renewalAmount ?? subscription.amount ?? 0),
+          renewalSetupFee: Number(subscription.renewalSetupFee ?? subscription.setupFee ?? 0),
+          firstBillAmount: Number(subscription.firstBillAmount ?? subscription.amount ?? 0),
+          firstBillSetupFee: Number(subscription.firstBillSetupFee ?? subscription.setupFee ?? 0),
         },
       ]),
     );
@@ -1767,6 +1832,39 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
         {
           ...session,
           billingInterval: session.billingInterval ?? 'MONTHLY',
+        },
+      ]),
+    );
+  };
+
+  const normalizeCommercialInvoices = (invoices: CommercialConfig['invoices'] | undefined) => {
+    if (!invoices) return {};
+
+    return Object.fromEntries(
+      Object.entries(invoices).map(([key, invoice]) => [
+        key,
+        {
+          ...invoice,
+          amount: Number(invoice.amount ?? 0),
+          billingInterval: invoice.billingInterval ?? 'MONTHLY',
+          billingType: invoice.billingType ?? 'FIRST_BILL',
+        },
+      ]),
+    );
+  };
+
+  const normalizeBillingCycleChangeRequests = (requests: CommercialConfig['billingCycleChangeRequests'] | undefined) => {
+    if (!requests) return {};
+
+    return Object.fromEntries(
+      Object.entries(requests).map(([key, request]) => [
+        key,
+        {
+          ...request,
+          currentBillingInterval: request.currentBillingInterval ?? 'MONTHLY',
+          targetBillingInterval: request.targetBillingInterval ?? 'MONTHLY',
+          proratedAmount: Number(request.proratedAmount ?? 0),
+          status: request.status ?? 'PENDING_APPROVAL',
         },
       ]),
     );
@@ -1921,6 +2019,8 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
         organizations: (parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.organizations ?? {},
         subscriptions: normalizeCommercialSubscriptions((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.subscriptions),
         onboardingSessions: normalizeCommercialSessions((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.onboardingSessions),
+        invoices: normalizeCommercialInvoices((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.invoices),
+        billingCycleChangeRequests: normalizeBillingCycleChangeRequests((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.billingCycleChangeRequests),
       },
     },
   };

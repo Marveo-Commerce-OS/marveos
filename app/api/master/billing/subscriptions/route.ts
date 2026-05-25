@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin } from '@/lib/auth';
-import { appendAuditLog, readAdminStore, updateAdminStore, type CommercialSubscriptionStatus } from '@/lib/adminStore';
+import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin, normalizeMarveoRoles } from '@/lib/auth';
+import {
+  appendAuditLog,
+  readAdminStore,
+  updateAdminStore,
+  type CommercialBillingCycleChangeRequest,
+  type CommercialBillingInterval,
+  type CommercialPlanConfig,
+  type CommercialSubscriptionStatus,
+} from '@/lib/adminStore';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 
 type SubscriptionRow = {
@@ -22,6 +30,19 @@ type SubscriptionRow = {
   updatedAt: string;
 };
 
+type BillingCycleChangeRow = {
+  id: string;
+  subscriptionId: string;
+  organizationName: string;
+  ownerEmail: string;
+  currentBillingInterval: CommercialBillingInterval;
+  targetBillingInterval: CommercialBillingInterval;
+  proratedAmount: number;
+  status: CommercialBillingCycleChangeRequest['status'];
+  requestedAt: string;
+  requestedByRole: string;
+};
+
 async function ensureAdminSession() {
   const session = await getSession();
   if (!session) {
@@ -34,6 +55,18 @@ async function ensureAdminSession() {
   }
 
   return { session };
+}
+
+async function resolveActorContext(token: string) {
+  const actor = await getCurrentPlatformUser(token);
+  const roles = normalizeMarveoRoles(actor?.roles || []);
+  return {
+    actor,
+    roles,
+    isSuper: roles.includes('SUPER_ADMIN'),
+    isAdminRole: roles.includes('ADMIN') || roles.includes('SUPER_ADMIN'),
+    isBillingManager: roles.includes('BILLING_MANAGER'),
+  };
 }
 
 function badRequest(message: string) {
@@ -70,16 +103,144 @@ function mapSubscriptionRows(store: Awaited<ReturnType<typeof readAdminStore>>):
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+function mapBillingCycleRequests(store: Awaited<ReturnType<typeof readAdminStore>>): BillingCycleChangeRow[] {
+  const commercial = store.cloud.commercial;
+
+  return Object.values(commercial.billingCycleChangeRequests || {})
+    .map((request) => {
+      const subscription = commercial.subscriptions[request.subscriptionId];
+      const identity = subscription ? commercial.identities[subscription.identityId] : null;
+      const organization = subscription ? commercial.organizations[subscription.organizationId] : null;
+
+      return {
+        id: request.id,
+        subscriptionId: request.subscriptionId,
+        organizationName: organization?.name || request.organizationId,
+        ownerEmail: identity?.email || 'unknown',
+        currentBillingInterval: request.currentBillingInterval,
+        targetBillingInterval: request.targetBillingInterval,
+        proratedAmount: request.proratedAmount,
+        status: request.status,
+        requestedAt: request.requestedAt,
+        requestedByRole: request.requestedByRole,
+      };
+    })
+    .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+}
+
+function getPlanRegionPrice(plan: CommercialPlanConfig, country: string, billingInterval: CommercialBillingInterval) {
+  const region = plan.regions.find((item) => item.country === country)
+    || plan.regions.find((item) => item.country === 'US')
+    || plan.regions[0];
+
+  const intervalPrice = billingInterval === 'ANNUAL' ? region.annual : region.monthly;
+  return { region, intervalPrice };
+}
+
+function calculateProration(params: {
+  currentAmount: number;
+  targetAmount: number;
+  periodStartAt?: string;
+  periodEndAt?: string;
+}) {
+  const startAt = params.periodStartAt ? new Date(params.periodStartAt).getTime() : NaN;
+  const endAt = params.periodEndAt ? new Date(params.periodEndAt).getTime() : NaN;
+  const now = Date.now();
+
+  if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) {
+    return Math.round(params.targetAmount - params.currentAmount);
+  }
+
+  const total = endAt - startAt;
+  const remaining = Math.max(0, endAt - now);
+  const remainingRatio = total > 0 ? remaining / total : 0;
+  const currentValue = params.currentAmount * remainingRatio;
+  const targetValue = params.targetAmount * remainingRatio;
+
+  return Math.round(targetValue - currentValue);
+}
+
+function applyBillingCycleChange(params: {
+  current: Awaited<ReturnType<typeof readAdminStore>>;
+  subscriptionId: string;
+  targetBillingInterval: CommercialBillingInterval;
+  actorRole: string;
+  actorEmail: string;
+  reason?: string;
+  direct: boolean;
+}) {
+  const now = new Date().toISOString();
+  const current = params.current;
+  const subscription = current.cloud.commercial.subscriptions[params.subscriptionId];
+  if (!subscription) {
+    return { current, request: null as BillingCycleChangeRow | null };
+  }
+
+  const plan = current.cloud.commercial.plans.find((item) => item.id === subscription.planId) || current.cloud.commercial.plans[0];
+  const { intervalPrice } = getPlanRegionPrice(plan, subscription.country, params.targetBillingInterval);
+  const proratedAmount = calculateProration({
+    currentAmount: subscription.amount,
+    targetAmount: intervalPrice.amount,
+    periodStartAt: subscription.billingPeriodStartAt || subscription.trialStartDate || subscription.createdAt,
+    periodEndAt: subscription.billingPeriodEndAt || subscription.trialEndDate || subscription.createdAt,
+  });
+  const requestId = `cycle_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  const request: CommercialBillingCycleChangeRequest = {
+    id: requestId,
+    subscriptionId: subscription.id,
+    organizationId: subscription.organizationId,
+    requestedBy: params.actorEmail,
+    requestedByRole: params.actorRole,
+    currentBillingInterval: subscription.billingInterval,
+    targetBillingInterval: params.targetBillingInterval,
+    proratedAmount,
+    reason: params.reason,
+    status: params.direct ? 'APPLIED' : 'PENDING_APPROVAL',
+    requestedAt: now,
+    approvedAt: params.direct ? now : undefined,
+    approvedBy: params.direct ? params.actorEmail : undefined,
+    appliedAt: params.direct ? now : undefined,
+    appliedBy: params.direct ? params.actorEmail : undefined,
+  };
+
+  current.cloud.commercial.billingCycleChangeRequests[requestId] = request;
+
+  if (params.direct) {
+    current.cloud.commercial.subscriptions[subscription.id] = {
+      ...subscription,
+      billingInterval: params.targetBillingInterval,
+      intendedBillingInterval: params.targetBillingInterval,
+      amount: intervalPrice.amount,
+      setupFee: intervalPrice.setupFee || 0,
+      renewalAmount: intervalPrice.amount,
+      renewalSetupFee: intervalPrice.setupFee || 0,
+      billingPeriodStartAt: now,
+      billingPeriodEndAt: params.targetBillingInterval === 'ANNUAL' ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: now,
+    };
+  }
+
+  return { current, request };
+}
+
 export async function GET() {
   const auth = await ensureAdminSession();
   if ('error' in auth) return auth.error;
 
   const canMutate = await isSuperAdmin(auth.session.token);
+  const actor = await resolveActorContext(auth.session.token);
   const store = await readAdminStore();
   return NextResponse.json({
     safeBillingActionsEnabled: canMutate,
     canMutateBillingRecords: canMutate,
     subscriptions: mapSubscriptionRows(store),
+    billingCycleChangeRequests: mapBillingCycleRequests(store),
+    billingCycleCapabilities: {
+      canRequestChange: actor.isBillingManager || actor.isAdminRole || actor.isSuper,
+      canApproveChange: actor.isAdminRole,
+      canApplyDirectly: actor.isSuper,
+    },
   });
 }
 
@@ -88,9 +249,7 @@ export async function PATCH(req: NextRequest) {
   if ('error' in auth) return auth.error;
 
   const canMutate = await isSuperAdmin(auth.session.token);
-  if (!canMutate) {
-    return NextResponse.json({ error: 'Only super admins can mutate billing records.' }, { status: 403 });
-  }
+  const actor = await resolveActorContext(auth.session.token);
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return badRequest('Invalid JSON body');
@@ -105,22 +264,33 @@ export async function PATCH(req: NextRequest) {
     'DELETE_SUBSCRIPTION',
     'PURGE_TEST_TRIALS',
     'PURGE_TEST_RESTART',
+    'REQUEST_BILLING_CYCLE_CHANGE',
+    'APPROVE_BILLING_CYCLE_CHANGE',
+    'REJECT_BILLING_CYCLE_CHANGE',
+    'APPLY_BILLING_CYCLE_CHANGE',
   ]);
   if (!allowedActions.has(action)) {
-    return badRequest('action must be MARK_TRIAL_EXPIRED, SUSPEND, REACTIVATE, DELETE_SUBSCRIPTION, PURGE_TEST_TRIALS, or PURGE_TEST_RESTART');
+    return badRequest('action must be MARK_TRIAL_EXPIRED, SUSPEND, REACTIVATE, DELETE_SUBSCRIPTION, PURGE_TEST_TRIALS, PURGE_TEST_RESTART, REQUEST_BILLING_CYCLE_CHANGE, APPROVE_BILLING_CYCLE_CHANGE, REJECT_BILLING_CYCLE_CHANGE, or APPLY_BILLING_CYCLE_CHANGE');
   }
 
-  if (!subscriptionId && action !== 'PURGE_TEST_TRIALS' && action !== 'PURGE_TEST_RESTART') {
+  const cycleChangeAction = action === 'REQUEST_BILLING_CYCLE_CHANGE' || action === 'APPROVE_BILLING_CYCLE_CHANGE' || action === 'REJECT_BILLING_CYCLE_CHANGE' || action === 'APPLY_BILLING_CYCLE_CHANGE';
+  if (!cycleChangeAction && !canMutate) {
+    return NextResponse.json({ error: 'Only super admins can mutate billing records.' }, { status: 403 });
+  }
+
+  if (!subscriptionId && action !== 'PURGE_TEST_TRIALS' && action !== 'PURGE_TEST_RESTART' && action !== 'REQUEST_BILLING_CYCLE_CHANGE' && action !== 'APPROVE_BILLING_CYCLE_CHANGE' && action !== 'REJECT_BILLING_CYCLE_CHANGE' && action !== 'APPLY_BILLING_CYCLE_CHANGE') {
     return badRequest('subscriptionId is required');
   }
 
   let nextStatus: CommercialSubscriptionStatus | null = null;
   let deletedSubscriptionIds: string[] = [];
   let deletedWorkspaceIds: string[] = [];
+  let changedCycleRequestId: string | null = null;
 
   await updateAdminStore((current) => {
     const subscriptions = { ...current.cloud.commercial.subscriptions };
     const onboardingSessions = { ...current.cloud.commercial.onboardingSessions };
+    const billingCycleChangeRequests = { ...current.cloud.commercial.billingCycleChangeRequests };
 
     if (action === 'PURGE_TEST_TRIALS' || action === 'PURGE_TEST_RESTART') {
       const candidates = Object.values(subscriptions)
@@ -202,6 +372,141 @@ export async function PATCH(req: NextRequest) {
             ...current.cloud.commercial,
             subscriptions,
             onboardingSessions,
+            billingCycleChangeRequests,
+          },
+        },
+      };
+    }
+
+    if (action === 'REQUEST_BILLING_CYCLE_CHANGE') {
+      if (!(actor.isBillingManager || actor.isAdminRole || actor.isSuper)) {
+        return current;
+      }
+
+      const targetBillingInterval = String((body as { targetBillingInterval?: unknown }).targetBillingInterval || '').trim().toUpperCase() === 'ANNUAL'
+        ? 'ANNUAL'
+        : 'MONTHLY';
+      const reason = String((body as { reason?: unknown }).reason || '').trim() || undefined;
+      const subscription = subscriptions[subscriptionId];
+      if (!subscription) return current;
+
+      const plan = current.cloud.commercial.plans.find((item) => item.id === subscription.planId) || current.cloud.commercial.plans[0];
+      const { intervalPrice } = getPlanRegionPrice(plan, subscription.country, targetBillingInterval);
+      const proratedAmount = calculateProration({
+        currentAmount: subscription.amount,
+        targetAmount: intervalPrice.amount,
+        periodStartAt: subscription.billingPeriodStartAt || subscription.trialStartDate || subscription.createdAt,
+        periodEndAt: subscription.billingPeriodEndAt || subscription.trialEndDate || subscription.createdAt,
+      });
+
+      const requestId = `cycle_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      billingCycleChangeRequests[requestId] = {
+        id: requestId,
+        subscriptionId,
+        organizationId: subscription.organizationId,
+        requestedBy: actor.actor?.email || 'unknown',
+        requestedByRole: actor.roles[0] || 'UNKNOWN',
+        currentBillingInterval: subscription.billingInterval,
+        targetBillingInterval,
+        proratedAmount,
+        reason,
+        status: actor.isSuper ? 'APPLIED' : 'PENDING_APPROVAL',
+        requestedAt: new Date().toISOString(),
+        approvedAt: actor.isSuper ? new Date().toISOString() : undefined,
+        approvedBy: actor.isSuper ? actor.actor?.email : undefined,
+        appliedAt: actor.isSuper ? new Date().toISOString() : undefined,
+        appliedBy: actor.isSuper ? actor.actor?.email : undefined,
+      };
+      changedCycleRequestId = requestId;
+
+      if (actor.isSuper) {
+        subscriptions[subscriptionId] = {
+          ...subscription,
+          billingInterval: targetBillingInterval,
+          intendedBillingInterval: targetBillingInterval,
+          amount: intervalPrice.amount,
+          setupFee: intervalPrice.setupFee || 0,
+          renewalAmount: intervalPrice.amount,
+          renewalSetupFee: intervalPrice.setupFee || 0,
+          billingPeriodStartAt: new Date().toISOString(),
+          billingPeriodEndAt: targetBillingInterval === 'ANNUAL'
+            ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      return {
+        ...current,
+        cloud: {
+          ...current.cloud,
+          commercial: {
+            ...current.cloud.commercial,
+            subscriptions,
+            onboardingSessions,
+            billingCycleChangeRequests,
+          },
+        },
+      };
+    }
+
+    if (action === 'APPROVE_BILLING_CYCLE_CHANGE' || action === 'REJECT_BILLING_CYCLE_CHANGE' || action === 'APPLY_BILLING_CYCLE_CHANGE') {
+      if (!(actor.isAdminRole || actor.isSuper)) {
+        return current;
+      }
+
+      const requestId = String((body as { requestId?: unknown }).requestId || '').trim();
+      const request = requestId ? billingCycleChangeRequests[requestId] : undefined;
+      if (!request) return current;
+
+      const subscription = subscriptions[request.subscriptionId];
+      if (!subscription) return current;
+
+      if (action === 'REJECT_BILLING_CYCLE_CHANGE') {
+        billingCycleChangeRequests[requestId] = {
+          ...request,
+          status: 'REJECTED',
+          rejectionReason: String((body as { rejectionReason?: unknown }).rejectionReason || '').trim() || undefined,
+        };
+        changedCycleRequestId = requestId;
+      } else {
+        const plan = current.cloud.commercial.plans.find((item) => item.id === subscription.planId) || current.cloud.commercial.plans[0];
+        const { intervalPrice } = getPlanRegionPrice(plan, subscription.country, request.targetBillingInterval);
+        subscriptions[subscription.id] = {
+          ...subscription,
+          billingInterval: request.targetBillingInterval,
+          intendedBillingInterval: request.targetBillingInterval,
+          amount: intervalPrice.amount,
+          setupFee: intervalPrice.setupFee || 0,
+          renewalAmount: intervalPrice.amount,
+          renewalSetupFee: intervalPrice.setupFee || 0,
+          billingPeriodStartAt: new Date().toISOString(),
+          billingPeriodEndAt: request.targetBillingInterval === 'ANNUAL'
+            ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+            : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        billingCycleChangeRequests[requestId] = {
+          ...request,
+          status: 'APPLIED',
+          approvedAt: new Date().toISOString(),
+          approvedBy: actor.actor?.email,
+          appliedAt: new Date().toISOString(),
+          appliedBy: actor.actor?.email,
+        };
+        changedCycleRequestId = requestId;
+      }
+
+      return {
+        ...current,
+        cloud: {
+          ...current.cloud,
+          commercial: {
+            ...current.cloud.commercial,
+            subscriptions,
+            onboardingSessions,
+            billingCycleChangeRequests,
           },
         },
       };
@@ -239,12 +544,16 @@ export async function PATCH(req: NextRequest) {
     };
   });
 
-  const actor = await getCurrentPlatformUser(auth.session.token);
+  const auditedActor = await getCurrentPlatformUser(auth.session.token);
   await appendAuditLog({
-    actorEmail: actor?.email ?? String(auth.session.user?.user_email ?? 'unknown'),
+    actorEmail: auditedActor?.email ?? String(auth.session.user?.user_email ?? 'unknown'),
     action: 'billing.subscription.status_changed',
-    target: action === 'PURGE_TEST_TRIALS' || action === 'PURGE_TEST_RESTART' ? 'subscription:trial-purge' : `subscription:${subscriptionId}`,
-    details: `action=${action};status=${nextStatus || 'unchanged'};deleted=${deletedSubscriptionIds.length};deletedWorkspaces=${deletedWorkspaceIds.length}`,
+    target: action === 'PURGE_TEST_TRIALS' || action === 'PURGE_TEST_RESTART'
+      ? 'subscription:trial-purge'
+      : action.includes('BILLING_CYCLE_CHANGE') && changedCycleRequestId
+        ? `billing-cycle:${changedCycleRequestId}`
+        : `subscription:${subscriptionId}`,
+    details: `action=${action};status=${nextStatus || 'unchanged'};deleted=${deletedSubscriptionIds.length};deletedWorkspaces=${deletedWorkspaceIds.length};cycleRequest=${changedCycleRequestId || 'none'}`,
   });
 
   const refreshed = await readAdminStore();
@@ -277,6 +586,7 @@ export async function PATCH(req: NextRequest) {
     deletedWorkspaceCount: deletedWorkspaceIds.length,
     deletedWorkspaceIds,
     subscriptions: mapSubscriptionRows(refreshed),
+    billingCycleChangeRequests: mapBillingCycleRequests(refreshed),
     safeBillingActionsEnabled: true,
     canMutateBillingRecords: true,
   });

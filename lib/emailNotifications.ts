@@ -272,6 +272,12 @@ type EmailTransportOverride = {
   replyToEmail?: string;
 };
 
+type EmailAttachment = {
+  filename: string;
+  content: Buffer | string;
+  contentType?: string;
+};
+
 type SmtpAttempt = {
   port: number;
   secure: boolean;
@@ -309,6 +315,7 @@ async function deliverViaSmtp(params: {
   subject: string;
   html: string;
   text: string;
+  attachments?: EmailAttachment[];
   transportOverride?: EmailTransportOverride;
 }) : Promise<SendResult> {
   const store = await readAdminStore();
@@ -356,6 +363,7 @@ async function deliverViaSmtp(params: {
         subject: params.subject,
         html: params.html,
         text: params.text,
+        attachments: params.attachments,
       });
 
       return { ok: true, skipped: false } as const;
@@ -391,6 +399,7 @@ async function deliverViaResend(params: {
   subject: string;
   html: string;
   text: string;
+  attachments?: EmailAttachment[];
   transportOverride?: EmailTransportOverride;
 }): Promise<SendResult> {
   const store = await readAdminStore();
@@ -427,6 +436,13 @@ async function deliverViaResend(params: {
         subject: params.subject,
         html: params.html,
         text: params.text,
+        attachments: params.attachments?.map((attachment) => ({
+          filename: attachment.filename,
+          content: Buffer.isBuffer(attachment.content)
+            ? attachment.content.toString('base64')
+            : Buffer.from(String(attachment.content)).toString('base64'),
+          content_type: attachment.contentType || 'application/octet-stream',
+        })),
       }),
     });
 
@@ -464,6 +480,7 @@ async function deliverViaConfiguredProvider(params: {
   subject: string;
   html: string;
   text: string;
+  attachments?: EmailAttachment[];
   transportOverride?: EmailTransportOverride;
 }): Promise<SendResult> {
   const store = await readAdminStore();
@@ -553,6 +570,7 @@ export async function sendPlatformEmailNotification(params: {
   fallbackSubject?: string;
   cc?: string[] | string;
   bcc?: string[] | string;
+  attachments?: EmailAttachment[];
 }) {
   const store = await readAdminStore();
   const emailSettings = store.platformSettings.email;
@@ -588,6 +606,7 @@ export async function sendPlatformEmailNotification(params: {
     subject: rendered.subject,
     html: rendered.html,
     text: rendered.text,
+    attachments: params.attachments,
   });
 }
 
@@ -597,6 +616,7 @@ export async function sendPlatformTestEmail(params: {
   variables?: EmailTemplateVariables;
   fallbackSubject?: string;
   transportOverride?: EmailTransportOverride;
+  attachments?: EmailAttachment[];
 }) {
   const to = normalizeRecipients(params.to);
   if (to.length === 0) {
@@ -617,6 +637,7 @@ export async function sendPlatformTestEmail(params: {
     subject: `[TEST] ${rendered.subject}`,
     html: rendered.html,
     text: rendered.text,
+    attachments: params.attachments,
     transportOverride: params.transportOverride,
   });
 }
@@ -628,6 +649,7 @@ export async function sendPlatformDirectEmail(params: {
   text: string;
   cc?: string[] | string;
   bcc?: string[] | string;
+  attachments?: EmailAttachment[];
   transportOverride?: EmailTransportOverride;
 }) {
   const to = normalizeRecipients(params.to);
@@ -642,6 +664,7 @@ export async function sendPlatformDirectEmail(params: {
     subject: params.subject,
     html: params.html,
     text: params.text,
+    attachments: params.attachments,
     transportOverride: params.transportOverride,
   });
 }

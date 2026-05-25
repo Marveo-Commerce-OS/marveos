@@ -101,6 +101,14 @@ function pickRegionalPlanPrice(
         amount: convertAmount(baseRegion.annual.amount, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
         setupFee: convertAmount(baseRegion.annual.setupFee || 0, baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
       },
+      introductoryMonthly: {
+        amount: convertAmount((baseRegion.introductoryMonthly?.amount ?? baseRegion.monthly.amount), baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+        setupFee: convertAmount((baseRegion.introductoryMonthly?.setupFee ?? (baseRegion.monthly.setupFee || 0)), baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+      },
+      introductoryAnnual: {
+        amount: convertAmount((baseRegion.introductoryAnnual?.amount ?? baseRegion.annual.amount), baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+        setupFee: convertAmount((baseRegion.introductoryAnnual?.setupFee ?? (baseRegion.annual.setupFee || 0)), baseRegion.currency, fallbackCurrency, conversionPolicy.fxRates),
+      },
     };
   }
 
@@ -109,6 +117,8 @@ function pickRegionalPlanPrice(
     currency: fallbackCurrency,
     monthly: { amount: 0, setupFee: 0 },
     annual: { amount: 0, setupFee: 0 },
+    introductoryMonthly: { amount: 0, setupFee: 0 },
+    introductoryAnnual: { amount: 0, setupFee: 0 },
   };
 }
 
@@ -204,6 +214,62 @@ function findIdentityByEmail(identities: Record<string, CommercialIdentity>, ema
   return existing || null;
 }
 
+function normalizePhoneKey(value?: string): string {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function normalizeCompanyKey(value?: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function findIdentityByContact(
+  identities: Record<string, CommercialIdentity>,
+  contact: {
+    email: string;
+    phone?: string;
+    company?: string;
+  },
+) {
+  const normalizedEmail = contact.email.trim().toLowerCase();
+  const normalizedPhone = normalizePhoneKey(contact.phone);
+  const normalizedCompany = normalizeCompanyKey(contact.company);
+
+  return Object.values(identities).find((identity) => {
+    if (identity.email.trim().toLowerCase() === normalizedEmail) return true;
+    if (normalizedPhone && normalizePhoneKey(identity.phone) === normalizedPhone) return true;
+    if (normalizedCompany && normalizeCompanyKey(identity.company) === normalizedCompany) return true;
+    return false;
+  }) || null;
+}
+
+function buildBillingPeriodEndAt(startIso: string, interval: CommercialBillingInterval): string {
+  return interval === 'ANNUAL' ? addDaysIso(startIso, 365) : addDaysIso(startIso, 30);
+}
+
+function resolvePlanBillingAmount(params: {
+  plan: CommercialPlanConfig;
+  country: string;
+  fallbackCurrency: string;
+  billingInterval: CommercialBillingInterval;
+  firstBill: boolean;
+  conversionPolicy?: {
+    basePricingCurrency: 'USD' | 'GBP' | 'NGN';
+    fxRates: { USD: number; GBP: number; NGN: number };
+  };
+}) {
+  const pricing = pickRegionalPlanPrice(params.plan, params.country, params.fallbackCurrency, params.conversionPolicy);
+  const intervalPricing = params.billingInterval === 'ANNUAL' ? pricing.annual : pricing.monthly;
+  const introductoryPricing = params.billingInterval === 'ANNUAL'
+    ? pricing.introductoryAnnual || pricing.annual
+    : pricing.introductoryMonthly || pricing.monthly;
+
+  return {
+    region: pricing,
+    renewalPricing: intervalPricing,
+    firstBillPricing: params.firstBill ? introductoryPricing : intervalPricing,
+  };
+}
+
 function isSubscriptionEntitled(status: CommercialSubscriptionStatus): boolean {
   return status === 'TRIAL' || status === 'ACTIVE';
 }
@@ -286,15 +352,28 @@ export async function getPublicPlans(country: string) {
         pricing: {
           country: pricing.country,
           currency: pricing.currency,
-          monthly: {
-            amount: pricing.monthly.amount,
-            setupFee: pricing.monthly.setupFee || 0,
+          renewal: {
+            monthly: {
+              amount: pricing.monthly.amount,
+              setupFee: pricing.monthly.setupFee || 0,
+            },
+            annual: {
+              amount: pricing.annual.amount,
+              setupFee: pricing.annual.setupFee || 0,
+            },
           },
-          annual: {
-            amount: pricing.annual.amount,
-            setupFee: pricing.annual.setupFee || 0,
+          firstBill: {
+            monthly: {
+              amount: pricing.introductoryMonthly?.amount ?? pricing.monthly.amount,
+              setupFee: pricing.introductoryMonthly?.setupFee ?? pricing.monthly.setupFee ?? 0,
+            },
+            annual: {
+              amount: pricing.introductoryAnnual?.amount ?? pricing.annual.amount,
+              setupFee: pricing.introductoryAnnual?.setupFee ?? pricing.annual.setupFee ?? 0,
+            },
           },
           annualDiscountPercent: pricing.annualDiscountPercent,
+          billingNote: 'After the first bill, the subscription renews at the standard price shown in the renewal section.',
         },
         trial: {
           available: plan.trialEnabled,
@@ -393,15 +472,24 @@ export async function startPublicOnboarding(payload: {
       ...current.platformSettings.billingCurrencyPolicy.countryCurrencyMap,
     };
     const fallbackCurrency = payload.currency || getCurrencyForCountry(normalizedCountry, effectiveCountryCurrencyMap);
-    const { region: selectedPrice, intervalPrice: selectedIntervalPrice } = getIntervalPrice(
-      selectedPlan,
-      normalizedCountry,
+    const matchedIdentity = findIdentityByContact(current.cloud.commercial.identities, {
+      email,
+      phone: payload.customer.phone,
+      company: payload.customer.company,
+    });
+    const isFirstTimeCustomer = !matchedIdentity;
+    const { region: selectedPrice, renewalPricing, firstBillPricing } = resolvePlanBillingAmount({
+      plan: selectedPlan,
+      country: normalizedCountry,
       fallbackCurrency,
       billingInterval,
-      current.platformSettings.billingCurrencyPolicy,
-    );
+      firstBill: isFirstTimeCustomer,
+      conversionPolicy: current.platformSettings.billingCurrencyPolicy,
+    });
+    const selectedIntervalPrice = firstBillPricing;
+    const renewalIntervalPrice = renewalPricing;
 
-    let identity = findIdentityByEmail(current.cloud.commercial.identities, email);
+    let identity = matchedIdentity;
     if (!identity) {
       identity = {
         id: makeId('identity'),
@@ -449,6 +537,7 @@ export async function startPublicOnboarding(payload: {
     const trialDays = selectedPlan.trialDurationDays ?? current.cloud.commercial.trialDefaults.trialDurationDays;
     const trialAllowed = selectedPlan.trialEnabled && current.cloud.commercial.trialDefaults.trialEnabled;
     const useTrial = payload.paymentMode === 'TRIAL' && trialAllowed;
+    const billingPeriodEndAt = useTrial ? addDaysIso(now, trialDays) : buildBillingPeriodEndAt(now, billingInterval);
     const paymentProvider = payload.paymentMode === 'PAID'
       ? (payload.paymentProvider || expectedProviderForCountry(normalizedCountry, current))
       : undefined;
@@ -462,8 +551,14 @@ export async function startPublicOnboarding(payload: {
       currency: selectedPrice.currency,
       amount: selectedIntervalPrice.amount,
       setupFee: selectedIntervalPrice.setupFee || 0,
+      renewalAmount: renewalIntervalPrice.amount,
+      renewalSetupFee: renewalIntervalPrice.setupFee || 0,
+      firstBillAmount: selectedIntervalPrice.amount,
+      firstBillSetupFee: selectedIntervalPrice.setupFee || 0,
       billingInterval,
       intendedBillingInterval: billingInterval,
+      billingPeriodStartAt: now,
+      billingPeriodEndAt,
       status: useTrial ? 'TRIAL' : 'PAST_DUE',
       paymentReference: payload.paymentReference?.trim() || undefined,
       paymentProvider,
@@ -514,6 +609,10 @@ export async function startPublicOnboarding(payload: {
     subscriptionStatus: latestSubscription?.status,
     billingInterval: latestSubscription?.billingInterval,
     paymentVerificationStatus: latestSubscription?.paymentVerificationStatus,
+    amountDueNow: latestSubscription?.amount,
+    firstBillAmount: latestSubscription?.firstBillAmount ?? latestSubscription?.amount,
+    renewalAmount: latestSubscription?.renewalAmount,
+    currency: latestSubscription?.currency,
     redirectUrl,
   };
 }
