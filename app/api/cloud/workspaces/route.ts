@@ -6,6 +6,22 @@ import { createWorkspace, deriveClientOwnershipContext } from '@/lib/cloudOrches
 const WEBSITE_TYPES = new Set(['NEW_WEBSITE', 'EXISTING_WEBSITE', 'CUSTOM_HEADLESS']);
 const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
 
+function normalizeCommercialPlanToWorkspacePlan(planId?: string): AccountPlan {
+  if (planId === 'starter' || planId === 'business' || planId === 'enterprise') {
+    return planId;
+  }
+
+  if (planId === 'growth') {
+    return 'business';
+  }
+
+  return 'starter';
+}
+
+function isEntitledCommercialSubscriptionStatus(status: string | undefined): boolean {
+  return status === 'TRIAL' || status === 'ACTIVE';
+}
+
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
@@ -46,12 +62,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await ensureAdminSession();
-  if ('error' in auth) {
-    return auth.error;
-  }
-
   const body = await req.json();
+  const auth = await ensureAdminSession();
+
   const name = String(body?.name || '').trim();
   const businessType = String(body?.businessType || '').trim();
   const country = String(body?.country || '').trim();
@@ -69,14 +82,51 @@ export async function POST(req: NextRequest) {
   const websiteType = websiteTypeRaw && WEBSITE_TYPES.has(websiteTypeRaw)
     ? (websiteTypeRaw as 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS')
     : undefined;
+  const onboardingSessionId = String(body?.onboardingSessionId || '').trim();
 
-  const ownership = deriveClientOwnershipContext({
-    name,
-    contentBaseUrl,
-    businessProfile,
-    planId,
-    actorEmail: auth.session.user?.user_email ?? auth.session.user?.email ?? '',
-  });
+  let actorEmail = '';
+  let ownership: ReturnType<typeof deriveClientOwnershipContext> | null = null;
+  let currentPlan: AccountPlan;
+
+  if ('error' in auth) {
+    if (!onboardingSessionId) {
+      return auth.error;
+    }
+
+    const store = await readAdminStore();
+    const onboarding = store.cloud.commercial.onboardingSessions[onboardingSessionId];
+    if (!onboarding) {
+      return NextResponse.json({ error: 'Invalid onboarding session' }, { status: 401 });
+    }
+
+    const subscription = store.cloud.commercial.subscriptions[onboarding.subscriptionId];
+    if (!subscription || !isEntitledCommercialSubscriptionStatus(subscription.status)) {
+      return NextResponse.json({ error: 'Subscription not entitled for workspace provisioning' }, { status: 402 });
+    }
+
+    const identity = store.cloud.commercial.identities[onboarding.identityId];
+    const organization = store.cloud.commercial.organizations[onboarding.organizationId];
+    actorEmail = identity?.email || '';
+    currentPlan = normalizeCommercialPlanToWorkspacePlan(planId || subscription.planId);
+
+    ownership = {
+      clientOrganizationId: onboarding.organizationId,
+      clientOrganizationName: organization?.name || name || 'Client Organization',
+      clientSubscriptionId: onboarding.subscriptionId,
+      clientSubscriptionPlan: currentPlan,
+      workspaceOwnership: 'client',
+    };
+  } else {
+    actorEmail = auth.session.user?.user_email ?? auth.session.user?.email ?? '';
+    ownership = deriveClientOwnershipContext({
+      name,
+      contentBaseUrl,
+      businessProfile,
+      planId,
+      actorEmail,
+    });
+    currentPlan = planId && planId in PLAN_WORKSPACE_LIMITS ? (planId as AccountPlan) : (await readAdminStore()).cloud.accountPlan;
+  }
 
   if (!name || !businessType || !country || !businessModel || !contentBaseUrl) {
     return badRequest('name, businessType, country, businessModel, and contentBaseUrl are required');
@@ -91,7 +141,6 @@ export async function POST(req: NextRequest) {
   }
 
   const store = await readAdminStore();
-  const currentPlan: AccountPlan = (planId && planId in PLAN_WORKSPACE_LIMITS ? (planId as AccountPlan) : store.cloud.accountPlan);
   const workspaceCount = Object.values(store.cloud.workspaces).filter((workspace) => {
     const sameOrganization = workspace.clientOrganizationId === ownership.clientOrganizationId;
     const sameSubscription = workspace.clientSubscriptionId === ownership.clientSubscriptionId;
@@ -129,7 +178,7 @@ export async function POST(req: NextRequest) {
     clientSubscriptionId: ownership.clientSubscriptionId,
     clientSubscriptionPlan: currentPlan,
     workspaceOwnership: ownership.workspaceOwnership,
-    actorEmail: auth.session.user?.user_email ?? auth.session.user?.email ?? '',
+    actorEmail,
   });
 
   await updateAdminStore((current) => ({
@@ -143,9 +192,9 @@ export async function POST(req: NextRequest) {
     },
   }));
 
-  const actor = await getCurrentWpUser(auth.session.token);
+  const actor = 'error' in auth ? null : await getCurrentWpUser(auth.session.token);
   await appendAuditLog({
-    actorEmail: actor?.email ?? auth.session.user?.user_email ?? 'unknown',
+    actorEmail: actor?.email ?? (actorEmail || 'unknown'),
     action: 'cloud.workspace.created',
     target: workspace.id,
     details: `Workspace created with onboarding step machine initialized (${workspace.name}).`,

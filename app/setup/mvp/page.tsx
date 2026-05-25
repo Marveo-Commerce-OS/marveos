@@ -774,6 +774,10 @@ function SetupMvpPageContent() {
 
     if (!res.ok) {
       const data = await safeJson<{ error?: string }>(res);
+      const isPublicOnboarding = Boolean(searchParams.get('session'));
+      if (isPublicOnboarding && (res.status === 401 || res.status === 403)) {
+        return;
+      }
       throw new Error(data?.error || 'Failed to save onboarding progress');
     }
   }
@@ -931,6 +935,8 @@ function SetupMvpPageContent() {
           ? draft.existingConnectionChoice === 'manual' || draft.existingWebsiteData.supportRequired
           : supportNeeded;
       let effectiveSupportNeeded = effectiveSupportNeededBase;
+      const onboardingSessionId = searchParams.get('session');
+      const isPublicOnboarding = Boolean(onboardingSessionId);
 
       withPhaseStatus('prepare', 'running', 'Preparing your workspace');
 
@@ -949,6 +955,7 @@ function SetupMvpPageContent() {
           businessProfile,
           selectedTemplateId: draft.websiteType === 'NEW_WEBSITE' ? draft.selectedTemplateId : undefined,
           supportRequired: effectiveSupportNeeded,
+          onboardingSessionId: onboardingSessionId || undefined,
         }),
       });
 
@@ -996,7 +1003,6 @@ function SetupMvpPageContent() {
         supportRequired: effectiveSupportNeeded,
       });
 
-      const onboardingSessionId = searchParams.get('session');
       try {
         const profileProvisionRes = await fetch('/api/master/provisioning/profile-complete', {
           method: 'POST',
@@ -1139,6 +1145,14 @@ function SetupMvpPageContent() {
           onboardingStatus: 'IN_PROGRESS',
           websiteType: draft.websiteType,
         });
+      }
+
+      if (isPublicOnboarding) {
+        withPhaseStatus('connect', 'done', 'Onboarding details saved');
+        withPhaseStatus('support', 'done', effectiveSupportNeeded ? 'Support queue will continue in OS Setup Center' : 'Support assignment not required');
+        withPhaseStatus('check', 'done', 'Launch checks continue inside OS Setup Center after workspace creation');
+        setWizardStep('ready');
+        return;
       }
 
       await callOnboardingUpdate(nextWorkspaceId, {
