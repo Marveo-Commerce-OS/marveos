@@ -429,73 +429,94 @@ export default function BillingPlansManagerClient() {
                         </span>
                       </div>
                       <div className="grid gap-2 lg:grid-cols-7">
-                      <input
-                        value={region.country}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, country: e.target.value.toUpperCase() }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Country"
-                      />
-                      <input
-                        value={region.currency}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Currency"
-                      />
-                      <input
-                        type="number"
-                        value={region.monthly.amount}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, monthly: { ...prev.monthly, amount: asNumber(e.target.value, 0) } }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Monthly"
-                      />
-                      <input
-                        type="number"
-                        value={region.monthly.setupFee}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, monthly: { ...prev.monthly, setupFee: asNumber(e.target.value, 0) } }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Monthly setup"
-                      />
-                      <input
-                        type="number"
-                        value={region.annual.amount}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annual: { ...prev.annual, amount: asNumber(e.target.value, 0) } }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Annual"
-                      />
-                      <input
-                        type="number"
-                        value={region.annual.setupFee}
-                        onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annual: { ...prev.annual, setupFee: asNumber(e.target.value, 0) } }))}
-                        disabled={!canMutate || saving}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                        placeholder="Annual setup"
-                      />
-                      <div className="flex gap-1">
-                        <input
-                          type="number"
-                          value={region.annualDiscountPercent ?? 0}
-                          onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annualDiscountPercent: asNumber(e.target.value, 0) }))}
-                          disabled={!canMutate || saving}
-                          className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                          placeholder="Discount %"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateDraft(plan.id, (prev) => ({
-                            ...prev,
-                            regions: prev.regions.filter((_, regionIdx) => regionIdx !== idx),
-                          }))}
-                          disabled={!canMutate || saving || draft.regions.length <= 1}
-                          className="rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-800 disabled:opacity-60"
-                        >
-                          Remove
-                        </button>
-                      </div>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Country code
+                          <input
+                            value={region.country}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, country: e.target.value.toUpperCase() }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Country"
+                          />
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Currency code
+                          <input
+                            value={region.currency}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Currency"
+                          />
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Monthly price
+                          <input
+                            type="number"
+                            value={region.monthly.amount}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, monthly: { ...prev.monthly, amount: asNumber(e.target.value, 0) } }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Monthly"
+                          />
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Monthly setup fee
+                          <input
+                            type="number"
+                            value={region.monthly.setupFee}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, monthly: { ...prev.monthly, setupFee: asNumber(e.target.value, 0) } }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Monthly setup"
+                          />
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Annual price
+                          <input
+                            type="number"
+                            value={region.annual.amount}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annual: { ...prev.annual, amount: asNumber(e.target.value, 0) } }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Annual"
+                          />
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600">
+                          Annual setup fee
+                          <input
+                            type="number"
+                            value={region.annual.setupFee}
+                            onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annual: { ...prev.annual, setupFee: asNumber(e.target.value, 0) } }))}
+                            disabled={!canMutate || saving}
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                            placeholder="Annual setup"
+                          />
+                        </label>
+                        <div>
+                          <label className="text-[11px] font-medium text-slate-600">
+                            Annual discount (%)
+                            <input
+                              type="number"
+                              value={region.annualDiscountPercent ?? 0}
+                              onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, annualDiscountPercent: asNumber(e.target.value, 0) }))}
+                              disabled={!canMutate || saving}
+                              className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
+                              placeholder="Discount %"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => updateDraft(plan.id, (prev) => ({
+                              ...prev,
+                              regions: prev.regions.filter((_, regionIdx) => regionIdx !== idx),
+                            }))}
+                            disabled={!canMutate || saving || draft.regions.length <= 1}
+                            className="mt-2 w-full rounded-lg bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-800 disabled:opacity-60"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}

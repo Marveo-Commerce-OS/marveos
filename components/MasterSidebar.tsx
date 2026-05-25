@@ -59,7 +59,7 @@ export default function MasterSidebar({
   const router = useRouter();
   const config = getConfig();
   const [profile, setProfile] = useState<{ displayName: string; email: string; avatarUrl?: string } | null>(null);
-  const [billingMenuOpen, setBillingMenuOpen] = useState(false);
+  const [billingMenuOpen, setBillingMenuOpen] = useState(pathname.startsWith('/master/billing'));
   const allowedModuleSet = new Set(allowedModules);
   const visibleNav = MASTER_NAV.filter((item) => allowedModuleSet.has(item.moduleKey));
 
@@ -123,12 +123,7 @@ export default function MasterSidebar({
           if (moduleKey === 'plansBilling') {
             const active = pathname.startsWith('/master/billing');
             return (
-              <div
-                key={href}
-                className="relative"
-                onMouseEnter={() => setBillingMenuOpen(true)}
-                onMouseLeave={() => setBillingMenuOpen(false)}
-              >
+              <div key={href}>
                 <button
                   type="button"
                   onClick={() => setBillingMenuOpen((current) => !current)}
@@ -144,17 +139,17 @@ export default function MasterSidebar({
                 </button>
 
                 {billingMenuOpen ? (
-                  <div className="absolute left-0 top-full z-20 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                  <div className="mt-1 ml-7 space-y-1 border-l border-slate-200 pl-3">
                     <Link
                       href="/master/billing#plans"
-                      className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
                       Plans
                       <span className="mt-0.5 block text-[11px] font-normal text-slate-500">All plans and setup</span>
                     </Link>
                     <Link
                       href="/master/billing#subscriptions"
-                      className="mt-1 block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                      className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
                       Billing
                       <span className="mt-0.5 block text-[11px] font-normal text-slate-500">Commercial subscriptions only</span>
