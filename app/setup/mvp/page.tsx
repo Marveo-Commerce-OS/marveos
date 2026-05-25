@@ -168,6 +168,11 @@ interface ProfileLookupsState {
 
 const STORAGE_KEY = 'marveo.mvp.onboarding.v1';
 
+interface PersistedOnboardingState {
+  draft: Partial<DraftState>;
+  workspaceId?: string;
+}
+
 const PLAN_OPTIONS = [
   { id: 'starter', name: 'Starter', description: 'For early stage brands and pilots.' },
   { id: 'growth', name: 'Growth', description: 'Balanced setup for growing teams.' },
@@ -417,16 +422,23 @@ function SetupMvpPageContent() {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<DraftState>;
-      const restoredStep = typeof parsed.wizardStep === 'string' ? (parsed.wizardStep as WizardStep) : undefined;
+      const parsed = JSON.parse(raw) as Partial<DraftState> | PersistedOnboardingState;
+      const persisted =
+        parsed && typeof parsed === 'object' && 'draft' in parsed
+          ? (parsed as PersistedOnboardingState)
+          : null;
+      const restoredDraft = persisted?.draft ?? (parsed as Partial<DraftState>);
+      const restoredWorkspaceId = typeof persisted?.workspaceId === 'string' ? persisted.workspaceId : '';
+      const restoredStep = typeof restoredDraft.wizardStep === 'string' ? (restoredDraft.wizardStep as WizardStep) : undefined;
       const sanitizedStep = restoredStep ? getNextAllowedInitialOnboardingStep(restoredStep) : undefined;
       const blockedStepRecovered = Boolean(restoredStep && !isInitialOnboardingStepAllowed(restoredStep));
       window.setTimeout(() => {
         setDraft((prev) => ({
           ...prev,
-          ...parsed,
+          ...restoredDraft,
           wizardStep: sanitizedStep ?? prev.wizardStep,
         }));
+        if (restoredWorkspaceId) setWorkspaceId(restoredWorkspaceId);
         if (blockedStepRecovered) {
           setStepGuardMessage('Website setup is available inside OS Setup Center after workspace creation.');
         }
@@ -438,11 +450,15 @@ function SetupMvpPageContent() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
+      const persisted: PersistedOnboardingState = {
+        draft,
+        workspaceId: workspaceId || undefined,
+      };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
     } catch {
       // Ignore local storage failures.
     }
-  }, [draft]);
+  }, [draft, workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2104,7 +2120,19 @@ function SetupMvpPageContent() {
               </div>
               <div className="flex gap-3">
                 <a href={workspaceId ? `/dashboard?workspaceId=${workspaceId}` : '/dashboard'} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold">Open dashboard</a>
-                <button onClick={() => setDraft(defaultDraft())} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Start another setup</button>
+                <button
+                  onClick={() => {
+                    setDraft(defaultDraft());
+                    setWorkspaceId('');
+                    setChecklist(null);
+                    setPhases(INITIAL_PHASES);
+                    setError('');
+                    setStepGuardMessage('');
+                  }}
+                  className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold"
+                >
+                  Start another setup
+                </button>
               </div>
             </section>
           )}
