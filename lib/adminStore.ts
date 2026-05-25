@@ -478,6 +478,7 @@ export interface CommercialPlanConfig {
   id: string;
   name: string;
   description: string;
+  active: boolean;
   workspaceLimit: number;
   featureEntitlements: string[];
   trialEnabled: boolean;
@@ -1369,6 +1370,7 @@ const DEFAULT_STORE: AdminConfigStore = {
           id: 'starter',
           name: 'Starter Workspace',
           description: 'For founders and growing businesses.',
+          active: true,
           workspaceLimit: 1,
           featureEntitlements: ['workspace.basic', 'onboarding.guided', 'support.standard'],
           trialEnabled: true,
@@ -1383,6 +1385,7 @@ const DEFAULT_STORE: AdminConfigStore = {
           id: 'growth',
           name: 'Growth Operations',
           description: 'For teams operating across multiple workflows.',
+          active: true,
           workspaceLimit: 5,
           featureEntitlements: ['workspace.multi', 'analytics.advanced', 'support.priority'],
           trialEnabled: true,
@@ -1397,6 +1400,7 @@ const DEFAULT_STORE: AdminConfigStore = {
           id: 'enterprise',
           name: 'Enterprise Infrastructure',
           description: 'For enterprise and agency operations at scale.',
+          active: true,
           workspaceLimit: 999,
           featureEntitlements: ['workspace.unlimited', 'governance.advanced', 'support.dedicated'],
           trialEnabled: false,
@@ -1633,6 +1637,16 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
 
     return plans.map((plan) => ({
       ...plan,
+      id: String(plan.id ?? '').trim().toLowerCase(),
+      name: String(plan.name ?? '').trim(),
+      description: String(plan.description ?? '').trim(),
+      active: typeof plan.active === 'boolean' ? plan.active : true,
+      workspaceLimit: Number.isFinite(Number(plan.workspaceLimit)) ? Math.max(1, Number(plan.workspaceLimit)) : 1,
+      featureEntitlements: Array.isArray(plan.featureEntitlements)
+        ? plan.featureEntitlements.map((item) => String(item).trim()).filter(Boolean)
+        : [],
+      trialEnabled: Boolean(plan.trialEnabled),
+      trialDurationDays: Number.isFinite(Number(plan.trialDurationDays)) ? Math.max(0, Number(plan.trialDurationDays)) : undefined,
       regions: Array.isArray(plan.regions)
         ? plan.regions.map((region) => {
             const legacyAmount = Number((region as { amount?: number }).amount ?? 0);
@@ -1643,12 +1657,12 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
               country: String(region.country ?? '').trim().toUpperCase(),
               currency: String(region.currency ?? '').trim().toUpperCase(),
               monthly: {
-                amount: Number(monthly.amount ?? 0),
-                setupFee: Number(monthly.setupFee ?? 0),
+                amount: Math.max(0, Number(monthly.amount ?? 0)),
+                setupFee: Math.max(0, Number(monthly.setupFee ?? 0)),
               },
               annual: {
-                amount: Number(annual.amount ?? 0),
-                setupFee: Number(annual.setupFee ?? 0),
+                amount: Math.max(0, Number(annual.amount ?? 0)),
+                setupFee: Math.max(0, Number(annual.setupFee ?? 0)),
               },
               annualDiscountPercent: typeof region.annualDiscountPercent === 'number' ? region.annualDiscountPercent : undefined,
             };

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore, type AccountPlan, type WorkspaceOrchestration } from '@/lib/adminStore';
 import { createWorkspace, deriveClientOwnershipContext } from '@/lib/cloudOrchestration';
+import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 import { resolveWorkspaceEntitlement } from '@/lib/workspaceEntitlements';
 
 const WEBSITE_TYPES = new Set(['NEW_WEBSITE', 'EXISTING_WEBSITE', 'CUSTOM_HEADLESS']);
@@ -165,6 +166,7 @@ export async function POST(req: NextRequest) {
   const onboardingSessionId = String(body?.onboardingSessionId || '').trim();
 
   let actorEmail = '';
+  let ownerName = '';
   let ownership: ReturnType<typeof deriveClientOwnershipContext> | null = null;
   let legacyAccountPlan: AccountPlan;
   let subscriptionPlanId: string | undefined;
@@ -189,6 +191,7 @@ export async function POST(req: NextRequest) {
     const identity = store.cloud.commercial.identities[onboarding.identityId];
     const organization = store.cloud.commercial.organizations[onboarding.organizationId];
     actorEmail = identity?.email || '';
+    ownerName = String(identity?.name || organization?.name || '').trim();
     subscriptionForSessionPlan = subscription.planId;
     subscriptionPlanId = subscription.planId;
     legacyAccountPlan = toLegacyAccountPlan(subscription.planId, store.cloud.accountPlan);
@@ -324,6 +327,29 @@ export async function POST(req: NextRequest) {
     target: workspace.id,
     details: `Workspace created with onboarding step machine initialized (${workspace.name}).`,
   });
+
+  if (onboardingSessionId && actorEmail) {
+    const appBaseUrl = (process.env.MARVEO_APP_BASE_URL || req.nextUrl.origin).replace(/\/$/, '');
+    const loginUrl = `${appBaseUrl}/login`;
+    const continueSetupUrl = `${appBaseUrl}/setup/mvp?session=${encodeURIComponent(onboardingSessionId)}`;
+    const changePasswordUrl = `${appBaseUrl}/password/change`;
+
+    await sendPlatformEmailNotification({
+      templateKey: 'CLIENT_SIGNUP',
+      to: actorEmail,
+      variables: {
+        clientName: ownerName || workspace.name || actorEmail,
+        workspaceName: workspace.name,
+        appBaseUrl: loginUrl,
+        loginUrl,
+        continueSetupUrl,
+        changePasswordUrl,
+        onboardingSessionId,
+        workspaceId: workspace.id,
+      },
+      fallbackSubject: `Your workspace is ready: ${workspace.name}`,
+    });
+  }
 
   return NextResponse.json({ workspace }, { status: 201 });
 }

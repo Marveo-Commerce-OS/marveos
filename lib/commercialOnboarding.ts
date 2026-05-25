@@ -271,11 +271,12 @@ export async function getPublicPlans(country: string) {
   };
   const conversionPolicy = store.platformSettings.billingCurrencyPolicy;
   const currency = getCurrencyForCountry(normalizedCountry, effectiveCountryCurrencyMap);
+  const activePlans = store.cloud.commercial.plans.filter((plan) => plan.active !== false);
 
   return {
     country: normalizedCountry,
     currency,
-    plans: store.cloud.commercial.plans.map((plan) => {
+    plans: activePlans.map((plan) => {
       const pricing = pickRegionalPlanPrice(plan, normalizedCountry, currency, conversionPolicy);
       return {
         planId: plan.id,
@@ -383,7 +384,9 @@ export async function startPublicOnboarding(payload: {
     const normalizedCountry = normalizeCountry(payload.country);
     const billingInterval = normalizeBillingInterval(payload.billingInterval);
 
-    const selectedPlan = current.cloud.commercial.plans.find((plan) => plan.id === payload.selectedPlanId)
+    const activePlans = current.cloud.commercial.plans.filter((plan) => plan.active !== false);
+    const selectedPlan = activePlans.find((plan) => plan.id === payload.selectedPlanId)
+      || activePlans[0]
       || current.cloud.commercial.plans[0];
     const effectiveCountryCurrencyMap = {
       ...current.cloud.commercial.countryCurrencyMap,
@@ -730,8 +733,10 @@ export async function prepareSubscriptionUpgrade(payload: {
 
     if (!existingSubscription) return current;
 
-    const selectedPlan = current.cloud.commercial.plans.find((plan) => plan.id === (payload.selectedPlanId || existingSubscription.planId))
-      || current.cloud.commercial.plans.find((plan) => plan.id === existingSubscription.planId)
+    const activePlans = current.cloud.commercial.plans.filter((plan) => plan.active !== false);
+    const selectedPlan = activePlans.find((plan) => plan.id === (payload.selectedPlanId || existingSubscription.planId))
+      || activePlans.find((plan) => plan.id === existingSubscription.planId)
+      || activePlans[0]
       || current.cloud.commercial.plans[0];
 
     const billingInterval = requestedInterval || existingSubscription.intendedBillingInterval || existingSubscription.billingInterval;

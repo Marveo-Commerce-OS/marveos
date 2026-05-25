@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { getControlCenterSnapshot } from '../_lib/controlCenter';
 import { readAdminStore } from '@/lib/adminStore';
 import BillingSubscriptionsClient from './BillingSubscriptionsClient';
+import BillingPlansManagerClient from './BillingPlansManagerClient';
 
 export default async function MasterBillingPage() {
   const snapshot = await getControlCenterSnapshot();
@@ -14,9 +15,6 @@ export default async function MasterBillingPage() {
       <div>
         <h1 className="text-3xl font-bold text-slate-900">Plans & Billing</h1>
         <p className="mt-2 text-sm text-slate-600">Platform-native subscription operations across organizations, plans, intervals, trials, and payment references.</p>
-        <p className="mt-3 inline-flex rounded-full border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
-          Billing ledger and invoice exports are currently read-only
-        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
@@ -26,9 +24,9 @@ export default async function MasterBillingPage() {
           <p className="mt-2 text-xs text-slate-500">Client onboarding default</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Workspace Usage</p>
-          <p className="mt-2 text-2xl font-bold text-slate-900">{snapshot.workspaces.length} / {snapshot.workspaceLimit === 999 ? 'Unlimited' : snapshot.workspaceLimit}</p>
-          <p className="mt-2 text-xs text-slate-500">Live data</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Active Commercial Plans</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900">{commercial.plans.filter((plan) => plan.active !== false).length}</p>
+          <p className="mt-2 text-xs text-slate-500">Plans visible to public pricing API</p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Client Subscription Summary</p>
@@ -40,11 +38,13 @@ export default async function MasterBillingPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
         <h2 className="text-lg font-semibold text-slate-900">Payment operations</h2>
         <ul className="mt-3 space-y-2">
+          <li>Plan lifecycle and pricing are managed in this module and persisted in platform state.</li>
           <li>Subscription status transitions persist in platform state.</li>
-          <li>Trial expiry, suspension, and reactivation are operational.</li>
-          <li>Provider reconciliation and invoice exports are read-only in this phase.</li>
+          <li>Trial expiry, suspension, reactivation, and cleanup actions are operational.</li>
         </ul>
       </div>
+
+      <BillingPlansManagerClient />
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-700">
         <h2 className="text-lg font-semibold text-slate-900">Regional pricing and trial controls</h2>

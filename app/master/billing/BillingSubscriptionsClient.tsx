@@ -24,6 +24,7 @@ type SubscriptionRow = {
 
 type BillingResponse = {
   safeBillingActionsEnabled: boolean;
+  canMutateBillingRecords?: boolean;
   subscriptions: SubscriptionRow[];
   error?: string;
 };
@@ -76,8 +77,8 @@ export default function BillingSubscriptionsClient() {
     return () => clearTimeout(timer);
   }, []);
 
-  async function applyAction(subscriptionId: string, action: 'MARK_TRIAL_EXPIRED' | 'SUSPEND' | 'REACTIVATE') {
-    setBusyId(subscriptionId);
+  async function applyAction(subscriptionId: string, action: 'MARK_TRIAL_EXPIRED' | 'SUSPEND' | 'REACTIVATE' | 'DELETE_SUBSCRIPTION' | 'PURGE_TEST_TRIALS' | 'PURGE_TEST_RESTART') {
+    setBusyId(subscriptionId || '__bulk__');
     setError('');
     setMessage('');
 
@@ -85,18 +86,35 @@ export default function BillingSubscriptionsClient() {
       const res = await fetch('/api/master/billing/subscriptions', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscriptionId, action }),
+        body: JSON.stringify(subscriptionId ? { subscriptionId, action } : { action }),
       });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; subscriptions?: SubscriptionRow[]; safeBillingActionsEnabled?: boolean } | null;
+      const data = (await res.json().catch(() => null)) as {
+        ok?: boolean;
+        error?: string;
+        subscriptions?: SubscriptionRow[];
+        safeBillingActionsEnabled?: boolean;
+        canMutateBillingRecords?: boolean;
+        deletedCount?: number;
+        deletedWorkspaceCount?: number;
+      } | null;
       if (!res.ok || !data?.ok) throw new Error(data?.error || 'Billing action failed.');
 
       setPayload((prev) => prev ? ({
         ...prev,
         subscriptions: Array.isArray(data.subscriptions) ? data.subscriptions : prev.subscriptions,
         safeBillingActionsEnabled: Boolean(data.safeBillingActionsEnabled ?? prev.safeBillingActionsEnabled),
+        canMutateBillingRecords: Boolean(data.canMutateBillingRecords ?? prev.canMutateBillingRecords),
       }) : prev);
 
-      setMessage(`Updated subscription ${subscriptionId}.`);
+      if (action === 'PURGE_TEST_TRIALS') {
+        setMessage(`Purged ${data.deletedCount || 0} trial subscription(s).`);
+      } else if (action === 'PURGE_TEST_RESTART') {
+        setMessage(`Purged ${data.deletedCount || 0} trial subscription(s) and ${data.deletedWorkspaceCount || 0} linked workspace(s).`);
+      } else if (action === 'DELETE_SUBSCRIPTION') {
+        setMessage(`Deleted trial subscription ${subscriptionId}.`);
+      } else {
+        setMessage(`Updated subscription ${subscriptionId}.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Billing action failed.');
     } finally {
@@ -105,6 +123,7 @@ export default function BillingSubscriptionsClient() {
   }
 
   const safeActions = Boolean(payload?.safeBillingActionsEnabled);
+  const canMutateBillingRecords = Boolean(payload?.canMutateBillingRecords ?? safeActions);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -133,6 +152,17 @@ export default function BillingSubscriptionsClient() {
           >
             Refresh
           </button>
+          {canMutateBillingRecords ? (
+            <button
+              type="button"
+              onClick={() => void applyAction('', 'PURGE_TEST_RESTART')}
+              disabled={!safeActions || busyId !== null}
+              className="rounded-full bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-900 disabled:opacity-60"
+              title="Delete test trial subscriptions and linked test workspaces to restart QA runs."
+            >
+              Purge and restart test
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -163,6 +193,7 @@ export default function BillingSubscriptionsClient() {
                 const canExpireTrial = safeActions && subscription.status === 'TRIAL';
                 const canSuspend = safeActions && subscription.status !== 'SUSPENDED';
                 const canReactivate = safeActions && subscription.status === 'SUSPENDED';
+                const canDeleteTrial = safeActions && subscription.paymentMode === 'TRIAL';
 
                 return (
                   <tr key={subscription.id} className="border-b border-slate-100 last:border-b-0 align-top">
@@ -214,6 +245,15 @@ export default function BillingSubscriptionsClient() {
                           title={safeActions ? 'Reactivate subscription' : 'Action unavailable'}
                         >
                           Reactivate
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void applyAction(subscription.id, 'DELETE_SUBSCRIPTION')}
+                          disabled={!canDeleteTrial || busy}
+                          className="rounded-full bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-900 disabled:opacity-60"
+                          title={safeActions ? 'Delete this trial-mode subscription and its linked onboarding sessions' : 'Action unavailable'}
+                        >
+                          Delete trial
                         </button>
                       </div>
                       {busy ? <p className="mt-1 text-xs text-slate-500">Updating…</p> : null}

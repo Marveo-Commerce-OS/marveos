@@ -6,6 +6,9 @@ import { useEffect, useMemo, useState } from 'react';
 type Workspace = {
   id: string;
   name: string;
+  clientOrganizationId?: string;
+  clientOrganizationName?: string;
+  clientSubscriptionId?: string;
   country: string;
   supportRequired?: boolean;
   supportAssignment?: { status: string };
@@ -18,6 +21,7 @@ type Workspace = {
 type SubscriptionRow = {
   id: string;
   ownerEmail: string;
+  organizationId: string;
   organizationName: string;
   planId: string;
   billingInterval: string;
@@ -40,7 +44,7 @@ type TeamUserRow = {
 };
 
 type ClientRow = {
-  key: string; // email
+  key: string;
   organization: string;
   ownerEmail: string;
   country: string;
@@ -100,26 +104,41 @@ export default function MasterClientsPage() {
     return map;
   }, [subscriptions]);
 
+  const subscriptionById = useMemo(() => {
+    const map = new Map<string, SubscriptionRow>();
+    for (const subscription of subscriptions) {
+      if (!subscription.id) continue;
+      map.set(subscription.id, subscription);
+    }
+    return map;
+  }, [subscriptions]);
+
   const clients = useMemo(() => {
     const rows = new Map<string, ClientRow>();
 
     for (const workspace of workspaces) {
       const email = getContactEmail(workspace);
-      if (!email) continue;
+      const subscription = (workspace.clientSubscriptionId ? subscriptionById.get(workspace.clientSubscriptionId) : undefined)
+        || (email ? subscriptionByEmail.get(email) : undefined);
+      const ownerEmail = email || subscription?.ownerEmail || '';
+      const fallbackKey = ownerEmail || workspace.clientOrganizationId || subscription?.organizationId || workspace.id;
+      const key = workspace.clientOrganizationId || subscription?.organizationId || fallbackKey;
+      const existing = rows.get(key);
 
-      const subscription = subscriptionByEmail.get(email);
-      const existing = rows.get(email);
-
-      const organization = subscription?.organizationName || getBusinessName(workspace) || email;
+      const organization = workspace.clientOrganizationName
+        || subscription?.organizationName
+        || getBusinessName(workspace)
+        || ownerEmail
+        || key;
       const planId = subscription?.planId || null;
 
       const supportOpen = Boolean(workspace.supportRequired) && (workspace.supportAssignment?.status || 'UNASSIGNED') !== 'ASSIGNED';
 
       if (!existing) {
-        rows.set(email, {
-          key: email,
+        rows.set(key, {
+          key,
           organization,
-          ownerEmail: email,
+          ownerEmail,
           country: subscription?.country || workspace.country || '—',
           currency: subscription?.currency || '—',
           subscriptionStatus: subscription?.status || 'UNLINKED',
@@ -139,7 +158,7 @@ export default function MasterClientsPage() {
     }
 
     return Array.from(rows.values()).sort((a, b) => b.latestUpdatedAt.localeCompare(a.latestUpdatedAt));
-  }, [workspaces, subscriptionByEmail]);
+  }, [workspaces, subscriptionByEmail, subscriptionById]);
 
   async function load() {
     setLoading(true);
@@ -176,15 +195,15 @@ export default function MasterClientsPage() {
     void load();
   }, []);
 
-  async function assignSupportForClient(clientEmail: string) {
-    const officerId = officerByClient[clientEmail] || '';
+  async function assignSupportForClient(clientKey: string, clientEmail: string) {
+    const officerId = officerByClient[clientKey] || '';
     const officer = officers.find((user) => user.id === officerId) || null;
     if (!officerId || !officer) {
       setError('Select a support officer first.');
       return;
     }
 
-    setBusyKey(clientEmail);
+    setBusyKey(clientKey);
     setError('');
     setMessage('');
 
@@ -265,14 +284,15 @@ export default function MasterClientsPage() {
                 {clients.map((client) => {
                   const busy = busyKey === client.key;
                   const hasOpenSupport = client.supportOpenCount > 0;
+                  const canAssignSupport = hasOpenSupport && Boolean(client.ownerEmail);
 
                   return (
                     <tr key={client.key} className="border-b border-slate-100 align-top">
                       <td className="px-4 py-3">
                         <p className="font-semibold text-slate-900">{client.organization}</p>
-                        <p className="text-xs text-slate-500">{client.key}</p>
+                        <p className="text-xs text-slate-500">{client.ownerEmail || client.key}</p>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{client.ownerEmail}</td>
+                      <td className="px-4 py-3 text-sm text-slate-700">{client.ownerEmail || '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{client.country} / {client.currency}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{client.planId || '—'}</td>
                       <td className="px-4 py-3 text-sm text-slate-700">{toLabel(client.subscriptionStatus)}</td>
@@ -305,8 +325,8 @@ export default function MasterClientsPage() {
                               value={officerByClient[client.key] || ''}
                               onChange={(e) => setOfficerByClient((prev) => ({ ...prev, [client.key]: e.target.value }))}
                               className="rounded-xl border border-slate-300 px-2 py-1 text-xs"
-                              disabled={busy || !hasOpenSupport}
-                              title={!hasOpenSupport ? 'No open support items for this client.' : 'Select support officer to assign'}
+                              disabled={busy || !canAssignSupport}
+                              title={!hasOpenSupport ? 'No open support items for this client.' : !client.ownerEmail ? 'Contact email missing for this client.' : 'Select support officer to assign'}
                             >
                               <option value="">Assign officer…</option>
                               {officers.map((officer) => (
@@ -317,10 +337,10 @@ export default function MasterClientsPage() {
                             </select>
                             <button
                               type="button"
-                              onClick={() => void assignSupportForClient(client.key)}
-                              disabled={busy || !hasOpenSupport}
+                              onClick={() => void assignSupportForClient(client.key, client.ownerEmail)}
+                              disabled={busy || !canAssignSupport}
                               className="rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-900 disabled:opacity-60"
-                              title={!hasOpenSupport ? 'No open support items to assign.' : 'Assign officer to unassigned support-required workspaces'}
+                              title={!hasOpenSupport ? 'No open support items to assign.' : !client.ownerEmail ? 'Contact email missing for this client.' : 'Assign officer to unassigned support-required workspaces'}
                             >
                               Assign support
                             </button>
