@@ -142,7 +142,7 @@ export interface PlatformSettings {
   };
   email: {
     enabled: boolean;
-    provider: 'SMTP' | 'WORDPRESS_MAILER';
+    provider: 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER';
     host: string;
     port: number;
     secure: boolean;

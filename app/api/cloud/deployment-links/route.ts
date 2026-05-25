@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, isAdmin } from '@/lib/auth';
 import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
-import { PLAN_WORKSPACE_LIMITS } from '@/lib/adminStore';
-import type { AccountPlan, DeploymentLink } from '@/lib/adminStore';
+import type { DeploymentLink } from '@/lib/adminStore';
 import { createWorkspace } from '@/lib/cloudOrchestration';
+import { resolveWorkspaceEntitlement } from '@/lib/workspaceEntitlements';
 import { v4 as uuid } from 'uuid';
-
-const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -34,12 +32,21 @@ export async function GET() {
   }
 
   const store = await readAdminStore();
+  const entitlement = resolveWorkspaceEntitlement(store, {
+    accountPlan: store.cloud.accountPlan,
+  });
+  if (!entitlement.ok) {
+    return NextResponse.json({ error: entitlement.error }, { status: 503 });
+  }
+
   const links = Object.values(store.cloud.deploymentLinks).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return NextResponse.json({
     accountPlan: store.cloud.accountPlan,
-    workspaceCount: Object.keys(store.cloud.workspaces).length,
-    workspaceLimit: OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan],
+    plan: entitlement.entitlement.planId,
+    workspaceCount: entitlement.entitlement.workspaceCount,
+    workspaceLimit: entitlement.entitlement.workspaceLimit,
+    remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
     links,
   });
 }
@@ -68,18 +75,22 @@ export async function POST(req: NextRequest) {
   }
 
   const store = await readAdminStore();
-  const currentPlan = store.cloud.accountPlan;
-  const workspaceCount = Object.keys(store.cloud.workspaces).length;
-  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[currentPlan];
+  const entitlement = resolveWorkspaceEntitlement(store, {
+    accountPlan: store.cloud.accountPlan,
+  });
+  if (!entitlement.ok) {
+    return NextResponse.json({ error: entitlement.error }, { status: 503 });
+  }
 
   // Check if workspace limit exceeded
-  if (!OWNER_UNLIMITED_WORKSPACES && workspaceCount >= workspaceLimit) {
+  if (!entitlement.entitlement.hasCapacity) {
     return NextResponse.json(
       {
-        error: `Workspace limit reached (${currentPlan}: ${workspaceLimit} workspace${workspaceLimit === 1 ? '' : 's'} max)`,
-        currentPlan,
-        workspaceCount,
-        workspaceLimit,
+        error: `Workspace limit reached (${entitlement.entitlement.planId}: ${entitlement.entitlement.workspaceLimit} workspace${entitlement.entitlement.workspaceLimit === 1 ? '' : 's'} max)`,
+        currentPlan: entitlement.entitlement.planId,
+        workspaceCount: entitlement.entitlement.workspaceCount,
+        workspaceLimit: entitlement.entitlement.workspaceLimit,
+        remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
       },
       { status: 402 } // Payment Required
     );
@@ -102,7 +113,7 @@ export async function POST(req: NextRequest) {
 
   const deploymentLink: DeploymentLink = {
     id: linkId,
-    plan: currentPlan,
+    plan: store.cloud.accountPlan,
     createdAt: new Date().toISOString(),
     expiresAt: expiresAt.toISOString(),
     used: false,

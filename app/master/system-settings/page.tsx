@@ -8,7 +8,7 @@ type PaymentMode = 'sandbox' | 'live';
 type GatewayProvider = 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL';
 type MarketKey = 'NG' | 'GB' | 'AE' | 'CA' | 'US' | 'AFRICA_OTHER';
 type CurrencyCode = 'USD' | 'GBP' | 'NGN';
-type EmailProvider = 'SMTP' | 'WORDPRESS_MAILER';
+type EmailProvider = 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER';
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 type SetupType = 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
 type MarveoRole =
@@ -2277,7 +2277,7 @@ export default function MasterSystemSettingsPage() {
                 disabled={smtpTesting}
                 className="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {smtpTesting ? 'Testing SMTP...' : 'Test SMTP connection'}
+                {smtpTesting ? 'Testing SMTP...' : 'Test SMTP / SES connection'}
               </button>
               <p className="text-xs text-slate-500">Uses current SMTP form values (including unsaved edits).</p>
             </div>
@@ -2360,7 +2360,7 @@ export default function MasterSystemSettingsPage() {
               <label className="text-sm text-slate-700">
                 Provider
                 <select
-                  value={data.platformSettings.email.provider}
+                  value={data.platformSettings.email.provider === 'WORDPRESS_MAILER' ? 'SMTP' : data.platformSettings.email.provider}
                   onChange={(e) => setData((prev) => prev ? {
                     ...prev,
                     platformSettings: {
@@ -2374,104 +2374,121 @@ export default function MasterSystemSettingsPage() {
                   className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
                 >
                   <option value="SMTP">SMTP</option>
-                  <option value="WORDPRESS_MAILER">WordPress mailer</option>
+                  <option value="RESEND">Resend</option>
+                  <option value="SES_SMTP">Amazon SES SMTP</option>
                 </select>
               </label>
 
-              <label className="text-sm text-slate-700">
-                SMTP host
-                <input
-                  value={data.platformSettings.email.host}
-                  onChange={(e) => setData((prev) => prev ? {
-                    ...prev,
-                    platformSettings: {
-                      ...prev.platformSettings,
-                      email: {
-                        ...prev.platformSettings.email,
-                        host: e.target.value,
-                      },
-                    },
-                  } : prev)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                  placeholder="smtp-relay.brevo.com"
-                />
-              </label>
+              {data.platformSettings.email.provider === 'RESEND' ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 lg:col-span-2">
+                  Resend delivery uses the server-side environment variable RESEND_API_KEY. Keep it on the server only.
+                </div>
+              ) : null}
 
-              <label className="text-sm text-slate-700">
-                SMTP port
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={data.platformSettings.email.port}
-                  onChange={(e) => setData((prev) => prev ? {
-                    ...prev,
-                    platformSettings: {
-                      ...prev.platformSettings,
-                      email: {
-                        ...prev.platformSettings.email,
-                        port: Number(e.target.value || 587),
-                      },
-                    },
-                  } : prev)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
+              {data.platformSettings.email.provider === 'WORDPRESS_MAILER' ? (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-800 lg:col-span-2">
+                  Legacy WordPress mailer was detected. Select SMTP, Resend, or Amazon SES SMTP and save to migrate.
+                </div>
+              ) : null}
 
-              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={data.platformSettings.email.secure}
-                  onChange={(e) => setData((prev) => prev ? {
-                    ...prev,
-                    platformSettings: {
-                      ...prev.platformSettings,
-                      email: {
-                        ...prev.platformSettings.email,
-                        secure: e.target.checked,
-                      },
-                    },
-                  } : prev)}
-                />
-                Use TLS/secure SMTP
-              </label>
+              {data.platformSettings.email.provider !== 'RESEND' ? (
+                <>
+                  <label className="text-sm text-slate-700">
+                    SMTP host
+                    <input
+                      value={data.platformSettings.email.host}
+                      onChange={(e) => setData((prev) => prev ? {
+                        ...prev,
+                        platformSettings: {
+                          ...prev.platformSettings,
+                          email: {
+                            ...prev.platformSettings.email,
+                            host: e.target.value,
+                          },
+                        },
+                      } : prev)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      placeholder="smtp-relay.brevo.com"
+                    />
+                  </label>
 
-              <label className="text-sm text-slate-700">
-                SMTP username
-                <input
-                  value={data.platformSettings.email.username}
-                  onChange={(e) => setData((prev) => prev ? {
-                    ...prev,
-                    platformSettings: {
-                      ...prev.platformSettings,
-                      email: {
-                        ...prev.platformSettings.email,
-                        username: e.target.value,
-                      },
-                    },
-                  } : prev)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
+                  <label className="text-sm text-slate-700">
+                    SMTP port
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={data.platformSettings.email.port}
+                      onChange={(e) => setData((prev) => prev ? {
+                        ...prev,
+                        platformSettings: {
+                          ...prev.platformSettings,
+                          email: {
+                            ...prev.platformSettings.email,
+                            port: Number(e.target.value || 587),
+                          },
+                        },
+                      } : prev)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    />
+                  </label>
 
-              <label className="text-sm text-slate-700">
-                SMTP password / app password
-                <input
-                  type="password"
-                  value={data.platformSettings.email.password}
-                  onChange={(e) => setData((prev) => prev ? {
-                    ...prev,
-                    platformSettings: {
-                      ...prev.platformSettings,
-                      email: {
-                        ...prev.platformSettings.email,
-                        password: e.target.value,
-                      },
-                    },
-                  } : prev)}
-                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={data.platformSettings.email.secure}
+                      onChange={(e) => setData((prev) => prev ? {
+                        ...prev,
+                        platformSettings: {
+                          ...prev.platformSettings,
+                          email: {
+                            ...prev.platformSettings.email,
+                            secure: e.target.checked,
+                          },
+                        },
+                      } : prev)}
+                    />
+                    Use TLS/secure SMTP
+                  </label>
+
+                  <label className="text-sm text-slate-700">
+                    SMTP username
+                    <input
+                      value={data.platformSettings.email.username}
+                      onChange={(e) => setData((prev) => prev ? {
+                        ...prev,
+                        platformSettings: {
+                          ...prev.platformSettings,
+                          email: {
+                            ...prev.platformSettings.email,
+                            username: e.target.value,
+                          },
+                        },
+                      } : prev)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    />
+                  </label>
+
+                  <label className="text-sm text-slate-700">
+                    SMTP password / app password
+                    <input
+                      type="password"
+                      value={data.platformSettings.email.password}
+                      onChange={(e) => setData((prev) => prev ? {
+                        ...prev,
+                        platformSettings: {
+                          ...prev.platformSettings,
+                          email: {
+                            ...prev.platformSettings.email,
+                            password: e.target.value,
+                          },
+                        },
+                      } : prev)}
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    />
+                  </label>
+                </>
+              ) : null}
 
               <label className="text-sm text-slate-700">
                 From email
@@ -2874,7 +2891,7 @@ export default function MasterSystemSettingsPage() {
                   onClick={() => {
                     const configured = (data?.platformSettings.email.fromEmail || data?.platformSettings.email.username || '').trim().toLowerCase();
                     if (!configured) {
-                      setTestError('Set From email (or SMTP username) first, then try quick send.');
+                      setTestError('Set a sender email first, then try quick send.');
                       return;
                     }
                     setTestRecipient(configured);

@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
-import { appendAuditLog, readAdminStore, updateAdminStore, PLAN_WORKSPACE_LIMITS, type AccountPlan } from '@/lib/adminStore';
+import { appendAuditLog, readAdminStore, updateAdminStore, type AccountPlan, type WorkspaceOrchestration } from '@/lib/adminStore';
 import { createWorkspace, deriveClientOwnershipContext } from '@/lib/cloudOrchestration';
+import { resolveWorkspaceEntitlement } from '@/lib/workspaceEntitlements';
 
 const WEBSITE_TYPES = new Set(['NEW_WEBSITE', 'EXISTING_WEBSITE', 'CUSTOM_HEADLESS']);
-const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
 
-function normalizeCommercialPlanToWorkspacePlan(planId?: string): AccountPlan {
+const INCOMPLETE_WORKSPACE_STATUSES = new Set<WorkspaceOrchestration['status']>(['draft', 'onboarding', 'blocked']);
+
+function isEntitledCommercialSubscriptionStatus(status: string | undefined): boolean {
+  return status === 'TRIAL' || status === 'ACTIVE';
+}
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
+
+function toLegacyAccountPlan(planId: string | undefined, fallback: AccountPlan): AccountPlan {
   if (planId === 'starter' || planId === 'business' || planId === 'enterprise') {
     return planId;
   }
@@ -15,15 +25,80 @@ function normalizeCommercialPlanToWorkspacePlan(planId?: string): AccountPlan {
     return 'business';
   }
 
-  return 'starter';
+  return fallback;
 }
 
-function isEntitledCommercialSubscriptionStatus(status: string | undefined): boolean {
-  return status === 'TRIAL' || status === 'ACTIVE';
+function normalizeValue(value: string | undefined): string {
+  return String(value || '').trim().toLowerCase();
 }
 
-function badRequest(message: string) {
-  return NextResponse.json({ error: message }, { status: 400 });
+function normalizeUrl(value: string | undefined): string {
+  return normalizeValue(value).replace(/\/+$/, '');
+}
+
+function profileFromWorkspace(workspace: WorkspaceOrchestration): Record<string, unknown> {
+  const profile = workspace.businessProfile;
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return {};
+  return profile as Record<string, unknown>;
+}
+
+function findReusableWorkspace(params: {
+  workspaces: Record<string, WorkspaceOrchestration>;
+  onboardingSessionId?: string;
+  clientOrganizationId: string;
+  clientSubscriptionId: string;
+  businessName: string;
+  contactEmail: string;
+  contentBaseUrl: string;
+}): WorkspaceOrchestration | null {
+  const sameScope = (workspace: WorkspaceOrchestration) => {
+    const sameOrganization = workspace.clientOrganizationId === params.clientOrganizationId;
+    const sameSubscription = workspace.clientSubscriptionId === params.clientSubscriptionId;
+    return sameOrganization || sameSubscription;
+  };
+
+  const inScope = Object.values(params.workspaces).filter(sameScope);
+  if (inScope.length === 0) return null;
+
+  if (params.onboardingSessionId) {
+    const sessionMatched = inScope.find((workspace) => {
+      const profile = profileFromWorkspace(workspace);
+      return normalizeValue(String(profile.onboardingSessionId || '')) === normalizeValue(params.onboardingSessionId);
+    });
+
+    if (sessionMatched) {
+      return sessionMatched;
+    }
+  }
+
+  const now = Date.now();
+  const recentThresholdMs = 10 * 60 * 1000;
+  const normalizedBusinessName = normalizeValue(params.businessName);
+  const normalizedContactEmail = normalizeValue(params.contactEmail);
+  const normalizedBaseUrl = normalizeUrl(params.contentBaseUrl);
+
+  const candidate = inScope.find((workspace) => {
+    if (!INCOMPLETE_WORKSPACE_STATUSES.has(workspace.status)) {
+      return false;
+    }
+
+    const updatedAtMs = Number(new Date(workspace.updatedAt || workspace.createdAt).getTime());
+    const recentlyTouched = Number.isFinite(updatedAtMs) && now - updatedAtMs <= recentThresholdMs;
+    if (!recentlyTouched) {
+      return false;
+    }
+
+    const profile = profileFromWorkspace(workspace);
+    const workspaceBusinessName = normalizeValue(String(profile.businessName || workspace.name || ''));
+    const workspaceContactEmail = normalizeValue(String(profile.contactEmail || ''));
+    const workspaceBaseUrl = normalizeUrl(workspace.contentBaseUrl);
+
+    return workspaceBusinessName === normalizedBusinessName
+      && workspaceContactEmail === normalizedContactEmail
+      && workspaceBaseUrl === normalizedBaseUrl;
+  });
+
+  return candidate || null;
 }
 
 async function ensureAdminSession() {
@@ -47,17 +122,22 @@ export async function GET() {
   }
 
   const store = await readAdminStore();
+  const entitlement = resolveWorkspaceEntitlement(store, {
+    accountPlan: store.cloud.accountPlan,
+  });
+  if (!entitlement.ok) {
+    return NextResponse.json({ error: entitlement.error }, { status: 503 });
+  }
+
   const workspaces = Object.values(store.cloud.workspaces).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const workspaceCount = workspaces.length;
-  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[store.cloud.accountPlan];
-  const remainingWorkspaces = Math.max(0, workspaceLimit - workspaceCount);
 
   return NextResponse.json({
     workspaces,
-    plan: store.cloud.accountPlan,
-    workspaceCount,
-    workspaceLimit,
-    remainingWorkspaces,
+    plan: entitlement.entitlement.planId,
+    accountPlan: store.cloud.accountPlan,
+    workspaceCount: entitlement.entitlement.workspaceCount,
+    workspaceLimit: entitlement.entitlement.workspaceLimit,
+    remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
   });
 }
 
@@ -86,7 +166,9 @@ export async function POST(req: NextRequest) {
 
   let actorEmail = '';
   let ownership: ReturnType<typeof deriveClientOwnershipContext> | null = null;
-  let currentPlan: AccountPlan;
+  let legacyAccountPlan: AccountPlan;
+  let subscriptionPlanId: string | undefined;
+  let subscriptionForSessionPlan: string | undefined;
 
   if ('error' in auth) {
     if (!onboardingSessionId) {
@@ -107,16 +189,19 @@ export async function POST(req: NextRequest) {
     const identity = store.cloud.commercial.identities[onboarding.identityId];
     const organization = store.cloud.commercial.organizations[onboarding.organizationId];
     actorEmail = identity?.email || '';
-    currentPlan = normalizeCommercialPlanToWorkspacePlan(planId || subscription.planId);
+    subscriptionForSessionPlan = subscription.planId;
+    subscriptionPlanId = subscription.planId;
+    legacyAccountPlan = toLegacyAccountPlan(subscription.planId, store.cloud.accountPlan);
 
     ownership = {
       clientOrganizationId: onboarding.organizationId,
       clientOrganizationName: organization?.name || name || 'Client Organization',
       clientSubscriptionId: onboarding.subscriptionId,
-      clientSubscriptionPlan: currentPlan,
+      clientSubscriptionPlan: legacyAccountPlan,
       workspaceOwnership: 'client',
     };
   } else {
+    const store = await readAdminStore();
     actorEmail = auth.session.user?.user_email ?? auth.session.user?.email ?? '';
     ownership = deriveClientOwnershipContext({
       name,
@@ -125,7 +210,8 @@ export async function POST(req: NextRequest) {
       planId,
       actorEmail,
     });
-    currentPlan = planId && planId in PLAN_WORKSPACE_LIMITS ? (planId as AccountPlan) : (await readAdminStore()).cloud.accountPlan;
+    subscriptionPlanId = planId;
+    legacyAccountPlan = toLegacyAccountPlan(planId, store.cloud.accountPlan);
   }
 
   if (!name || !businessType || !country || !businessModel || !contentBaseUrl) {
@@ -141,25 +227,64 @@ export async function POST(req: NextRequest) {
   }
 
   const store = await readAdminStore();
-  const workspaceCount = Object.values(store.cloud.workspaces).filter((workspace) => {
-    const sameOrganization = workspace.clientOrganizationId === ownership.clientOrganizationId;
-    const sameSubscription = workspace.clientSubscriptionId === ownership.clientSubscriptionId;
-    return sameOrganization || sameSubscription;
-  }).length;
-  const workspaceLimit = OWNER_UNLIMITED_WORKSPACES ? 999 : PLAN_WORKSPACE_LIMITS[currentPlan];
+  const entitlement = resolveWorkspaceEntitlement(store, {
+    subscriptionPlanId,
+    accountPlan: legacyAccountPlan,
+    scope: {
+      clientOrganizationId: ownership.clientOrganizationId,
+      clientSubscriptionId: ownership.clientSubscriptionId,
+    },
+  });
+  if (!entitlement.ok) {
+    return NextResponse.json({ error: entitlement.error }, { status: 503 });
+  }
 
-  if (!OWNER_UNLIMITED_WORKSPACES && workspaceCount >= workspaceLimit) {
+  if (!entitlement.entitlement.hasCapacity) {
     return NextResponse.json(
       {
-        error: `Workspace limit reached for this client subscription (${currentPlan}: ${workspaceLimit} workspace${workspaceLimit === 1 ? '' : 's'} max)`,
-        hint: 'Create a new client organization/subscription context or upgrade the client plan',
-        currentPlan,
-        workspaceCount,
-        workspaceLimit,
+        error: `Workspace limit reached for this client subscription (${entitlement.entitlement.planId}: ${entitlement.entitlement.workspaceLimit} workspace${entitlement.entitlement.workspaceLimit === 1 ? '' : 's'} max)`,
+        hint: 'Upgrade this client subscription to add more workspace capacity.',
+        currentPlan: entitlement.entitlement.planId,
+        workspaceCount: entitlement.entitlement.workspaceCount,
+        workspaceLimit: entitlement.entitlement.workspaceLimit,
+        remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
       },
       { status: 402 } // Payment Required
     );
   }
+
+  const normalizedBusinessName = String((businessProfile?.businessName as string) || name || '').trim();
+  const normalizedContactEmail = String((businessProfile?.contactEmail as string) || actorEmail || '').trim();
+  const reusableWorkspace = findReusableWorkspace({
+    workspaces: store.cloud.workspaces,
+    onboardingSessionId,
+    clientOrganizationId: ownership.clientOrganizationId,
+    clientSubscriptionId: ownership.clientSubscriptionId,
+    businessName: normalizedBusinessName,
+    contactEmail: normalizedContactEmail,
+    contentBaseUrl,
+  });
+
+  if (reusableWorkspace) {
+    return NextResponse.json(
+      {
+        workspace: reusableWorkspace,
+        reused: true,
+        reason: 'existing_pending_workspace',
+        planId: entitlement.entitlement.planId,
+        workspaceCount: entitlement.entitlement.workspaceCount,
+        workspaceLimit: entitlement.entitlement.workspaceLimit,
+        remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
+      },
+      { status: 200 },
+    );
+  }
+
+  const workspaceBusinessProfile = {
+    ...(businessProfile || {}),
+    ...(onboardingSessionId ? { onboardingSessionId } : {}),
+    ...(subscriptionForSessionPlan ? { commercialPlanId: subscriptionForSessionPlan } : {}),
+  };
 
   const workspace = createWorkspace({
     name,
@@ -168,15 +293,15 @@ export async function POST(req: NextRequest) {
     businessModel,
     contentSource,
     contentBaseUrl,
-    planId,
+    planId: planId || subscriptionPlanId,
     websiteType,
-    businessProfile,
+    businessProfile: workspaceBusinessProfile,
     selectedTemplateId,
     supportRequired,
     clientOrganizationId: ownership.clientOrganizationId,
     clientOrganizationName: ownership.clientOrganizationName,
     clientSubscriptionId: ownership.clientSubscriptionId,
-    clientSubscriptionPlan: currentPlan,
+    clientSubscriptionPlan: legacyAccountPlan,
     workspaceOwnership: ownership.workspaceOwnership,
     actorEmail,
   });

@@ -10,8 +10,13 @@ function badRequest(message: string) {
 function reasonToMessage(reason: string): string {
   if (reason === 'no-recipient') return 'Please provide a valid recipient email.';
   if (reason === 'template-not-found') return 'Selected template was not found.';
-  if (reason === 'wordpress-mailer-provider') return 'Test send currently supports SMTP only. Switch provider to SMTP to test here.';
+  if (reason === 'wordpress-mailer-provider') return 'Legacy WordPress mailer is not supported in this test tool. Select SMTP, Resend, or Amazon SES SMTP.';
   if (reason === 'incomplete-transport-config') return 'SMTP settings are incomplete. Configure host, port, username, password, and from email.';
+  if (reason === 'resend-api-key-missing') return 'Resend API key is missing on the server. Set RESEND_API_KEY in server environment variables.';
+  if (reason === 'resend-missing-from-email') return 'Resend requires a sender email. Set From email in Email Settings.';
+  if (reason === 'resend-authentication-failed') return 'Resend authentication failed. Verify RESEND_API_KEY on the server.';
+  if (reason === 'resend-sender-domain-not-verified') return 'Resend sender domain is not verified. Verify the domain or sender address in Resend.';
+  if (reason === 'email-send-failed') return 'Email send failed. Check provider configuration and try again.';
   if (reason.includes('ETIMEDOUT')) {
     return 'SMTP connection timed out. Check host/port reachability, firewall rules, and provider settings. For port 465 use secure=true; for port 587 use secure=false.';
   }
@@ -68,7 +73,7 @@ export async function POST(req: NextRequest) {
     : null;
 
   const transportOverride = emailConfig ? {
-    provider: String(emailConfig.provider || 'SMTP').toUpperCase() as 'SMTP' | 'WORDPRESS_MAILER',
+    provider: String(emailConfig.provider || 'SMTP').toUpperCase() as 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER',
     host: typeof emailConfig.host === 'string' ? emailConfig.host.trim() : undefined,
     port: Number.isFinite(Number(emailConfig.port)) ? Number(emailConfig.port) : undefined,
     secure: typeof emailConfig.secure === 'boolean' ? emailConfig.secure : undefined,

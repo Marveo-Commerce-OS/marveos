@@ -1,6 +1,5 @@
 import { readAdminStore, type WorkspaceOrchestration } from '@/lib/adminStore';
-
-const OWNER_UNLIMITED_WORKSPACES = process.env.MARVEO_OWNER_UNLIMITED_WORKSPACES !== 'false';
+import { resolveWorkspaceEntitlement } from '@/lib/workspaceEntitlements';
 
 export interface ControlCenterClient {
   id: string;
@@ -38,6 +37,10 @@ function hasDeploymentBlocker(workspace: WorkspaceOrchestration): boolean {
 
 export async function getControlCenterSnapshot() {
   const store = await readAdminStore();
+  const entitlement = resolveWorkspaceEntitlement(store, {
+    accountPlan: store.cloud.accountPlan,
+  });
+
   const workspaces = Object.values(store.cloud.workspaces).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const identities = Object.values(store.nativeAuth.identities);
   const commercialPlans = store.cloud.commercial?.plans ?? [];
@@ -99,7 +102,7 @@ export async function getControlCenterSnapshot() {
 
   return {
     accountPlan: store.cloud.accountPlan,
-    workspaceLimit: OWNER_UNLIMITED_WORKSPACES ? 999 : (store.cloud.accountPlan === 'starter' ? 1 : store.cloud.accountPlan === 'business' ? 3 : 999),
+    workspaceLimit: entitlement.ok ? entitlement.entitlement.workspaceLimit : 0,
     workspaces,
     clients,
     metrics: {

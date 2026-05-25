@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { sendPlatformDirectEmail } from '@/lib/emailNotifications';
 
 type ReportingConfig = {
   scheduleEnabled: boolean;
@@ -127,37 +127,25 @@ export async function GET(req: NextRequest) {
   }
 
   const emailConfig = store.platformSettings.email;
-  if (emailConfig.provider !== 'SMTP' || !emailConfig.host || !emailConfig.port || !emailConfig.username || !emailConfig.password || !emailConfig.fromEmail) {
-    return NextResponse.json({ ok: false, skipped: true, reason: 'smtp-not-ready' }, { status: 400 });
+  if (!emailConfig.enabled) {
+    return NextResponse.json({ ok: false, skipped: true, reason: 'email-disabled' }, { status: 400 });
   }
 
   const summary = summarize(store);
   const html = buildHtml(summary, reporting);
   const text = `Marveo Leadership Report\nTotal Workspaces: ${summary.totalWorkspaces}\nFailed Deployments: ${summary.failedDeployments}\nOpen Support Assignments: ${summary.openSupportAssignments}\nLaunch Blockers: ${summary.launchBlockers}\nConnected Websites: ${summary.connectedWebsites}\nPlans Sold: ${summary.plansSold}\nPlans Available: ${summary.plansAvailable}\nGenerated At: ${summary.generatedAt}`;
 
-  const transporter = nodemailer.createTransport({
-    host: emailConfig.host,
-    port: emailConfig.port,
-    secure: emailConfig.secure,
-    auth: {
-      user: emailConfig.username,
-      pass: emailConfig.password,
-    },
-    dnsTimeout: 8000,
-    connectionTimeout: 12000,
-    greetingTimeout: 12000,
-    socketTimeout: 20000,
-  });
-
   try {
-    await transporter.sendMail({
-      from: emailConfig.fromName ? `${emailConfig.fromName} <${emailConfig.fromEmail}>` : emailConfig.fromEmail,
-      replyTo: emailConfig.replyToEmail || undefined,
+    const delivery = await sendPlatformDirectEmail({
       to: recipients,
       subject: `Marveo Leadership Report · ${now.toISOString().slice(0, 10)}`,
       html,
       text,
     });
+
+    if (!delivery.ok) {
+      return NextResponse.json({ ok: false, skipped: delivery.skipped, reason: delivery.reason }, { status: 400 });
+    }
 
     await updateAdminStore((current) => ({
       ...current,

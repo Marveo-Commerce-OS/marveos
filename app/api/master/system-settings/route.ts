@@ -269,8 +269,8 @@ export async function PATCH(req: NextRequest) {
     ? (body.email as Record<string, unknown>)
     : {};
   const emailProvider = String(email.provider || 'SMTP').toUpperCase();
-  if (!['SMTP', 'WORDPRESS_MAILER'].includes(emailProvider)) {
-    return badRequest('email.provider must be SMTP or WORDPRESS_MAILER.');
+  if (!['SMTP', 'RESEND', 'SES_SMTP', 'WORDPRESS_MAILER'].includes(emailProvider)) {
+    return badRequest('email.provider must be SMTP, RESEND, SES_SMTP, or WORDPRESS_MAILER.');
   }
 
   const emailPort = Number(email.port ?? 587);
@@ -370,7 +370,7 @@ export async function PATCH(req: NextRequest) {
         },
         email: {
           enabled: Boolean(email.enabled),
-          provider: emailProvider as 'SMTP' | 'WORDPRESS_MAILER',
+          provider: emailProvider as 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER',
           host: typeof email.host === 'string' ? email.host.trim() : '',
           port: emailPort,
           secure: Boolean(email.secure),

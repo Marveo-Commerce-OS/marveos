@@ -99,8 +99,8 @@ export async function POST(req: NextRequest) {
 
   const emailConfig = emailConfigRaw as Record<string, unknown>;
   const provider = String(emailConfig.provider || 'SMTP').toUpperCase();
-  if (provider !== 'SMTP') {
-    return badRequest('SMTP connection test only supports provider=SMTP.');
+  if (!['SMTP', 'SES_SMTP'].includes(provider)) {
+    return badRequest('SMTP connection test only supports SMTP and Amazon SES SMTP providers.');
   }
 
   const host = String(emailConfig.host || '').trim();

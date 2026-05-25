@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { recoverOnboardingSession } from '@/lib/commercialOnboarding';
+import { readAdminStore } from '@/lib/adminStore';
+import { resolveWorkspaceEntitlement } from '@/lib/workspaceEntitlements';
 import { enforceRateLimit } from '@/lib/security/requestGuards';
 
 export async function GET(req: NextRequest, context: { params: Promise<{ sessionId: string }> }) {
@@ -20,5 +22,35 @@ export async function GET(req: NextRequest, context: { params: Promise<{ session
     return NextResponse.json({ ok: false, error: result.reason }, { status: 404 });
   }
 
-  return NextResponse.json(result);
+  const store = await readAdminStore();
+  const recoveredSessionId = typeof result.sessionId === 'string' ? result.sessionId : '';
+  const activeSession = recoveredSessionId
+    ? store.cloud.commercial.onboardingSessions[recoveredSessionId]
+    : null;
+  const activeSubscription = activeSession
+    ? store.cloud.commercial.subscriptions[activeSession.subscriptionId]
+    : null;
+
+  const entitlement = activeSession && activeSubscription
+    ? resolveWorkspaceEntitlement(store, {
+        subscriptionPlanId: activeSubscription.planId,
+        scope: {
+          clientOrganizationId: activeSession.organizationId,
+          clientSubscriptionId: activeSession.subscriptionId,
+        },
+      })
+    : null;
+
+  return NextResponse.json({
+    ...result,
+    workspaceEntitlement: entitlement?.ok
+      ? {
+          planId: entitlement.entitlement.planId,
+          workspaceLimit: entitlement.entitlement.workspaceLimit,
+          workspaceCount: entitlement.entitlement.workspaceCount,
+          remainingWorkspaces: entitlement.entitlement.remainingWorkspaces,
+          hasCapacity: entitlement.entitlement.hasCapacity,
+        }
+      : null,
+  });
 }

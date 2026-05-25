@@ -253,13 +253,15 @@ type SendResult =
   | { ok: false; skipped: true; reason: string }
   | { ok: false; skipped: false; reason: string };
 
+type SupportedEmailProvider = 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER';
+
 const SMTP_DNS_TIMEOUT_MS = 8000;
 const SMTP_CONNECT_TIMEOUT_MS = 12000;
 const SMTP_GREETING_TIMEOUT_MS = 12000;
 const SMTP_SOCKET_TIMEOUT_MS = 20000;
 
 type EmailTransportOverride = {
-  provider?: 'SMTP' | 'WORDPRESS_MAILER';
+  provider?: SupportedEmailProvider;
   host?: string;
   port?: number;
   secure?: boolean;
@@ -373,6 +375,112 @@ async function deliverViaSmtp(params: {
   } as const;
 }
 
+function detectResendSenderDomainError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    (lower.includes('domain') && lower.includes('verify')) ||
+    lower.includes('from address is not verified') ||
+    lower.includes('from domain is not verified')
+  );
+}
+
+async function deliverViaResend(params: {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  html: string;
+  text: string;
+  transportOverride?: EmailTransportOverride;
+}): Promise<SendResult> {
+  const store = await readAdminStore();
+  const baseEmailSettings = store.platformSettings.email;
+  const emailSettings = {
+    ...baseEmailSettings,
+    ...(params.transportOverride || {}),
+  };
+
+  if (!emailSettings.fromEmail) {
+    return { ok: false, skipped: true, reason: 'resend-missing-from-email' } as const;
+  }
+
+  const apiKey = String(process.env.RESEND_API_KEY || '').trim();
+  if (!apiKey) {
+    return { ok: false, skipped: true, reason: 'resend-api-key-missing' } as const;
+  }
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: emailSettings.fromName
+          ? `${emailSettings.fromName} <${emailSettings.fromEmail}>`
+          : emailSettings.fromEmail,
+        reply_to: emailSettings.replyToEmail || undefined,
+        to: params.to,
+        cc: params.cc,
+        bcc: params.bcc,
+        subject: params.subject,
+        html: params.html,
+        text: params.text,
+      }),
+    });
+
+    if (response.ok) {
+      return { ok: true, skipped: false } as const;
+    }
+
+    const body = (await response.json().catch(() => null)) as
+      | { message?: string; error?: string; name?: string }
+      | null;
+    const detail = String(body?.message || body?.error || body?.name || 'resend-send-failed').trim();
+
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, skipped: false, reason: 'resend-authentication-failed' } as const;
+    }
+
+    if (detectResendSenderDomainError(detail)) {
+      return { ok: false, skipped: false, reason: 'resend-sender-domain-not-verified' } as const;
+    }
+
+    return { ok: false, skipped: false, reason: detail || 'resend-send-failed' } as const;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'resend-send-failed';
+    if (detectResendSenderDomainError(message)) {
+      return { ok: false, skipped: false, reason: 'resend-sender-domain-not-verified' } as const;
+    }
+    return { ok: false, skipped: false, reason: message } as const;
+  }
+}
+
+async function deliverViaConfiguredProvider(params: {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  html: string;
+  text: string;
+  transportOverride?: EmailTransportOverride;
+}): Promise<SendResult> {
+  const store = await readAdminStore();
+  const baseEmailSettings = store.platformSettings.email;
+  const provider = (params.transportOverride?.provider || baseEmailSettings.provider || 'SMTP') as SupportedEmailProvider;
+
+  if (provider === 'WORDPRESS_MAILER') {
+    return { ok: false, skipped: true, reason: 'wordpress-mailer-provider' } as const;
+  }
+
+  if (provider === 'RESEND') {
+    return deliverViaResend(params);
+  }
+
+  return deliverViaSmtp(params);
+}
+
 export async function renderPlatformEmailTemplatePreview(params: {
   templateKey: PlatformEmailTemplateKey;
   variables?: EmailTemplateVariables;
@@ -463,14 +571,6 @@ export async function sendPlatformEmailNotification(params: {
     return { ok: false, skipped: true, reason: 'no-recipient' } as const;
   }
 
-  if (emailSettings.provider === 'WORDPRESS_MAILER') {
-    return { ok: false, skipped: true, reason: 'wordpress-mailer-provider' } as const;
-  }
-
-  if (!emailSettings.host || !emailSettings.port || !emailSettings.username || !emailSettings.password || !emailSettings.fromEmail) {
-    return { ok: false, skipped: true, reason: 'incomplete-transport-config' } as const;
-  }
-
   const vars: EmailTemplateVariables = params.variables || {};
   const rendered = await renderPlatformEmailTemplatePreview({
     templateKey: params.templateKey,
@@ -481,7 +581,7 @@ export async function sendPlatformEmailNotification(params: {
     return { ok: false, skipped: true, reason: rendered.reason } as const;
   }
 
-  return deliverViaSmtp({
+  return deliverViaConfiguredProvider({
     to,
     cc: params.cc ? normalizeRecipients(params.cc) : undefined,
     bcc: params.bcc ? normalizeRecipients(params.bcc) : undefined,
@@ -512,11 +612,36 @@ export async function sendPlatformTestEmail(params: {
     return { ok: false, skipped: true, reason: rendered.reason } as const;
   }
 
-  return deliverViaSmtp({
+  return deliverViaConfiguredProvider({
     to,
     subject: `[TEST] ${rendered.subject}`,
     html: rendered.html,
     text: rendered.text,
+    transportOverride: params.transportOverride,
+  });
+}
+
+export async function sendPlatformDirectEmail(params: {
+  to: string[] | string;
+  subject: string;
+  html: string;
+  text: string;
+  cc?: string[] | string;
+  bcc?: string[] | string;
+  transportOverride?: EmailTransportOverride;
+}) {
+  const to = normalizeRecipients(params.to);
+  if (to.length === 0) {
+    return { ok: false, skipped: true, reason: 'no-recipient' } as const;
+  }
+
+  return deliverViaConfiguredProvider({
+    to,
+    cc: params.cc ? normalizeRecipients(params.cc) : undefined,
+    bcc: params.bcc ? normalizeRecipients(params.bcc) : undefined,
+    subject: params.subject,
+    html: params.html,
+    text: params.text,
     transportOverride: params.transportOverride,
   });
 }

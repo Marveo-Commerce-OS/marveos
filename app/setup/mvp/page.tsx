@@ -173,6 +173,14 @@ interface PersistedOnboardingState {
   workspaceId?: string;
 }
 
+interface WorkspaceEntitlementSummary {
+  planId: string;
+  workspaceLimit: number;
+  workspaceCount: number;
+  remainingWorkspaces: number;
+  hasCapacity: boolean;
+}
+
 const PLAN_OPTIONS = [
   { id: 'starter', name: 'Starter', description: 'For early stage brands and pilots.' },
   { id: 'growth', name: 'Growth', description: 'Balanced setup for growing teams.' },
@@ -412,6 +420,7 @@ function SetupMvpPageContent() {
   });
   const [stepGuardMessage, setStepGuardMessage] = useState('');
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [workspaceEntitlement, setWorkspaceEntitlement] = useState<WorkspaceEntitlementSummary | null>(null);
   const [entitlementState, setEntitlementState] = useState<{
     status: 'checking' | 'allowed' | 'trial_expired' | 'blocked';
     message?: string;
@@ -583,6 +592,7 @@ function SetupMvpPageContent() {
           ok?: boolean;
           selectedPlanId?: string;
           selectedTemplateId?: string;
+          workspaceEntitlement?: WorkspaceEntitlementSummary | null;
         }>(response);
 
         if (cancelled || !payload?.ok) return;
@@ -596,6 +606,7 @@ function SetupMvpPageContent() {
             selectedTemplateId: payload.selectedTemplateId || prev.newWebsiteData.selectedTemplateId,
           },
         }));
+        setWorkspaceEntitlement(payload.workspaceEntitlement || null);
       } catch {
         // Ignore session hydration failures.
       }
@@ -926,6 +937,13 @@ function SetupMvpPageContent() {
   }
 
   async function startDeployment() {
+    if (workspaceEntitlement && !workspaceEntitlement.hasCapacity) {
+      setError(
+        `Workspace entitlement exhausted (${workspaceEntitlement.planId}: ${workspaceEntitlement.workspaceLimit} max). Upgrade to add another workspace.`,
+      );
+      return;
+    }
+
     setLoading(true);
     setError('');
     setChecklist(null);
@@ -1008,16 +1026,50 @@ function SetupMvpPageContent() {
         }),
       });
 
+      const createData = await safeJson<{
+        workspace?: { id: string };
+        error?: string;
+        currentPlan?: string;
+        workspaceCount?: number;
+        workspaceLimit?: number;
+        remainingWorkspaces?: number;
+      }>(createRes);
       if (!createRes.ok) {
-        const data = await safeJson<{ error?: string }>(createRes);
-        throw new Error(data?.error || 'Failed to create workspace');
+        const exhausted = createRes.status === 402
+          && typeof createData?.workspaceLimit === 'number'
+          && typeof createData?.workspaceCount === 'number';
+
+        if (exhausted) {
+          throw new Error(`${createData?.error || 'Workspace limit reached'} Upgrade is required to create another workspace.`);
+        }
+
+        throw new Error(createData?.error || 'Failed to create workspace');
       }
 
-      const createData = await safeJson<{ workspace?: { id: string } }>(createRes);
       const nextWorkspaceId = createData?.workspace?.id;
       if (!nextWorkspaceId) throw new Error('Workspace id was not returned.');
 
       setWorkspaceId(nextWorkspaceId);
+      if (
+        typeof createData?.workspaceCount === 'number'
+        && typeof createData?.workspaceLimit === 'number'
+        && typeof createData?.remainingWorkspaces === 'number'
+      ) {
+        setWorkspaceEntitlement({
+          planId: String(createData?.currentPlan || draft.planId || 'starter'),
+          workspaceCount: createData.workspaceCount,
+          workspaceLimit: createData.workspaceLimit,
+          remainingWorkspaces: createData.remainingWorkspaces,
+          hasCapacity: createData.remainingWorkspaces > 0,
+        });
+      } else {
+        setWorkspaceEntitlement((prev) => prev ? {
+          ...prev,
+          workspaceCount: prev.workspaceCount + 1,
+          remainingWorkspaces: Math.max(0, prev.remainingWorkspaces - 1),
+          hasCapacity: Math.max(0, prev.remainingWorkspaces - 1) > 0,
+        } : prev);
+      }
       withPhaseStatus('prepare', 'done', 'Workspace prepared');
 
       withPhaseStatus('connect', 'running', 'Saving onboarding details');
@@ -2081,10 +2133,25 @@ function SetupMvpPageContent() {
                 <p>Email: {draft.profile.contactEmail || '-'}</p>
                 <p>Support required: {supportNeeded || connectionStatus === 'SUPPORT_REQUIRED' ? 'Yes' : 'No'}</p>
                 <p>Flow summary ready: {flowSummary ? 'Yes' : 'No'}</p>
+                {workspaceEntitlement ? (
+                  <>
+                    <p>Active plan entitlement: {workspaceEntitlement.planId}</p>
+                    <p>
+                      Workspace allowance: {workspaceEntitlement.workspaceCount}/{workspaceEntitlement.workspaceLimit}
+                      {' '}
+                      used ({workspaceEntitlement.remainingWorkspaces} remaining)
+                    </p>
+                  </>
+                ) : null}
               </div>
+              {workspaceEntitlement && !workspaceEntitlement.hasCapacity ? (
+                <p className="text-sm text-amber-200">
+                  Workspace limit reached for your active plan. Upgrade to add another business workspace.
+                </p>
+              ) : null}
               <div className="flex justify-between">
                 <button onClick={() => setWizardStep('profile')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
-                <button onClick={startDeployment} disabled={loading} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold disabled:opacity-50">Start installation</button>
+                <button onClick={startDeployment} disabled={loading || Boolean(workspaceEntitlement && !workspaceEntitlement.hasCapacity)} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold disabled:opacity-50">Start installation</button>
               </div>
             </section>
           )}
@@ -2117,7 +2184,17 @@ function SetupMvpPageContent() {
                 <p>Workspace ID: {workspaceId || '-'}</p>
                 <p>Launch ready: {checklist?.readyForLaunch ? 'Yes' : 'Needs review'}</p>
                 <p>Checklist blockers: {checklist?.blockers.length || 0}</p>
+                {workspaceEntitlement ? (
+                  <p>
+                    Workspace entitlement: {workspaceEntitlement.workspaceCount}/{workspaceEntitlement.workspaceLimit}
+                    {' '}
+                    used ({workspaceEntitlement.remainingWorkspaces} remaining)
+                  </p>
+                ) : null}
               </div>
+              {workspaceEntitlement && !workspaceEntitlement.hasCapacity ? (
+                <p className="text-sm text-amber-200">You have reached your workspace limit. Upgrade your plan to create another workspace.</p>
+              ) : null}
               <div className="flex gap-3">
                 <a href={workspaceId ? `/dashboard?workspaceId=${workspaceId}` : '/dashboard'} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold">Open dashboard</a>
                 <button
@@ -2131,7 +2208,7 @@ function SetupMvpPageContent() {
                   }}
                   className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold"
                 >
-                  Start another setup
+                  Create another workspace
                 </button>
               </div>
             </section>
