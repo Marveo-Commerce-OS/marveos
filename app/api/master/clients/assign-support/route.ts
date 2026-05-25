@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { requireSupportAccessSession } from '@/lib/support-access/session';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -29,6 +30,14 @@ function getWorkspaceContactEmail(workspace: { businessProfile?: Record<string, 
 export async function POST(req: NextRequest) {
   const auth = await ensureAdminSession();
   if ('error' in auth) return auth.error;
+
+  const supportUserId = String(auth.session.user?.id ?? auth.session.user?.ID ?? '').trim() || undefined;
+  const supportSession = await requireSupportAccessSession(req, {
+    actorEmail: auth.session.user?.user_email ?? 'unknown',
+    supportUserId,
+    auditTarget: 'master:clients:assign-support',
+  });
+  if ('error' in supportSession) return supportSession.error;
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return badRequest('Invalid JSON body');

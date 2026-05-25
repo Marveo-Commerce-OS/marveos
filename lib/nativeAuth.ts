@@ -1,5 +1,6 @@
 import { readAdminStore, updateAdminStore, appendAuditLog, type ManagedUserState, type NativePlatformSession } from './adminStore';
 import { randomUUID } from 'crypto';
+import { encodePasswordEntry, getPasswordEntry, verifyPasswordEntry } from './nativePasswords';
 
 export interface MarveoSession {
   id: string;
@@ -11,6 +12,7 @@ export interface MarveoSession {
 }
 
 const SESSION_DURATION_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+const DUMMY_PASSWORD_ENTRY = encodePasswordEntry('marveo_dummy_password_verifier');
 
 // Create a new session for a user
 export async function createSession(userId: string): Promise<MarveoSession> {
@@ -77,20 +79,32 @@ export async function getUserState(userId: string): Promise<ManagedUserState | n
   return state || null;
 }
 
-// Authenticate user by username/password (native version)
-// Currently a placeholder: real password hashing and user database needed
 export async function authenticateUser(username: string, password: string): Promise<string | null> {
-  // TODO: Implement real password checks
-  // For now, this only validates that a matching active platform user exists.
-  void password;
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const normalizedPassword = String(password || '');
+  if (!normalizedUsername || !normalizedPassword) return null;
+
   const store = await readAdminStore();
   const match = Object.entries(store.nativeAuth.identities).find(([, identity]) => {
-    if (identity.status !== 'ACTIVE') return false;
-    return identity.email.toLowerCase() === username.toLowerCase();
+    if (identity.status !== 'ACTIVE' && identity.status !== 'INVITED') return false;
+    return identity.email.toLowerCase() === normalizedUsername;
   });
-  if (!match) return null;
 
-  const [userId] = match;
+  const [userId, identity] = match || ['', null];
+  const userState = userId ? store.users[userId] : null;
+  const active = Boolean(userState?.active ?? true);
+  const invitePending = Boolean(userState?.invitePending);
+  const canAuthenticate = Boolean(identity) && (active || invitePending);
+
+  // Always perform password verification work to avoid existence leaks through timing.
+  const passwordEntry = canAuthenticate
+    ? getPasswordEntry(store.nativeAuth.permissions[userId]) || DUMMY_PASSWORD_ENTRY
+    : DUMMY_PASSWORD_ENTRY;
+  const passwordValid = verifyPasswordEntry(normalizedPassword, passwordEntry);
+
+  if (!canAuthenticate || !passwordValid) {
+    return null;
+  }
 
   // Issue session token
   const session = await createSession(userId);

@@ -3,6 +3,7 @@ import { getSession, isAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import type { WorkspaceOrchestration } from '@/lib/adminStore';
 import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -88,6 +89,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
   const workspace: WorkspaceOrchestration | undefined = store.cloud.workspaces[workspaceId];
 

@@ -12,6 +12,7 @@ import {
   type CommercialSubscription,
   type CommercialSubscriptionStatus,
 } from '@/lib/adminStore';
+import { verifyPaymentWithProvider } from '@/lib/payments';
 
 const DEFAULT_MARKETING_SOURCE = 'marketing_website' as const;
 
@@ -205,17 +206,6 @@ function findIdentityByEmail(identities: Record<string, CommercialIdentity>, ema
 
 function isSubscriptionEntitled(status: CommercialSubscriptionStatus): boolean {
   return status === 'TRIAL' || status === 'ACTIVE';
-}
-
-function getVerificationMode(): 'sandbox' | 'provider_api' {
-  const configured = String(process.env.MARVEO_PAYMENT_VERIFICATION_MODE || '').trim().toLowerCase();
-  if (configured === 'provider_api') return 'provider_api';
-  return 'sandbox';
-}
-
-function isSandboxPaymentReference(paymentReference: string): boolean {
-  const normalized = paymentReference.trim().toLowerCase();
-  return normalized.startsWith('sandbox_') || normalized.startsWith('test_') || normalized.startsWith('demo_');
 }
 
 function expectedProviderForCountry(country: string, store?: Awaited<ReturnType<typeof readAdminStore>>): CommercialPaymentProvider {
@@ -531,6 +521,7 @@ export async function verifyPayment(payload: {
   selectedPlanId?: string;
   billingInterval?: CommercialBillingInterval;
   organizationId?: string;
+  onboardingSessionId?: string;
   customerEmail?: string;
   country?: string;
   currency?: string;
@@ -542,7 +533,6 @@ export async function verifyPayment(payload: {
     return { ok: false, reason: 'payment reference is required' };
   }
 
-  const verificationMode = getVerificationMode();
   const normalizedEmail = payload.customerEmail?.trim().toLowerCase();
   const expectedCountry = payload.country ? normalizeCountry(payload.country) : undefined;
   const expectedBillingInterval = payload.billingInterval ? normalizeBillingInterval(payload.billingInterval) : undefined;
@@ -567,6 +557,10 @@ export async function verifyPayment(payload: {
       if (payload.selectedPlanId && subscription.planId !== payload.selectedPlanId) return false;
       if (expectedBillingInterval && subscription.billingInterval !== expectedBillingInterval) return false;
       if (payload.organizationId && subscription.organizationId !== payload.organizationId) return false;
+      if (payload.onboardingSessionId) {
+        const linkedSession = current.cloud.commercial.onboardingSessions[payload.onboardingSessionId];
+        if (!linkedSession || linkedSession.subscriptionId !== subscription.id) return false;
+      }
       if (normalizedEmail) {
         const identity = current.cloud.commercial.identities[subscription.identityId];
         if (!identity || identity.email.toLowerCase() !== normalizedEmail) return false;
@@ -582,43 +576,10 @@ export async function verifyPayment(payload: {
       return current;
     }
 
-    const sandboxAllowed = verificationMode === 'sandbox' && isSandboxPaymentReference(paymentReference);
-    if (!sandboxAllowed) {
-      verificationFailure = verificationMode === 'provider_api'
-        ? 'provider_api verification is not implemented yet; use sandbox mode until provider verification is completed'
-        : 'sandbox verification requires a sandbox/test payment reference';
-
-      current.cloud.commercial.subscriptions[match.id] = {
-        ...match,
-        paymentVerificationStatus: 'FAILED',
-        updatedAt: nowIso(),
-      };
-      return current;
-    }
-
-    const next: CommercialSubscription = {
-      ...match,
-      status: 'ACTIVE',
-      paymentVerificationStatus: 'SANDBOX_VERIFIED',
-      paymentVerifiedAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-
-    current.cloud.commercial.subscriptions[next.id] = next;
-    updatedSubscription = next;
+    updatedSubscription = match;
     onboardingSession = Object.values(current.cloud.commercial.onboardingSessions)
-      .filter((session) => session.subscriptionId === next.id)
+      .filter((session) => session.subscriptionId === match.id)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || null;
-
-    if (onboardingSession) {
-      const refreshedSession: CommercialOnboardingSession = {
-        ...onboardingSession,
-        expiresAt: addDaysIso(nowIso(), 2),
-        updatedAt: nowIso(),
-      };
-      current.cloud.commercial.onboardingSessions[refreshedSession.id] = refreshedSession;
-      onboardingSession = refreshedSession;
-    }
 
     return {
       ...current,
@@ -629,8 +590,93 @@ export async function verifyPayment(payload: {
     return { ok: false, reason: verificationFailure || 'payment reference not found' };
   }
 
-  const verifiedSubscription = updatedSubscription as CommercialSubscription;
-  const activeOnboardingSession = onboardingSession as CommercialOnboardingSession | null;
+  const candidateSubscription = updatedSubscription as CommercialSubscription;
+  const candidateOnboardingSession = onboardingSession as CommercialOnboardingSession | null;
+  const providerVerification = await verifyPaymentWithProvider({
+    provider: payload.provider,
+    reference: paymentReference,
+    expectedAmount: candidateSubscription.amount,
+    expectedCurrency: candidateSubscription.currency,
+    expectedCustomerEmail: normalizedEmail,
+    expectedMetadata: {
+      organizationId: candidateSubscription.organizationId,
+      ...(payload.onboardingSessionId ? { onboardingSessionId: payload.onboardingSessionId } : {}),
+      ...(payload.selectedPlanId ? { selectedPlanId: payload.selectedPlanId } : {}),
+    },
+  });
+
+  if (!providerVerification.ok) {
+    await updateAdminStore((current) => {
+      const subscription = current.cloud.commercial.subscriptions[candidateSubscription.id];
+      if (!subscription) return current;
+      return {
+        ...current,
+        cloud: {
+          ...current.cloud,
+          commercial: {
+            ...current.cloud.commercial,
+            subscriptions: {
+              ...current.cloud.commercial.subscriptions,
+              [subscription.id]: {
+                ...subscription,
+                paymentVerificationStatus: 'FAILED',
+                updatedAt: nowIso(),
+              },
+            },
+          },
+        },
+      };
+    });
+
+    return { ok: false, reason: providerVerification.reason || 'provider verification failed' };
+  }
+
+  await updateAdminStore((current) => {
+    const subscription = current.cloud.commercial.subscriptions[candidateSubscription.id];
+    if (!subscription) return current;
+
+    const next: CommercialSubscription = {
+      ...subscription,
+      status: 'ACTIVE',
+      paymentVerificationStatus: 'VERIFIED',
+      paymentVerifiedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+
+    const active = Object.values(current.cloud.commercial.onboardingSessions)
+      .filter((session) => session.subscriptionId === next.id)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || null;
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        commercial: {
+          ...current.cloud.commercial,
+          subscriptions: {
+            ...current.cloud.commercial.subscriptions,
+            [next.id]: next,
+          },
+          onboardingSessions: active
+            ? {
+                ...current.cloud.commercial.onboardingSessions,
+                [active.id]: {
+                  ...active,
+                  expiresAt: addDaysIso(nowIso(), 2),
+                  updatedAt: nowIso(),
+                },
+              }
+            : current.cloud.commercial.onboardingSessions,
+        },
+      },
+    };
+  });
+
+  const refreshed = await readAdminStore();
+  const verifiedSubscription = refreshed.cloud.commercial.subscriptions[candidateSubscription.id] || candidateSubscription;
+  const activeOnboardingSession = Object.values(refreshed.cloud.commercial.onboardingSessions)
+    .filter((session) => session.subscriptionId === candidateSubscription.id)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] || candidateOnboardingSession;
 
   return {
     ok: true,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -28,6 +29,9 @@ export async function PATCH(
   if ('error' in auth) return auth.error;
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return badRequest('Invalid JSON body');
 

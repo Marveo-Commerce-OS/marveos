@@ -8,6 +8,8 @@ import {
 } from '@/lib/adminStore';
 import type { SupportAssignmentContract } from '@/src/contexts/support/support-assignment.contract';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { requireSupportAccessSession } from '@/lib/support-access/session';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -53,6 +55,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
 
@@ -79,6 +84,18 @@ export async function POST(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
+  const supportUserId = String(auth.session.user?.id ?? auth.session.user?.ID ?? '').trim() || undefined;
+  const supportSession = await requireSupportAccessSession(req, {
+    actorEmail: auth.session.user?.user_email ?? 'unknown',
+    supportUserId,
+    workspaceId,
+    auditTarget: workspaceId,
+  });
+  if ('error' in supportSession) return supportSession.error;
+
   const body = await req.json();
 
   const clientId = String(body?.clientId || '').trim();
@@ -168,6 +185,18 @@ export async function PATCH(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
+  const supportUserId = String(auth.session.user?.id ?? auth.session.user?.ID ?? '').trim() || undefined;
+  const supportSession = await requireSupportAccessSession(req, {
+    actorEmail: auth.session.user?.user_email ?? 'unknown',
+    supportUserId,
+    workspaceId,
+    auditTarget: workspaceId,
+  });
+  if ('error' in supportSession) return supportSession.error;
+
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') {
     return badRequest('Invalid JSON body');

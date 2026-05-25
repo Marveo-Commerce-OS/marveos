@@ -3,6 +3,7 @@ import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { upsertSchemaVersion } from '@/lib/cloudOrchestration';
 import type { PageSchemaData, ComponentSchemaData } from '@/lib/adminStore';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -28,6 +29,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
 
   const workspace = store.cloud.workspaces[workspaceId];
@@ -52,6 +56,9 @@ export async function PUT(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const body = await req.json();
 
   const pageSchema = body?.pageSchema as PageSchemaData | undefined;

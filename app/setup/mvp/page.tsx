@@ -60,6 +60,9 @@ type WizardStep =
 
 interface ProfileBasics {
   businessName: string;
+  sector: string;
+  professionKey: string;
+  professionLabel: string;
   businessType: string;
   country: string;
   businessModel: string;
@@ -68,11 +71,25 @@ interface ProfileBasics {
   domain: string;
 }
 
+interface MakeupArtistOnboardingAnswers {
+  offersBridalMakeup: boolean;
+  offersStudioAppointments: boolean;
+  offersHomeService: boolean;
+  requiresDepositBeforeBooking: boolean;
+  defaultDeposit: string;
+  availabilityDays: string;
+  serviceLocation: string;
+  teamMode: 'ALONE' | 'TEAM';
+  enableOnlineBooking: boolean;
+  enableWhatsappEnquiriesFirst: boolean;
+}
+
 interface DraftState {
   wizardStep: WizardStep;
   planId: string;
   websiteType: WebsiteTypeKey | null;
   profile: ProfileBasics;
+  makeupArtist: MakeupArtistOnboardingAnswers;
   selectedTemplateId: string;
   supportRequired: boolean;
   existingConnectionChoice: 'connector' | 'manual';
@@ -220,12 +237,27 @@ function defaultDraft(): DraftState {
     websiteType: null,
     profile: {
       businessName: '',
+      sector: '',
+      professionKey: '',
+      professionLabel: '',
       businessType: 'Retail',
       country: 'United States',
       businessModel: 'B2C',
       contactEmail: '',
       contactPhone: '',
       domain: '',
+    },
+    makeupArtist: {
+      offersBridalMakeup: false,
+      offersStudioAppointments: false,
+      offersHomeService: false,
+      requiresDepositBeforeBooking: false,
+      defaultDeposit: '',
+      availabilityDays: '',
+      serviceLocation: '',
+      teamMode: 'ALONE',
+      enableOnlineBooking: true,
+      enableWhatsappEnquiriesFirst: true,
     },
     selectedTemplateId: '',
     supportRequired: false,
@@ -755,20 +787,42 @@ function SetupMvpPageContent() {
     try {
       const businessProfile = {
         businessName: draft.profile.businessName,
+        ...(draft.profile.sector ? { sector: draft.profile.sector } : {}),
+        ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
+        ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
         businessType: draft.profile.businessType,
         country: draft.profile.country,
         businessModel: draft.profile.businessModel,
         contactEmail: draft.profile.contactEmail,
         contactPhone: draft.profile.contactPhone,
         domain: draft.profile.domain,
+        ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
       };
 
       const collectedBusinessData =
         draft.websiteType === 'NEW_WEBSITE'
-          ? draft.newWebsiteData
+          ? {
+              ...draft.newWebsiteData,
+              ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
+              ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
+              ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
+              ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
+            }
           : draft.websiteType === 'EXISTING_WEBSITE'
-            ? draft.existingWebsiteData
-            : draft.customHeadlessData;
+            ? {
+                ...draft.existingWebsiteData,
+                ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
+                ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
+                ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
+                ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
+              }
+            : {
+                ...draft.customHeadlessData,
+                ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
+                ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
+                ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
+                ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
+              };
 
       const contentBaseUrl =
         draft.websiteType === 'NEW_WEBSITE'
@@ -846,6 +900,28 @@ function SetupMvpPageContent() {
         collectedBusinessData,
         supportRequired: effectiveSupportNeeded,
       });
+
+      const onboardingSessionId = searchParams.get('session');
+      try {
+        const profileProvisionRes = await fetch('/api/master/provisioning/profile-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            onboardingSessionId: onboardingSessionId || undefined,
+            workspaceId: nextWorkspaceId,
+            workspaceName: draft.profile.businessName || 'Marveo Workspace',
+            professionKey: draft.profile.professionKey || undefined,
+            onboardingAnswers: draft.profile.professionKey === 'makeup-artist' ? draft.makeupArtist : undefined,
+          }),
+        });
+
+        if (!profileProvisionRes.ok) {
+          const profileProvisionData = await safeJson<{ error?: string }>(profileProvisionRes);
+          withPhaseStatus('prepare', 'done', `Workspace prepared (provisioning warning: ${profileProvisionData?.error || 'profile hook unavailable'})`);
+        }
+      } catch {
+        withPhaseStatus('prepare', 'done', 'Workspace prepared (provisioning hook unavailable, continuing safely)');
+      }
 
       if (draft.websiteType === 'EXISTING_WEBSITE' && draft.existingConnectionChoice === 'connector') {
         const connectorToken = draft.existingWebsiteData.connectorToken.trim();
@@ -1209,6 +1285,42 @@ function SetupMvpPageContent() {
               <div className="grid md:grid-cols-2 gap-3">
                 <input value={draft.profile.businessName} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessName: e.target.value } }))} placeholder="Business name" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
                 <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Sector</span>
+                  <select
+                    value={draft.profile.sector}
+                    onChange={(e) => setDraft((prev) => ({
+                      ...prev,
+                      profile: {
+                        ...prev.profile,
+                        sector: e.target.value,
+                      },
+                    }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select sector (optional)</option>
+                    <option value="Beauty &amp; Personal Care" className="bg-slate-900 text-white">Beauty &amp; Personal Care</option>
+                  </select>
+                </label>
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Profession</span>
+                  <select
+                    value={draft.profile.professionKey}
+                    onChange={(e) => setDraft((prev) => ({
+                      ...prev,
+                      profile: {
+                        ...prev.profile,
+                        professionKey: e.target.value,
+                        professionLabel: e.target.value === 'makeup-artist' ? 'Makeup Artist' : prev.profile.professionLabel,
+                        businessType: e.target.value === 'makeup-artist' ? 'Makeup Artist' : prev.profile.businessType,
+                      },
+                    }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select profession (optional)</option>
+                    <option value="makeup-artist" className="bg-slate-900 text-white">Makeup Artist</option>
+                  </select>
+                </label>
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Business type</span>
                   <select
                     value={draft.profile.businessType}
@@ -1266,6 +1378,57 @@ function SetupMvpPageContent() {
                 <input value={draft.profile.contactEmail} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, contactEmail: e.target.value } }))} placeholder="Contact email" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
                 <input value={draft.profile.domain} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, domain: e.target.value } }))} placeholder="Primary domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
               </div>
+
+              {draft.profile.professionKey === 'makeup-artist' && (
+                <div className="rounded-2xl border border-fuchsia-900/30 bg-fuchsia-950/10 p-4 space-y-3">
+                  <p className="text-sm font-semibold text-fuchsia-100">Makeup Artist onboarding</p>
+                  <p className="text-xs text-fuchsia-200/80">Answer these to personalize your workspace modules, checklist, and dashboard.</p>
+
+                  <div className="grid md:grid-cols-2 gap-3 text-sm">
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.offersBridalMakeup} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, offersBridalMakeup: e.target.checked } }))} />
+                      Do you offer bridal makeup?
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.offersStudioAppointments} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, offersStudioAppointments: e.target.checked } }))} />
+                      Do you offer studio appointments?
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.offersHomeService} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, offersHomeService: e.target.checked } }))} />
+                      Do you offer home service?
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.requiresDepositBeforeBooking} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, requiresDepositBeforeBooking: e.target.checked } }))} />
+                      Do you require deposit before booking?
+                    </label>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <input value={draft.makeupArtist.defaultDeposit} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, defaultDeposit: e.target.value } }))} placeholder="Default deposit (e.g. 30% or 5000 NGN)" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <input value={draft.makeupArtist.availabilityDays} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, availabilityDays: e.target.value } }))} placeholder="Available days (e.g. Tue-Sun)" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <input value={draft.makeupArtist.serviceLocation} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, serviceLocation: e.target.value } }))} placeholder="City/location served" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                    <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                      <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Do you work alone or with a team?</span>
+                      <select value={draft.makeupArtist.teamMode} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, teamMode: e.target.value === 'TEAM' ? 'TEAM' : 'ALONE' } }))} className="w-full bg-transparent text-white focus:outline-none">
+                        <option value="ALONE" className="bg-slate-900 text-white">I work alone</option>
+                        <option value="TEAM" className="bg-slate-900 text-white">I work with a team</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid md:grid-cols-2 gap-3 text-sm">
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.enableOnlineBooking} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, enableOnlineBooking: e.target.checked } }))} />
+                      Do you want clients to book online?
+                    </label>
+                    <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200">
+                      <input type="checkbox" checked={draft.makeupArtist.enableWhatsappEnquiriesFirst} onChange={(e) => setDraft((prev) => ({ ...prev, makeupArtist: { ...prev.makeupArtist, enableWhatsappEnquiriesFirst: e.target.checked } }))} />
+                      Do you want WhatsApp enquiries enabled first?
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-between">
                 <button onClick={() => setWizardStep('plan')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
                 <button onClick={() => setWizardStep('website_type')} disabled={!canMoveFromProfile} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold disabled:opacity-50">Continue</button>

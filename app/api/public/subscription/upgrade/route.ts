@@ -1,24 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prepareSubscriptionUpgrade } from '@/lib/commercialOnboarding';
+import {
+  asOptionalTrimmedString,
+  enforceRateLimit,
+  parseBillingInterval,
+  parseEmail,
+  parsePaymentProvider,
+} from '@/lib/security/requestGuards';
 
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 });
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'public:subscription:upgrade');
+  if (limited) return limited;
+
   const body = await req.json().catch(() => null);
   if (!body) return badRequest('Invalid JSON body.');
 
-  const sessionId = body?.sessionId ? String(body.sessionId).trim() : undefined;
-  const email = body?.email ? String(body.email).trim().toLowerCase() : undefined;
-  const selectedPlanId = body?.selectedPlanId ? String(body.selectedPlanId).trim() : undefined;
-  const billingIntervalRaw = body?.billingInterval ? String(body.billingInterval).trim().toUpperCase() : undefined;
-  const billingInterval = billingIntervalRaw === 'ANNUAL' ? 'ANNUAL' : billingIntervalRaw === 'MONTHLY' ? 'MONTHLY' : undefined;
-  const providerRaw = body?.provider ? String(body.provider).trim().toUpperCase() : undefined;
-  const provider = providerRaw && ['PAYSTACK', 'FLUTTERWAVE', 'CUSTOM', 'STRIPE', 'PAYPAL'].includes(providerRaw)
-    ? providerRaw as 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL'
-    : undefined;
-  const paymentReference = body?.paymentReference ? String(body.paymentReference).trim() : undefined;
+  const sessionId = asOptionalTrimmedString(body?.sessionId);
+  const email = parseEmail(body?.email || null) || undefined;
+  const selectedPlanId = asOptionalTrimmedString(body?.selectedPlanId);
+  const billingIntervalRaw = asOptionalTrimmedString(body?.billingInterval)?.toUpperCase();
+  const billingInterval = parseBillingInterval(body?.billingInterval) || undefined;
+  const providerRaw = asOptionalTrimmedString(body?.provider)?.toUpperCase();
+  const provider = providerRaw ? parsePaymentProvider(providerRaw) || undefined : undefined;
+  const paymentReference = asOptionalTrimmedString(body?.paymentReference);
 
   if (!sessionId && !email) return badRequest('sessionId or email is required');
   if (billingIntervalRaw && !billingInterval) return badRequest('billingInterval must be MONTHLY or ANNUAL');

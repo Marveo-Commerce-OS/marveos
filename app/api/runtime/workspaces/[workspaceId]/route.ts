@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readAdminStore } from '@/lib/adminStore';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 function wpEndpoint(path: string): string {
   const base = getWordPressApiBase().replace(/\/$/, '');
@@ -40,6 +41,9 @@ export async function GET(
   context: { params: Promise<{ workspaceId: string }> },
 ) {
   const { workspaceId } = await context.params;
+  const access = await requireWorkspaceAccess(workspaceId);
+  if ('error' in access) return access.error;
+
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
 

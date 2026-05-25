@@ -4,6 +4,7 @@ import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminSto
 import { getWordPressApiBase } from '@/src/lib/endpoints';
 import { validateWorkspaceReadiness } from '@/lib/cloudOrchestration';
 import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -98,6 +99,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
 
@@ -130,6 +134,9 @@ export async function POST(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const body = await req.json();
   const launch = Boolean(body?.launch);
 

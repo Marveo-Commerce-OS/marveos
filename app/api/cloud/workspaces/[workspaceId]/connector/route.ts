@@ -7,6 +7,7 @@ import {
   getWorkspaceConnectorState,
   setWorkspaceConnectorState,
 } from '@/lib/adminStore';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 async function ensureAdminSession() {
   const session = await getSession();
@@ -41,6 +42,8 @@ export async function GET(
   if ('error' in auth) return auth.error;
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
 
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
@@ -78,6 +81,8 @@ export async function POST(
   if ('error' in auth) return auth.error;
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
 
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];

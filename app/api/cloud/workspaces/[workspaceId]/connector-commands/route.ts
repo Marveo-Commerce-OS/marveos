@@ -3,6 +3,7 @@ import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { appendCommand } from '@/lib/cloudOrchestration';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 type CommandType = 'content_mapping_sync' | 'module_activation';
 
@@ -54,6 +55,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
   if (!workspace) {
@@ -77,6 +81,9 @@ export async function POST(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const body = await req.json();
 
   const commandType = parseCommandType(String(body?.type || ''));

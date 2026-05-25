@@ -1,32 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { appendAuditLog } from '@/lib/adminStore';
-import { getWooCommerceRestBase } from '@/src/lib/endpoints';
-
-const WC = getWooCommerceRestBase();
-const AUTH = `consumer_key=${process.env.WOOCOMMERCE_CONSUMER_KEY ?? ''}&consumer_secret=${process.env.WOOCOMMERCE_CONSUMER_SECRET ?? ''}`;
+import { updateOrderStatus } from '@/modules/orders';
 
 export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!WC) return NextResponse.json({ error: 'WooCommerce API URL is not configured' }, { status: 503 });
 
   const { id, status } = await req.json();
   if (!id || !status) return NextResponse.json({ error: 'Missing id or status' }, { status: 400 });
 
-  const res = await fetch(`${WC}/orders/${id}?${AUTH}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
-    body: JSON.stringify({ status }),
+  const result = await updateOrderStatus({
+    id: Number(id),
+    status: String(status),
+    token: session.token,
+    actorEmail: session.user?.user_email ?? 'unknown',
   });
 
-  if (!res.ok) return NextResponse.json({ error: 'WC update failed' }, { status: res.status });
-  const updated = await res.json();
-  await appendAuditLog({
-    actorEmail: session.user?.user_email ?? 'unknown',
-    action: 'order.updated',
-    target: `order:${id}`,
-    details: `Status changed to ${status}`,
-  });
-  return NextResponse.json(updated);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
+  return NextResponse.json(result.data);
 }

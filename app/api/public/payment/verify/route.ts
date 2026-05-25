@@ -1,28 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyPayment } from '@/lib/commercialOnboarding';
 import { sendPlatformEmailNotification, sendPlatformFailureAlert } from '@/lib/emailNotifications';
+import {
+  asOptionalTrimmedString,
+  asTrimmedString,
+  enforceRateLimit,
+  parseBillingInterval,
+  parseEmail,
+  parsePaymentProvider,
+} from '@/lib/security/requestGuards';
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'public:payment:verify');
+  if (limited) return limited;
+
   const body = await req.json().catch(() => null);
-  const paymentReference = body?.paymentReference ? String(body.paymentReference).trim() : '';
-  const providerRaw = body?.provider ? String(body.provider).trim().toUpperCase() : '';
-  const provider = ['PAYSTACK', 'FLUTTERWAVE', 'CUSTOM', 'STRIPE', 'PAYPAL'].includes(providerRaw)
-    ? providerRaw as 'PAYSTACK' | 'FLUTTERWAVE' | 'CUSTOM' | 'STRIPE' | 'PAYPAL'
-    : null;
-  const selectedPlanId = body?.selectedPlanId ? String(body.selectedPlanId).trim() : undefined;
-  const billingIntervalRaw = body?.billingInterval ? String(body.billingInterval).trim().toUpperCase() : undefined;
-  const billingInterval = billingIntervalRaw === 'ANNUAL' ? 'ANNUAL' : billingIntervalRaw === 'MONTHLY' ? 'MONTHLY' : undefined;
-  const organizationId = body?.organizationId ? String(body.organizationId).trim() : undefined;
-  const customerEmail = body?.customerEmail ? String(body.customerEmail).trim().toLowerCase() : undefined;
-  const country = body?.country ? String(body.country).trim().toUpperCase() : undefined;
-  const currency = body?.currency ? String(body.currency).trim().toUpperCase() : undefined;
+  const paymentReference = asTrimmedString(body?.paymentReference);
+  const providerRaw = asTrimmedString(body?.provider).toUpperCase();
+  const provider = parsePaymentProvider(providerRaw);
+  const selectedPlanId = asOptionalTrimmedString(body?.selectedPlanId);
+  const billingIntervalRaw = asOptionalTrimmedString(body?.billingInterval)?.toUpperCase();
+  const billingInterval = parseBillingInterval(body?.billingInterval) || undefined;
+  const organizationId = asOptionalTrimmedString(body?.organizationId);
+  const customerEmail = parseEmail(body?.customerEmail || null) || undefined;
+  const country = asOptionalTrimmedString(body?.country)?.toUpperCase();
+  const currency = asOptionalTrimmedString(body?.currency)?.toUpperCase();
   const amount = typeof body?.amount === 'number' ? body.amount : undefined;
 
   if (!paymentReference) {
     return NextResponse.json({ ok: false, error: 'paymentReference is required' }, { status: 400 });
   }
 
-  if (!provider) {
+  if (!provider || !providerRaw) {
     return NextResponse.json({ ok: false, error: 'provider must be one of PAYSTACK, FLUTTERWAVE, CUSTOM, STRIPE, PAYPAL' }, { status: 400 });
   }
 

@@ -9,6 +9,7 @@ import {
 import { validateCollectedBusinessData } from '@/src/contexts/onboarding/onboarding-validation';
 import { MVP_ONBOARDING_STEP_SEQUENCE } from '@/src/contexts/onboarding/constants';
 import type { OnboardingStatusKey, OnboardingStepKey, WebsiteTypeKey } from '@/src/contexts/onboarding/types';
+import { requireWorkspaceAccess } from '@/lib/permissions/access';
 
 type OnboardingAction = 'start' | 'complete' | 'fail' | 'retry' | 'rollback';
 
@@ -54,6 +55,9 @@ export async function GET(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const store = await readAdminStore();
   const workspace = store.cloud.workspaces[workspaceId];
 
@@ -81,6 +85,9 @@ export async function PUT(
   }
 
   const { workspaceId } = await context.params;
+  const workspaceAccess = await requireWorkspaceAccess(workspaceId);
+  if ('error' in workspaceAccess) return workspaceAccess.error;
+
   const body = await req.json();
 
   const resolvedStep = resolveCompatibleStep({

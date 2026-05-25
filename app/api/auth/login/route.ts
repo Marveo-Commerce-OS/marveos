@@ -260,10 +260,10 @@ export async function POST(req: NextRequest) {
       ]);
       const internalAccess = hasInternalMasterAccess(marveoRoles);
       if (!internalAccess) {
-        return NextResponse.json({ error: 'This account does not have internal access.' }, { status: 403 });
+        return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
       }
       if (userState && !userState.active && !userState.invitePending) {
-        return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 });
+        return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 });
       }
 
       const passwordEntry = getPasswordEntry(nativeStore.nativeAuth.permissions[identityId]);

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { recoverOnboardingSession } from '@/lib/commercialOnboarding';
+import { enforceRateLimit } from '@/lib/security/requestGuards';
 
 export async function GET(req: NextRequest, context: { params: Promise<{ sessionId: string }> }) {
+  const limited = enforceRateLimit(req, 'public:onboarding:session:by-id');
+  if (limited) return limited;
+
   const params = await context.params;
   const sessionId = params.sessionId ? String(params.sessionId).trim() : '';
 

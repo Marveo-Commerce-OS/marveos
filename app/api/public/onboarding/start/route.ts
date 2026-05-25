@@ -1,35 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findTemplateForPublicOnboarding, startPublicOnboarding } from '@/lib/commercialOnboarding';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import {
+  asOptionalTrimmedString,
+  asTrimmedString,
+  enforceRateLimit,
+  parseBillingInterval,
+  parseEmail,
+} from '@/lib/security/requestGuards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, 'public:onboarding:start');
+  if (limited) return limited;
+
   const body = await req.json().catch(() => null);
   if (!body) return badRequest('Invalid JSON body.');
 
-  const selectedPlanId = String(body?.selectedPlanId || '').trim();
-  const selectedTemplateId = body?.selectedTemplateId ? String(body.selectedTemplateId).trim() : undefined;
-  const country = String(body?.country || '').trim();
-  const currency = body?.currency ? String(body.currency).trim() : undefined;
-  const billingIntervalRaw = String(body?.billingInterval || '').trim().toUpperCase();
-  const billingInterval = billingIntervalRaw === 'ANNUAL' ? 'ANNUAL' : billingIntervalRaw === 'MONTHLY' ? 'MONTHLY' : null;
-  const paymentModeRaw = String(body?.paymentMode || '').trim().toUpperCase();
+  const selectedPlanId = asTrimmedString(body?.selectedPlanId);
+  const selectedTemplateId = asOptionalTrimmedString(body?.selectedTemplateId);
+  const country = asTrimmedString(body?.country).toUpperCase();
+  const currency = asOptionalTrimmedString(body?.currency)?.toUpperCase();
+  const billingIntervalRaw = asTrimmedString(body?.billingInterval).toUpperCase();
+  const billingInterval = parseBillingInterval(body?.billingInterval);
+  const paymentModeRaw = asTrimmedString(body?.paymentMode).toUpperCase();
   const paymentMode = paymentModeRaw === 'PAID' ? 'PAID' : paymentModeRaw === 'TRIAL' ? 'TRIAL' : null;
-  const paymentReference = body?.paymentReference ? String(body.paymentReference).trim() : undefined;
-  const source = body?.source ? String(body.source).trim() : 'marketing_website';
+  const paymentReference = asOptionalTrimmedString(body?.paymentReference);
+  const source = asOptionalTrimmedString(body?.source) || 'marketing_website';
 
   const customer = body?.customer && typeof body.customer === 'object' ? body.customer : null;
-  const email = String(customer?.email || '').trim().toLowerCase();
-  const name = customer?.name ? String(customer.name).trim() : undefined;
-  const phone = customer?.phone ? String(customer.phone).trim() : undefined;
-  const company = customer?.company ? String(customer.company).trim() : undefined;
+  const email = parseEmail(customer?.email || null) || '';
+  const name = asOptionalTrimmedString(customer?.name);
+  const phone = asOptionalTrimmedString(customer?.phone);
+  const company = asOptionalTrimmedString(customer?.company);
 
   if (!selectedPlanId) return badRequest('selectedPlanId is required');
   if (!country) return badRequest('country is required');
-  if (!billingInterval) return badRequest('billingInterval must be MONTHLY or ANNUAL');
+  if (!billingInterval || !billingIntervalRaw) return badRequest('billingInterval must be MONTHLY or ANNUAL');
   if (!paymentMode) return badRequest('paymentMode must be TRIAL or PAID');
   if (!email) return badRequest('customer.email is required');
   if (paymentMode === 'PAID' && !paymentReference) {
