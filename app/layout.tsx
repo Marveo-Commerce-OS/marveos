@@ -9,7 +9,7 @@ const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' });
 export async function generateMetadata(): Promise<Metadata> {
   const store = await readAdminStore();
   const brandName = store.platformSettings.branding.brandName || 'Marvéo';
-  const faviconUrl = store.platformSettings.branding.faviconUrl || '/icon';
+  const faviconUrl = '/images/logo-mark.svg';
 
   return {
     title: brandName,
