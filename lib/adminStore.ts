@@ -1342,7 +1342,7 @@ const DEFAULT_STORE: AdminConfigStore = {
     accountPlan: 'starter',
     accountPlanUpdatedAt: new Date().toISOString(),
     lookups: {
-      businessTypes: ['Retail', 'Wholesale', 'Services', 'Manufacturing', 'Technology', 'Hospitality', 'Healthcare', 'Education', 'Real Estate'],
+      businessTypes: ['Retail', 'Service', 'Ecommerce', 'Professional Services', 'Creative Services', 'Health & Wellness', 'Education / Training', 'Hospitality', 'Real Estate', 'Other'],
       businessModels: ['B2C', 'B2B'],
       countries: [
         { code: 'NG', name: 'Nigeria' },

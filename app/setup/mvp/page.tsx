@@ -10,9 +10,15 @@ import { TerminalPanel } from './TerminalPanel';
 import { MVP_ONBOARDING_STEP_SEQUENCE, WEBSITE_TYPE_OPTIONS } from '@/src/contexts/onboarding/constants';
 import {
   ONBOARDING_BUSINESS_MODEL_OPTIONS,
-  ONBOARDING_BUSINESS_TYPE_OPTIONS,
   ONBOARDING_COUNTRY_OPTIONS,
 } from '@/src/config/onboardingProfileOptions';
+import {
+  businessTypes,
+  getProfessionsForSector,
+  getSectorsForBusinessType,
+  sectorRequiresProfession,
+} from '@/config/business-taxonomy';
+import { getCitiesForStates, getNigerianStates } from '@/config/locations/nigeria';
 import type {
   CustomHeadlessDataContract,
   ExistingWebsiteDataContract,
@@ -58,17 +64,37 @@ type WizardStep =
   | 'deploying'
   | 'ready';
 
+function isInitialOnboardingStepAllowed(step: WizardStep): boolean {
+  return step !== 'website_type' && step !== 'details';
+}
+
+function getNextAllowedInitialOnboardingStep(step: WizardStep): WizardStep {
+  if (step === 'website_type' || step === 'details') {
+    return 'profile';
+  }
+
+  return step;
+}
+
 interface ProfileBasics {
+  ownerName: string;
   businessName: string;
   sector: string;
   professionKey: string;
   professionLabel: string;
   businessType: string;
+  customBusinessType: string;
+  customProfessionName: string;
   country: string;
+  paymentCurrency: string;
+  coverageStates: string[];
+  coverageCities: string[];
+  customCoverageAreas: string[];
   businessModel: string;
   contactEmail: string;
   contactPhone: string;
   domain: string;
+  termsAccepted: boolean;
 }
 
 interface MakeupArtistOnboardingAnswers {
@@ -155,7 +181,7 @@ const INITIAL_PHASES: PhaseItem[] = [
 ];
 
 const DEFAULT_PROFILE_LOOKUPS: ProfileLookupsState = {
-  businessTypes: ONBOARDING_BUSINESS_TYPE_OPTIONS.map((option) => option.value),
+  businessTypes: businessTypes.map((option) => option.key),
   businessModels: ONBOARDING_BUSINESS_MODEL_OPTIONS.map((option) => option.value),
   countries: ONBOARDING_COUNTRY_OPTIONS.map((option) => option.value),
 };
@@ -234,18 +260,26 @@ function defaultDraft(): DraftState {
   return {
     wizardStep: 'plan',
     planId: 'starter',
-    websiteType: null,
+    websiteType: 'NEW_WEBSITE',
     profile: {
+      ownerName: '',
       businessName: '',
       sector: '',
       professionKey: '',
       professionLabel: '',
       businessType: 'Retail',
+      customBusinessType: '',
+      customProfessionName: '',
       country: 'United States',
+      paymentCurrency: 'USD',
+      coverageStates: [],
+      coverageCities: [],
+      customCoverageAreas: [],
       businessModel: 'B2C',
       contactEmail: '',
       contactPhone: '',
       domain: '',
+      termsAccepted: false,
     },
     makeupArtist: {
       offersBridalMakeup: false,
@@ -325,6 +359,7 @@ function SetupMvpPageContent() {
   const [workspaceId, setWorkspaceId] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [profileErrors, setProfileErrors] = useState<Record<string, string>>({});
   const [phases, setPhases] = useState<PhaseItem[]>(INITIAL_PHASES);
   const [checklist, setChecklist] = useState<LaunchChecklistContract | null>(null);
   const [profileLookups, setProfileLookups] = useState<ProfileLookupsState>(DEFAULT_PROFILE_LOOKUPS);
@@ -338,6 +373,7 @@ function SetupMvpPageContent() {
   const [connectorCheck, setConnectorCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'failed'; message?: string }>({
     status: 'idle',
   });
+  const [stepGuardMessage, setStepGuardMessage] = useState('');
   const [entitlementState, setEntitlementState] = useState<{
     status: 'checking' | 'allowed' | 'trial_expired' | 'blocked';
     message?: string;
@@ -349,8 +385,18 @@ function SetupMvpPageContent() {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Partial<DraftState>;
+      const restoredStep = typeof parsed.wizardStep === 'string' ? (parsed.wizardStep as WizardStep) : undefined;
+      const sanitizedStep = restoredStep ? getNextAllowedInitialOnboardingStep(restoredStep) : undefined;
+      const blockedStepRecovered = Boolean(restoredStep && !isInitialOnboardingStepAllowed(restoredStep));
       window.setTimeout(() => {
-        setDraft((prev) => ({ ...prev, ...parsed }));
+        setDraft((prev) => ({
+          ...prev,
+          ...parsed,
+          wizardStep: sanitizedStep ?? prev.wizardStep,
+        }));
+        if (blockedStepRecovered) {
+          setStepGuardMessage('Website setup is available inside OS Setup Center after workspace creation.');
+        }
       }, 0);
     } catch {
       // Ignore malformed local draft.
@@ -629,12 +675,6 @@ function SetupMvpPageContent() {
   }, [draft, workspaceId]);
 
   const canMoveFromPlan = Boolean(draft.planId);
-  const canMoveFromProfile = Boolean(
-    draft.profile.businessName.trim() &&
-      draft.profile.businessType.trim() &&
-      draft.profile.businessModel.trim() &&
-      draft.profile.contactEmail.trim(),
-  );
   const canMoveFromType = Boolean(draft.websiteType);
 
   const discoverySummary = useMemo(() => {
@@ -652,12 +692,77 @@ function SetupMvpPageContent() {
   }, [connectorSiteMetadata]);
 
   function setWizardStep(step: WizardStep) {
+    if (!isInitialOnboardingStepAllowed(step)) {
+      const nextStep = getNextAllowedInitialOnboardingStep(step);
+      setStepGuardMessage('Website setup is available inside OS Setup Center after workspace creation.');
+      setDraft((prev) => ({ ...prev, wizardStep: nextStep }));
+      setError('');
+      return;
+    }
+
+    setStepGuardMessage('');
     setDraft((prev) => ({ ...prev, wizardStep: step }));
     setError('');
   }
 
   function withPhaseStatus(key: PhaseItem['key'], status: PhaseStatus, note?: string) {
     setPhases((prev) => prev.map((phase) => (phase.key === key ? { ...phase, status, note } : phase)));
+  }
+
+  function parseCsvToArray(value: string): string[] {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function validateProfileStep(): Record<string, string> {
+    const nextErrors: Record<string, string> = {};
+    const effectiveBusinessType = draft.profile.businessType === 'Other'
+      ? draft.profile.customBusinessType.trim()
+      : draft.profile.businessType.trim();
+
+    if (!draft.profile.ownerName.trim()) nextErrors.ownerName = 'Owner name is required.';
+    if (!draft.profile.contactEmail.trim()) nextErrors.contactEmail = 'Email is required.';
+    if (!draft.profile.businessName.trim()) nextErrors.businessName = 'Business name is required.';
+    if (!draft.profile.country.trim()) nextErrors.country = 'Country is required.';
+    if (!effectiveBusinessType) nextErrors.businessType = 'Business type is required.';
+    if (!draft.profile.paymentCurrency.trim()) nextErrors.paymentCurrency = 'Payment currency is required.';
+
+    if (sectorOptions.length > 0 && !draft.profile.sector.trim()) {
+      nextErrors.sector = 'Sector is required for this business type.';
+    }
+
+    if (professionIsRequired && !draft.profile.professionKey.trim()) {
+      nextErrors.professionKey = 'Profession is required for this sector.';
+    }
+
+    if (draft.profile.professionKey === 'other' && !draft.profile.customProfessionName.trim()) {
+      nextErrors.customProfessionName = 'Custom profession name is required.';
+    }
+
+    if (draft.profile.country.toLowerCase().includes('nigeria')) {
+      const noStates = draft.profile.coverageStates.length === 0;
+      const noCustomCoverage = draft.profile.customCoverageAreas.length === 0;
+      if (noStates && noCustomCoverage) {
+        nextErrors.coverageStates = 'Select at least one coverage state or add a custom coverage area.';
+      }
+    } else if (draft.profile.customCoverageAreas.length === 0) {
+      nextErrors.customCoverageAreas = 'Add at least one coverage area.';
+    }
+
+    if (!draft.profile.termsAccepted) {
+      nextErrors.termsAccepted = 'You must accept terms to continue.';
+    }
+
+    return nextErrors;
+  }
+
+  function continueFromProfile() {
+    const nextErrors = validateProfileStep();
+    setProfileErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+    setWizardStep('review');
   }
 
   async function callOnboardingUpdate(nextWorkspaceId: string, payload: Record<string, unknown>) {
@@ -768,16 +873,6 @@ function SetupMvpPageContent() {
   }
 
   async function startDeployment() {
-    if (!draft.websiteType) {
-      setError('Please choose a website type first.');
-      return;
-    }
-
-    if (draft.websiteType === 'NEW_WEBSITE' && !draft.selectedTemplateId) {
-      setError('Please select a template for new website setup.');
-      return;
-    }
-
     setLoading(true);
     setError('');
     setChecklist(null);
@@ -785,51 +880,51 @@ function SetupMvpPageContent() {
     setWizardStep('deploying');
 
     try {
+      const effectiveBusinessType = draft.profile.businessType === 'Other'
+        ? draft.profile.customBusinessType.trim()
+        : draft.profile.businessType;
+      const effectiveProfessionName = draft.profile.professionKey === 'other'
+        ? draft.profile.customProfessionName.trim()
+        : draft.profile.professionLabel;
+
       const businessProfile = {
+        ownerName: draft.profile.ownerName,
         businessName: draft.profile.businessName,
         ...(draft.profile.sector ? { sector: draft.profile.sector } : {}),
         ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
-        ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
-        businessType: draft.profile.businessType,
+        ...(effectiveProfessionName ? { profession: effectiveProfessionName } : {}),
+        businessType: effectiveBusinessType,
+        customBusinessType: draft.profile.customBusinessType,
+        customProfessionName: draft.profile.customProfessionName,
         country: draft.profile.country,
+        paymentCurrency: draft.profile.paymentCurrency,
+        coverageStates: draft.profile.coverageStates,
+        coverageCities: draft.profile.coverageCities,
+        customCoverageAreas: draft.profile.customCoverageAreas,
         businessModel: draft.profile.businessModel,
         contactEmail: draft.profile.contactEmail,
         contactPhone: draft.profile.contactPhone,
         domain: draft.profile.domain,
+        termsAccepted: draft.profile.termsAccepted,
         ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
       };
 
-      const collectedBusinessData =
-        draft.websiteType === 'NEW_WEBSITE'
-          ? {
-              ...draft.newWebsiteData,
-              ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
-              ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
-              ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
-              ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
-            }
-          : draft.websiteType === 'EXISTING_WEBSITE'
-            ? {
-                ...draft.existingWebsiteData,
-                ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
-                ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
-                ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
-                ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
-              }
-            : {
-                ...draft.customHeadlessData,
-                ...(draft.profile.professionKey ? { professionKey: draft.profile.professionKey } : {}),
-                ...(draft.profile.professionLabel ? { profession: draft.profile.professionLabel } : {}),
-                ...(draft.profile.sector ? { professionSector: draft.profile.sector } : {}),
-                ...(draft.profile.professionKey === 'makeup-artist' ? { professionOnboardingAnswers: draft.makeupArtist } : {}),
-              };
+      const collectedBusinessData = {
+        businessType: effectiveBusinessType,
+        sector: draft.profile.sector,
+        professionKey: draft.profile.professionKey,
+        customBusinessType: draft.profile.customBusinessType,
+        customProfessionName: draft.profile.customProfessionName,
+        country: draft.profile.country,
+        coverageStates: draft.profile.coverageStates,
+        coverageCities: draft.profile.coverageCities,
+        customCoverageAreas: draft.profile.customCoverageAreas,
+        paymentCurrency: draft.profile.paymentCurrency,
+        onboardingAnswers: draft.profile.professionKey === 'makeup-artist' ? draft.makeupArtist : undefined,
+      };
 
       const contentBaseUrl =
-        draft.websiteType === 'NEW_WEBSITE'
-          ? toApiBaseUrl(draft.newWebsiteData.frontendDomain || draft.newWebsiteData.domain || draft.profile.domain)
-          : draft.websiteType === 'EXISTING_WEBSITE'
-            ? toApiBaseUrl(draft.existingWebsiteData.domain || draft.profile.domain)
-            : toApiBaseUrl(draft.profile.domain || 'headless.marveo.local');
+        toApiBaseUrl(draft.profile.domain || 'pending-website-setup.marveo.local');
 
       const effectiveSupportNeededBase =
         draft.websiteType === 'EXISTING_WEBSITE'
@@ -911,6 +1006,18 @@ function SetupMvpPageContent() {
             workspaceId: nextWorkspaceId,
             workspaceName: draft.profile.businessName || 'Marveo Workspace',
             professionKey: draft.profile.professionKey || undefined,
+            onboardingProfile: {
+              businessType: effectiveBusinessType,
+              sector: draft.profile.sector,
+              professionKey: draft.profile.professionKey,
+              customBusinessType: draft.profile.customBusinessType,
+              customProfessionName: draft.profile.customProfessionName,
+              country: draft.profile.country,
+              coverageStates: draft.profile.coverageStates,
+              coverageCities: draft.profile.coverageCities,
+              customCoverageAreas: draft.profile.customCoverageAreas,
+              paymentCurrency: draft.profile.paymentCurrency,
+            },
             onboardingAnswers: draft.profile.professionKey === 'makeup-artist' ? draft.makeupArtist : undefined,
           }),
         });
@@ -1063,7 +1170,7 @@ function SetupMvpPageContent() {
               : draft.existingConnectionChoice === 'manual'
                 ? 'Client requested manual support setup for WordPress connector installation'
                 : 'Onboarding support required',
-          setupType: draft.websiteType,
+          setupType: draft.websiteType || 'NEW_WEBSITE',
           requiredSkills:
             draft.websiteType === 'CUSTOM_HEADLESS'
               ? ['API Integration', 'Headless Architecture']
@@ -1134,25 +1241,29 @@ function SetupMvpPageContent() {
     }
   }
 
+  const currentWizardStep = isInitialOnboardingStepAllowed(draft.wizardStep)
+    ? draft.wizardStep
+    : getNextAllowedInitialOnboardingStep(draft.wizardStep);
+
   const progressStep =
-    draft.wizardStep === 'plan'
+    currentWizardStep === 'plan'
       ? 0
-      : draft.wizardStep === 'profile'
+      : currentWizardStep === 'profile'
         ? 1
-        : draft.wizardStep === 'website_type'
+        : currentWizardStep === 'review'
           ? 2
-          : draft.wizardStep === 'details'
+          : currentWizardStep === 'deploying'
             ? 3
-            : draft.wizardStep === 'review'
-              ? 4
-              : draft.wizardStep === 'deploying'
-                ? 5
-                : 6;
+            : 4;
 
   const terminalLogs = phases.map((p) => `${p.label}: ${p.note || p.status}`);
-  const businessTypeOptions = withCurrentOption(profileLookups.businessTypes, draft.profile.businessType);
   const businessModelOptions = withCurrentOption(profileLookups.businessModels, draft.profile.businessModel);
   const countryOptions = withCurrentOption(profileLookups.countries, draft.profile.country);
+  const sectorOptions = getSectorsForBusinessType(draft.profile.businessType);
+  const professionOptions = getProfessionsForSector(draft.profile.sector);
+  const professionIsRequired = sectorRequiresProfession(draft.profile.sector);
+  const nigerianStates = getNigerianStates();
+  const nigerianCities = getCitiesForStates(draft.profile.coverageStates);
 
   if (!enabled) {
     return (
@@ -1234,7 +1345,7 @@ function SetupMvpPageContent() {
           <p className="text-slate-400 text-sm max-w-2xl">Estimated setup time: 3-5 minutes. You can pause and resume from this browser at any point.</p>
 
           <AnimatedProgressRail
-            steps={['Plan', 'Profile', 'Website', 'Details', 'Review', 'Install', 'Ready']}
+            steps={['Plan', 'Profile', 'Review', 'Install', 'Ready']}
             currentStep={progressStep}
           />
 
@@ -1245,8 +1356,9 @@ function SetupMvpPageContent() {
           </div>
 
           {error ? <p className="mt-4 text-red-300 text-sm">{error}</p> : null}
+          {stepGuardMessage ? <p className="mt-3 text-xs text-cyan-200">{stepGuardMessage}</p> : null}
 
-          {draft.wizardStep === 'plan' && (
+          {currentWizardStep === 'plan' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Choose your plan</h2>
               <p className="text-sm text-slate-400">Pick a baseline. You can adjust plan details after workspace provisioning.</p>
@@ -1278,12 +1390,55 @@ function SetupMvpPageContent() {
             </section>
           )}
 
-          {draft.wizardStep === 'profile' && (
+          {currentWizardStep === 'profile' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Business profile</h2>
-              <p className="text-sm text-slate-400">This information configures workspace identity, defaults, and support routing.</p>
+              <p className="text-sm text-slate-400">This information configures workspace identity, profession-aware provisioning, and operational defaults.</p>
               <div className="grid md:grid-cols-2 gap-3">
+                <div>
+                  <input value={draft.profile.ownerName} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, ownerName: e.target.value } }))} placeholder="Owner name" className="w-full rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                  {profileErrors.ownerName ? <p className="mt-1 text-xs text-red-300">{profileErrors.ownerName}</p> : null}
+                </div>
+                <div>
                 <input value={draft.profile.businessName} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessName: e.target.value } }))} placeholder="Business name" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                  {profileErrors.businessName ? <p className="mt-1 text-xs text-red-300">{profileErrors.businessName}</p> : null}
+                </div>
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Business type</span>
+                  <select
+                    value={draft.profile.businessType}
+                    onChange={(e) => setDraft((prev) => ({
+                      ...prev,
+                      profile: {
+                        ...prev.profile,
+                        businessType: e.target.value,
+                        sector: '',
+                        professionKey: '',
+                        professionLabel: '',
+                        customProfessionName: '',
+                      },
+                    }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    {businessTypes.map((option) => (
+                      <option key={option.key} value={option.key} className="bg-slate-900 text-white">
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {profileErrors.businessType ? <p className="mt-1 text-xs text-red-300">{profileErrors.businessType}</p> : null}
+                </label>
+                {draft.profile.businessType === 'Other' ? (
+                  <div>
+                    <input
+                      value={draft.profile.customBusinessType}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, customBusinessType: e.target.value } }))}
+                      placeholder="Custom business type"
+                      className="w-full rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white"
+                    />
+                    <p className="mt-1 text-xs text-slate-400">Optional unless Business Type is Other.</p>
+                  </div>
+                ) : null}
                 <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Sector</span>
                   <select
@@ -1297,9 +1452,12 @@ function SetupMvpPageContent() {
                     }))}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >
-                    <option value="" className="bg-slate-900 text-white">Select sector (optional)</option>
-                    <option value="Beauty &amp; Personal Care" className="bg-slate-900 text-white">Beauty &amp; Personal Care</option>
+                    <option value="" className="bg-slate-900 text-white">Select sector</option>
+                    {sectorOptions.map((option) => (
+                      <option key={option.key} value={option.key} className="bg-slate-900 text-white">{option.label}</option>
+                    ))}
                   </select>
+                  {profileErrors.sector ? <p className="mt-1 text-xs text-red-300">{profileErrors.sector}</p> : null}
                 </label>
                 <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Profession</span>
@@ -1310,30 +1468,29 @@ function SetupMvpPageContent() {
                       profile: {
                         ...prev.profile,
                         professionKey: e.target.value,
-                        professionLabel: e.target.value === 'makeup-artist' ? 'Makeup Artist' : prev.profile.professionLabel,
-                        businessType: e.target.value === 'makeup-artist' ? 'Makeup Artist' : prev.profile.businessType,
+                        professionLabel: professionOptions.find((item) => item.key === e.target.value)?.label || '',
                       },
                     }))}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >
-                    <option value="" className="bg-slate-900 text-white">Select profession (optional)</option>
-                    <option value="makeup-artist" className="bg-slate-900 text-white">Makeup Artist</option>
-                  </select>
-                </label>
-                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
-                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Business type</span>
-                  <select
-                    value={draft.profile.businessType}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, businessType: e.target.value } }))}
-                    className="w-full bg-transparent text-white focus:outline-none"
-                  >
-                    {businessTypeOptions.map((option) => (
-                      <option key={option} value={option} className="bg-slate-900 text-white">
-                        {option}
-                      </option>
+                    <option value="" className="bg-slate-900 text-white">Select profession{professionIsRequired ? '' : ' (optional)'}</option>
+                    {professionOptions.map((option) => (
+                      <option key={option.key} value={option.key} className="bg-slate-900 text-white">{option.label}</option>
                     ))}
                   </select>
+                  {profileErrors.professionKey ? <p className="mt-1 text-xs text-red-300">{profileErrors.professionKey}</p> : null}
                 </label>
+                {draft.profile.professionKey === 'other' ? (
+                  <div>
+                    <input
+                      value={draft.profile.customProfessionName}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, customProfessionName: e.target.value, professionLabel: e.target.value } }))}
+                      placeholder="Custom profession name"
+                      className="w-full rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white"
+                    />
+                    {profileErrors.customProfessionName ? <p className="mt-1 text-xs text-red-300">{profileErrors.customProfessionName}</p> : null}
+                  </div>
+                ) : null}
                 <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
                   <span className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
                     Business model
@@ -1374,10 +1531,108 @@ function SetupMvpPageContent() {
                       </option>
                     ))}
                   </select>
+                  {profileErrors.country ? <p className="mt-1 text-xs text-red-300">{profileErrors.country}</p> : null}
                 </label>
-                <input value={draft.profile.contactEmail} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, contactEmail: e.target.value } }))} placeholder="Contact email" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
-                <input value={draft.profile.domain} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, domain: e.target.value } }))} placeholder="Primary domain" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                <label className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white">
+                  <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Payment currency</span>
+                  <select
+                    value={draft.profile.paymentCurrency}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, paymentCurrency: e.target.value } }))}
+                    className="w-full bg-transparent text-white focus:outline-none"
+                  >
+                    {['USD', 'NGN', 'GBP', 'EUR'].map((currency) => (
+                      <option key={currency} value={currency} className="bg-slate-900 text-white">{currency}</option>
+                    ))}
+                  </select>
+                  {profileErrors.paymentCurrency ? <p className="mt-1 text-xs text-red-300">{profileErrors.paymentCurrency}</p> : null}
+                </label>
+                <div>
+                  <input value={draft.profile.contactEmail} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, contactEmail: e.target.value } }))} placeholder="Contact email" className="w-full rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                  {profileErrors.contactEmail ? <p className="mt-1 text-xs text-red-300">{profileErrors.contactEmail}</p> : null}
+                </div>
+                <input value={draft.profile.contactPhone} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, contactPhone: e.target.value } }))} placeholder="Contact phone (optional)" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
+                <input value={draft.profile.domain} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, domain: e.target.value } }))} placeholder="Website URL (optional)" className="rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white" />
               </div>
+
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-4 space-y-3">
+                <p className="text-sm font-semibold text-white">Coverage area</p>
+                {draft.profile.country.toLowerCase().includes('nigeria') ? (
+                  <>
+                    <div>
+                      <p className="text-xs text-slate-300 mb-2">Select one or more states</p>
+                      <div className="grid md:grid-cols-3 gap-2 text-sm">
+                        {nigerianStates.map((state) => (
+                          <label key={state} className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={draft.profile.coverageStates.includes(state)}
+                              onChange={(e) => setDraft((prev) => ({
+                                ...prev,
+                                profile: {
+                                  ...prev.profile,
+                                  coverageStates: e.target.checked
+                                    ? [...prev.profile.coverageStates, state]
+                                    : prev.profile.coverageStates.filter((item) => item !== state),
+                                  coverageCities: e.target.checked
+                                    ? prev.profile.coverageCities
+                                    : prev.profile.coverageCities.filter((city) => getCitiesForStates(prev.profile.coverageStates.filter((item) => item !== state)).includes(city)),
+                                },
+                              }))}
+                            />
+                            {state}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-300 mb-2">Select one or more cities</p>
+                      <div className="grid md:grid-cols-3 gap-2 text-sm">
+                        {nigerianCities.map((city) => (
+                          <label key={city} className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={draft.profile.coverageCities.includes(city)}
+                              onChange={(e) => setDraft((prev) => ({
+                                ...prev,
+                                profile: {
+                                  ...prev.profile,
+                                  coverageCities: e.target.checked
+                                    ? [...prev.profile.coverageCities, city]
+                                    : prev.profile.coverageCities.filter((item) => item !== city),
+                                },
+                              }))}
+                            />
+                            {city}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+                <div>
+                  <textarea
+                    value={draft.profile.customCoverageAreas.join(', ')}
+                    onChange={(e) => setDraft((prev) => ({
+                      ...prev,
+                      profile: {
+                        ...prev.profile,
+                        customCoverageAreas: parseCsvToArray(e.target.value),
+                      },
+                    }))}
+                    placeholder="Custom coverage areas (comma separated)"
+                    className="w-full rounded-xl bg-slate-900/70 border border-slate-600 px-4 py-3 text-white"
+                  />
+                  <p className="mt-1 text-xs text-slate-400">Use this when your city is not listed.</p>
+                  {profileErrors.coverageStates ? <p className="mt-1 text-xs text-red-300">{profileErrors.coverageStates}</p> : null}
+                  {profileErrors.customCoverageAreas ? <p className="mt-1 text-xs text-red-300">{profileErrors.customCoverageAreas}</p> : null}
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200 text-sm">
+                <input type="checkbox" checked={draft.profile.termsAccepted} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, termsAccepted: e.target.checked } }))} />
+                I accept onboarding terms and operational setup policies.
+              </label>
+              {profileErrors.termsAccepted ? <p className="text-xs text-red-300">{profileErrors.termsAccepted}</p> : null}
 
               {draft.profile.professionKey === 'makeup-artist' && (
                 <div className="rounded-2xl border border-fuchsia-900/30 bg-fuchsia-950/10 p-4 space-y-3">
@@ -1431,12 +1686,12 @@ function SetupMvpPageContent() {
 
               <div className="flex justify-between">
                 <button onClick={() => setWizardStep('plan')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
-                <button onClick={() => setWizardStep('website_type')} disabled={!canMoveFromProfile} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold disabled:opacity-50">Continue</button>
+                <button onClick={continueFromProfile} className="px-5 py-3 rounded-full bg-blue-700 text-white font-semibold">Continue</button>
               </div>
             </section>
           )}
 
-          {draft.wizardStep === 'website_type' && (
+          {currentWizardStep === 'website_type' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Select website type</h2>
               <p className="text-sm text-slate-400">Choose how Marveo OS integrates with your current architecture.</p>
@@ -1472,7 +1727,7 @@ function SetupMvpPageContent() {
             </section>
           )}
 
-          {draft.wizardStep === 'details' && (
+          {currentWizardStep === 'details' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Setup details</h2>
               <p className="text-sm text-slate-400">Provide deployment details so we can build the exact onboarding path for your stack.</p>
@@ -1694,26 +1949,26 @@ function SetupMvpPageContent() {
             </section>
           )}
 
-          {draft.wizardStep === 'review' && (
+          {currentWizardStep === 'review' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Review and launch</h2>
               <p className="text-sm text-slate-400">Validate this summary, then start installation and orchestration.</p>
               <div className="rounded-2xl border border-slate-600 bg-slate-900/50 p-4 text-slate-200 text-sm space-y-1">
                 <p>Plan: {draft.planId}</p>
-                <p>Website type: {prettyWebsiteType(draft.websiteType)}</p>
+                <p>Onboarding mode: Profile-first</p>
                 <p>Business: {draft.profile.businessName || '-'}</p>
                 <p>Email: {draft.profile.contactEmail || '-'}</p>
                 <p>Support required: {supportNeeded || connectionStatus === 'SUPPORT_REQUIRED' ? 'Yes' : 'No'}</p>
                 <p>Flow summary ready: {flowSummary ? 'Yes' : 'No'}</p>
               </div>
               <div className="flex justify-between">
-                <button onClick={() => setWizardStep('details')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
-                <button onClick={startDeployment} disabled={loading || !draft.websiteType} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold disabled:opacity-50">Start installation</button>
+                <button onClick={() => setWizardStep('profile')} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Back</button>
+                <button onClick={startDeployment} disabled={loading} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold disabled:opacity-50">Start installation</button>
               </div>
             </section>
           )}
 
-          {draft.wizardStep === 'deploying' && (
+          {currentWizardStep === 'deploying' && (
             <section className="mt-8 space-y-5">
               <h2 className="text-2xl text-white font-semibold">Installing workspace</h2>
               <p className="text-sm text-slate-400">Provisioning infrastructure and syncing onboarding milestones in real time.</p>
@@ -1733,7 +1988,7 @@ function SetupMvpPageContent() {
             </section>
           )}
 
-          {draft.wizardStep === 'ready' && (
+          {currentWizardStep === 'ready' && (
             <section className="mt-8 space-y-4">
               <h2 className="text-2xl text-white font-semibold">Workspace ready</h2>
               <p className="text-slate-300">Your Marveo OS workspace is provisioned and onboarding has completed successfully.</p>

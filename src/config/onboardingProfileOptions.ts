@@ -28,12 +28,13 @@ export const ONBOARDING_BUSINESS_MODEL_OPTIONS: OnboardingOption[] = [
 
 export const ONBOARDING_BUSINESS_TYPE_OPTIONS: OnboardingOption[] = [
   { value: 'Retail', label: 'Retail' },
-  { value: 'Wholesale', label: 'Wholesale' },
-  { value: 'Services', label: 'Services' },
-  { value: 'Manufacturing', label: 'Manufacturing' },
-  { value: 'Technology', label: 'Technology' },
+  { value: 'Service', label: 'Service' },
+  { value: 'Ecommerce', label: 'Ecommerce' },
+  { value: 'Professional Services', label: 'Professional Services' },
+  { value: 'Creative Services', label: 'Creative Services' },
+  { value: 'Health & Wellness', label: 'Health & Wellness' },
+  { value: 'Education / Training', label: 'Education / Training' },
   { value: 'Hospitality', label: 'Hospitality' },
-  { value: 'Healthcare', label: 'Healthcare' },
-  { value: 'Education', label: 'Education' },
   { value: 'Real Estate', label: 'Real Estate' },
+  { value: 'Other', label: 'Other' },
 ];

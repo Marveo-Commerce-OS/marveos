@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findTemplateForPublicOnboarding, startPublicOnboarding } from '@/lib/commercialOnboarding';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { recoverOnboardingByEmail } from '@/lib/onboarding/sessionRecovery';
 import {
   asOptionalTrimmedString,
   asTrimmedString,
@@ -44,6 +45,35 @@ export async function POST(req: NextRequest) {
   if (!email) return badRequest('customer.email is required');
   if (paymentMode === 'PAID' && !paymentReference) {
     return badRequest('paymentReference is required for PAID mode');
+  }
+
+  const recovery = await recoverOnboardingByEmail(email);
+  if (recovery.status === 'completedWorkspace') {
+    return NextResponse.json(
+      {
+        error: recovery.message,
+        status: recovery.status,
+        allowedActions: recovery.allowedActions,
+        workspaceId: recovery.workspaceId,
+        redirectPath: recovery.redirectPath,
+      },
+      { status: 409 },
+    );
+  }
+
+  if (recovery.status === 'activeTrial' || recovery.status === 'pendingPayment' || recovery.status === 'incompleteOnboarding' || recovery.status === 'recoverableSession') {
+    if (recovery.sessionId) {
+      return NextResponse.json(
+        {
+          onboardingSessionId: recovery.sessionId,
+          recoveryStatus: recovery.status,
+          message: recovery.message,
+          allowedActions: recovery.allowedActions,
+          redirectUrl: `${(process.env.MARVEO_APP_BASE_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`).replace(/\/$/, '')}${recovery.redirectPath || `/setup/mvp?session=${encodeURIComponent(recovery.sessionId)}`}`,
+        },
+        { status: 200 },
+      );
+    }
   }
 
   if (selectedTemplateId) {

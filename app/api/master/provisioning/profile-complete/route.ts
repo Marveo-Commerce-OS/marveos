@@ -24,6 +24,12 @@ export async function POST(req: NextRequest) {
     && !Array.isArray((body as { onboardingAnswers?: unknown }).onboardingAnswers)
       ? ((body as { onboardingAnswers?: unknown }).onboardingAnswers as Record<string, unknown>)
       : undefined;
+  const onboardingProfile =
+    (body as { onboardingProfile?: unknown }).onboardingProfile
+    && typeof (body as { onboardingProfile?: unknown }).onboardingProfile === 'object'
+    && !Array.isArray((body as { onboardingProfile?: unknown }).onboardingProfile)
+      ? ((body as { onboardingProfile?: unknown }).onboardingProfile as Record<string, unknown>)
+      : undefined;
 
   if (!onboardingSessionId && !workspaceId) return badRequest('onboardingSessionId or workspaceId is required');
   if (!workspaceName) return badRequest('workspaceName is required');
@@ -33,6 +39,7 @@ export async function POST(req: NextRequest) {
     workspaceId: workspaceId || undefined,
     professionKey: professionKey || undefined,
     workspaceName,
+    onboardingProfile,
     onboardingAnswers,
     allowProfessionOverride,
   });

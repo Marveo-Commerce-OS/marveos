@@ -10,6 +10,7 @@ export interface ProfileCompletionInput {
   workspaceId?: string;
   professionKey?: string;
   workspaceName: string;
+  onboardingProfile?: Record<string, unknown>;
   onboardingAnswers?: Record<string, unknown>;
   allowProfessionOverride?: boolean;
 }
@@ -128,6 +129,21 @@ export async function provisionAfterProfileCompletion(input: ProfileCompletionIn
         professionKey: profession.key,
         professionName: profession.professionName,
         professionSector: profession.sector,
+        businessType: String(input.onboardingProfile?.businessType || existingCollected.businessType || ''),
+        sector: String(input.onboardingProfile?.sector || existingCollected.sector || profession.sector || ''),
+        customBusinessType: String(input.onboardingProfile?.customBusinessType || existingCollected.customBusinessType || ''),
+        customProfessionName: String(input.onboardingProfile?.customProfessionName || existingCollected.customProfessionName || ''),
+        country: String(input.onboardingProfile?.country || existingCollected.country || ''),
+        coverageStates: Array.isArray(input.onboardingProfile?.coverageStates)
+          ? input.onboardingProfile?.coverageStates
+          : (existingCollected.coverageStates || []),
+        coverageCities: Array.isArray(input.onboardingProfile?.coverageCities)
+          ? input.onboardingProfile?.coverageCities
+          : (existingCollected.coverageCities || []),
+        customCoverageAreas: Array.isArray(input.onboardingProfile?.customCoverageAreas)
+          ? input.onboardingProfile?.customCoverageAreas
+          : (existingCollected.customCoverageAreas || []),
+        paymentCurrency: String(input.onboardingProfile?.paymentCurrency || existingCollected.paymentCurrency || ''),
         professionOnboardingAnswersByKey: answersByKey,
         dashboardWidgets: provisionedData.dashboardWidgets,
         defaultRoles: provisionedData.defaultRoles,
@@ -145,9 +161,17 @@ export async function provisionAfterProfileCompletion(input: ProfileCompletionIn
               selectedModules: provisionedData.activatedModules,
               businessProfile: {
                 ...(existing.businessProfile || {}),
+                businessType: String(input.onboardingProfile?.businessType || (existing.businessProfile as Record<string, unknown> | undefined)?.businessType || ''),
                 sector: profession.sector,
                 profession: profession.professionName,
                 professionKey: profession.key,
+                customBusinessType: String(input.onboardingProfile?.customBusinessType || (existing.businessProfile as Record<string, unknown> | undefined)?.customBusinessType || ''),
+                customProfessionName: String(input.onboardingProfile?.customProfessionName || (existing.businessProfile as Record<string, unknown> | undefined)?.customProfessionName || ''),
+                country: String(input.onboardingProfile?.country || (existing.businessProfile as Record<string, unknown> | undefined)?.country || ''),
+                coverageStates: Array.isArray(input.onboardingProfile?.coverageStates) ? input.onboardingProfile?.coverageStates : ((existing.businessProfile as Record<string, unknown> | undefined)?.coverageStates || []),
+                coverageCities: Array.isArray(input.onboardingProfile?.coverageCities) ? input.onboardingProfile?.coverageCities : ((existing.businessProfile as Record<string, unknown> | undefined)?.coverageCities || []),
+                customCoverageAreas: Array.isArray(input.onboardingProfile?.customCoverageAreas) ? input.onboardingProfile?.customCoverageAreas : ((existing.businessProfile as Record<string, unknown> | undefined)?.customCoverageAreas || []),
+                paymentCurrency: String(input.onboardingProfile?.paymentCurrency || (existing.businessProfile as Record<string, unknown> | undefined)?.paymentCurrency || ''),
               },
               collectedBusinessData: nextCollected,
               updatedAt: new Date().toISOString(),
