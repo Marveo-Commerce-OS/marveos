@@ -155,6 +155,11 @@ interface PhaseItem {
   note?: string;
 }
 
+interface TermsSection {
+  title: string;
+  body: string;
+}
+
 interface ProfileLookupsState {
   businessTypes: string[];
   businessModels: string[];
@@ -195,6 +200,33 @@ const BUSINESS_MODEL_TOOLTIPS: Record<string, string> = {
   B2C: 'Business to Consumer: direct sales to individual customers.',
   B2B: 'Business to Business: sales to companies, usually with account or bulk workflows.',
 };
+
+const ONBOARDING_TERMS_SECTIONS: TermsSection[] = [
+  {
+    title: 'Service Scope',
+    body: 'Marveo provisions your workspace, baseline modules, and onboarding records based on the profile you submit. Final production readiness may still require connector validation, domain/DNS updates, and operator review inside Setup Center.',
+  },
+  {
+    title: 'Data Responsibility',
+    body: 'You confirm that the business profile, contact information, and operational settings you provide are accurate. Marveo uses this information to configure modules, notifications, and onboarding artifacts.',
+  },
+  {
+    title: 'Security And Access',
+    body: 'You are responsible for securing business email accounts, connector tokens, and login credentials. If access details are exposed or lost, rotate credentials immediately and contact support.',
+  },
+  {
+    title: 'Operational Notifications',
+    body: 'Marveo attempts to send onboarding and provisioning notifications to the business contact and configured operations recipients. Email delivery depends on valid SMTP/provider configuration and recipient availability.',
+  },
+  {
+    title: 'Post-Onboarding Setup',
+    body: 'Website connection and advanced launch tasks continue in OS > Setup Center after workspace creation. Acceptance of these terms confirms you understand that onboarding completion does not guarantee a public launch without final checks.',
+  },
+  {
+    title: 'Support And Changes',
+    body: 'Marveo may update onboarding procedures, terms text, and operational policies over time. Continued use of the setup flow indicates acceptance of the current version at the time of onboarding.',
+  },
+];
 
 function withCurrentOption(options: string[], current: string): string[] {
   const value = current.trim();
@@ -374,6 +406,7 @@ function SetupMvpPageContent() {
     status: 'idle',
   });
   const [stepGuardMessage, setStepGuardMessage] = useState('');
+  const [showTermsModal, setShowTermsModal] = useState(false);
   const [entitlementState, setEntitlementState] = useState<{
     status: 'checking' | 'allowed' | 'trial_expired' | 'blocked';
     message?: string;
@@ -1149,8 +1182,48 @@ function SetupMvpPageContent() {
 
       if (isPublicOnboarding) {
         withPhaseStatus('connect', 'done', 'Onboarding details saved');
-        withPhaseStatus('support', 'done', effectiveSupportNeeded ? 'Support queue will continue in OS Setup Center' : 'Support assignment not required');
-        withPhaseStatus('check', 'done', 'Launch checks continue inside OS Setup Center after workspace creation');
+
+        withPhaseStatus('support', 'running', 'Sending onboarding access notifications');
+        const completionRes = await fetch('/api/public/onboarding/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            onboardingSessionId: onboardingSessionId || undefined,
+            workspaceId: nextWorkspaceId,
+            workspaceName: draft.profile.businessName || 'Marveo Workspace',
+            clientEmail: draft.profile.contactEmail,
+            clientName: draft.profile.ownerName || draft.profile.businessName,
+          }),
+        });
+
+        const completionData = await safeJson<{
+          clientEmailSent?: boolean;
+          opsEmailSent?: boolean;
+        }>(completionRes);
+
+        if (!completionRes.ok) {
+          const completionError = await safeJson<{ error?: string }>(completionRes);
+          withPhaseStatus('support', 'done', `Workspace ready (notification warning: ${completionError?.error || 'email dispatch unavailable'})`);
+        } else {
+          const clientEmailSent = Boolean(completionData?.clientEmailSent);
+          const opsEmailSent = Boolean(completionData?.opsEmailSent);
+          withPhaseStatus(
+            'support',
+            'done',
+            clientEmailSent && opsEmailSent
+              ? 'Client and operations notifications sent'
+              : 'Workspace ready (some notifications were skipped)',
+          );
+        }
+
+        withPhaseStatus('check', 'running', 'Finalizing onboarding handoff');
+        await callOnboardingUpdate(nextWorkspaceId, {
+          onboardingStepKey: 'LAUNCH_CHECKLIST_READY',
+          action: 'complete',
+          onboardingStatus: 'READY_FOR_REVIEW',
+          websiteType: draft.websiteType,
+        });
+        withPhaseStatus('check', 'done', 'Handoff completed. Continue in OS Setup Center');
         setWizardStep('ready');
         return;
       }
@@ -1644,8 +1717,26 @@ function SetupMvpPageContent() {
 
               <label className="flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-slate-200 text-sm">
                 <input type="checkbox" checked={draft.profile.termsAccepted} onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, termsAccepted: e.target.checked } }))} />
-                I accept onboarding terms and operational setup policies.
+                <span>
+                  I accept the
+                  {' '}
+                  <button
+                    type="button"
+                    onClick={() => setShowTermsModal(true)}
+                    className="text-cyan-300 underline underline-offset-2 hover:text-cyan-200"
+                  >
+                    onboarding terms
+                  </button>
+                  {' '}
+                  and operational setup policies.
+                </span>
               </label>
+              <p className="text-xs text-slate-400">
+                You can also open the full page at
+                {' '}
+                <a href="/legal/onboarding-terms" target="_blank" rel="noreferrer" className="text-cyan-300 underline underline-offset-2 hover:text-cyan-200">/legal/onboarding-terms</a>
+                .
+              </p>
               {profileErrors.termsAccepted ? <p className="text-xs text-red-300">{profileErrors.termsAccepted}</p> : null}
 
               {draft.profile.professionKey === 'makeup-artist' && (
@@ -2016,6 +2107,28 @@ function SetupMvpPageContent() {
                 <button onClick={() => setDraft(defaultDraft())} className="px-5 py-3 rounded-full bg-slate-700 text-white font-semibold">Start another setup</button>
               </div>
             </section>
+          )}
+
+          {showTermsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-4">
+              <div className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-semibold text-white">Onboarding Terms</h3>
+                    <p className="mt-1 text-sm text-slate-300">Version draft for pilot rollout. You can refine this text later in content/legal review.</p>
+                  </div>
+                  <button type="button" onClick={() => setShowTermsModal(false)} className="rounded-lg bg-slate-800 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-slate-700">Close</button>
+                </div>
+                <div className="max-h-[65vh] space-y-4 overflow-y-auto pr-2">
+                  {ONBOARDING_TERMS_SECTIONS.map((section) => (
+                    <div key={section.title} className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+                      <p className="text-sm font-semibold text-white">{section.title}</p>
+                      <p className="mt-1 text-sm leading-relaxed text-slate-300">{section.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
         </GlassCard>
       </div>
