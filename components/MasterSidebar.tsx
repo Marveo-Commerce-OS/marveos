@@ -62,7 +62,6 @@ export default function MasterSidebar({
   const [billingMenuOpen, setBillingMenuOpen] = useState(false);
   const allowedModuleSet = new Set(allowedModules);
   const visibleNav = MASTER_NAV.filter((item) => allowedModuleSet.has(item.moduleKey));
-  const plansBillingVisible = allowedModuleSet.has('plansBilling');
 
   useEffect(() => {
     let cancelled = false;
@@ -145,7 +144,7 @@ export default function MasterSidebar({
                 </button>
 
                 {billingMenuOpen ? (
-                  <div className="absolute left-[calc(100%+10px)] top-0 z-20 w-60 rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
+                  <div className="absolute left-0 top-full z-20 mt-2 w-full rounded-2xl border border-slate-200 bg-white p-2 shadow-lg">
                     <Link
                       href="/master/billing#plans"
                       className="block rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"

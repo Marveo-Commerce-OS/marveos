@@ -419,7 +419,16 @@ export default function BillingPlansManagerClient() {
 
                 <div className="space-y-2">
                   {draft.regions.map((region, idx) => (
-                    <div key={`${plan.id}-region-${idx}`} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 lg:grid-cols-7">
+                    <div key={`${plan.id}-region-${idx}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          {region.country || 'Region'} pricing
+                        </p>
+                        <span className="text-[11px] text-slate-400">
+                          {region.currency || 'Currency'} · row {idx + 1}
+                        </span>
+                      </div>
+                      <div className="grid gap-2 lg:grid-cols-7">
                       <input
                         value={region.country}
                         onChange={(e) => updateRegion(plan.id, idx, (prev) => ({ ...prev, country: e.target.value.toUpperCase() }))}
@@ -486,6 +495,7 @@ export default function BillingPlansManagerClient() {
                         >
                           Remove
                         </button>
+                      </div>
                       </div>
                     </div>
                   ))}
