@@ -1174,95 +1174,99 @@ function SetupMvpPageContent() {
       if (draft.websiteType === 'EXISTING_WEBSITE' && draft.existingConnectionChoice === 'connector') {
         const connectorToken = draft.existingWebsiteData.connectorToken.trim();
         if (!connectorToken) {
-          throw new Error('Paste the Generated Secure Connection Token before deployment.');
-        }
-
-        await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'set_token', connectorToken }),
-        });
-
-        setConnectionStatus('TOKEN_GENERATED');
-
-        await callOnboardingUpdate(nextWorkspaceId, {
-          onboardingStepKey: 'CONNECTOR_TOKEN_GENERATED',
-          action: 'complete',
-          onboardingStatus: 'IN_PROGRESS',
-          websiteType: draft.websiteType,
-          connectorToken,
-        });
-
-        const verifyDomain = draft.existingWebsiteData.domain || draft.profile.domain;
-        if (verifyDomain.trim()) {
-          const submittedOrigin = normalizeOrigin(verifyDomain);
-          setConnectionStatus('PENDING_VERIFICATION');
-          const verifyRes = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector/verify`, {
+          effectiveSupportNeeded = true;
+          setConnectionStatus('SUPPORT_REQUIRED');
+          setConnectorCheck({ status: 'failed', message: 'No connector token provided yet. Account is ready; support can complete integration next.' });
+          await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain: verifyDomain, connectorToken }),
+            body: JSON.stringify({ action: 'update_status', connectorStatus: 'SUPPORT_REQUIRED' }),
+          });
+        } else {
+          await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'set_token', connectorToken }),
           });
 
-          const verifyData = await safeJson<{
-            verified?: boolean;
-            connectorStatus?: ConnectorStatusKey;
-            siteMetadata?: ConnectorSiteMetadata;
-            error?: string;
-            siteOrigin?: string;
-          }>(verifyRes);
+          setConnectionStatus('TOKEN_GENERATED');
 
+          await callOnboardingUpdate(nextWorkspaceId, {
+            onboardingStepKey: 'CONNECTOR_TOKEN_GENERATED',
+            action: 'complete',
+            onboardingStatus: 'IN_PROGRESS',
+            websiteType: draft.websiteType,
+            connectorToken,
+          });
 
-          if (!verifyRes.ok || !verifyData?.verified) {
-            effectiveSupportNeeded = true;
-            setConnectionStatus('FAILED');
-            setConnectorCheck({ status: 'failed', message: verifyData?.error || 'Connector verification failed. Support setup required.' });
-
-            await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+          const verifyDomain = draft.existingWebsiteData.domain || draft.profile.domain;
+          if (verifyDomain.trim()) {
+            const submittedOrigin = normalizeOrigin(verifyDomain);
+            setConnectionStatus('PENDING_VERIFICATION');
+            const verifyRes = await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector/verify`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'update_status', connectorStatus: 'FAILED' }),
+              body: JSON.stringify({ domain: verifyDomain, connectorToken }),
             });
-          } else {
-            const verifiedOrigin = normalizeOrigin(verifyData.siteOrigin || verifyData.siteMetadata?.siteUrl || '');
-            if (submittedOrigin && verifiedOrigin && submittedOrigin !== verifiedOrigin) {
+
+            const verifyData = await safeJson<{
+              verified?: boolean;
+              connectorStatus?: ConnectorStatusKey;
+              siteMetadata?: ConnectorSiteMetadata;
+              error?: string;
+              siteOrigin?: string;
+            }>(verifyRes);
+
+            if (!verifyRes.ok || !verifyData?.verified) {
               effectiveSupportNeeded = true;
               setConnectionStatus('FAILED');
-              setConnectorSiteMetadata(null);
-              setConnectorCheck({
-                status: 'failed',
-                message: 'This token does not match the website domain entered. Please confirm the WordPress site and token.',
-              });
+              setConnectorCheck({ status: 'failed', message: verifyData?.error || 'Connector verification failed. Support setup required.' });
 
               await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'update_status', connectorStatus: 'FAILED' }),
               });
+            } else {
+              const verifiedOrigin = normalizeOrigin(verifyData.siteOrigin || verifyData.siteMetadata?.siteUrl || '');
+              if (submittedOrigin && verifiedOrigin && submittedOrigin !== verifiedOrigin) {
+                effectiveSupportNeeded = true;
+                setConnectionStatus('FAILED');
+                setConnectorSiteMetadata(null);
+                setConnectorCheck({
+                  status: 'failed',
+                  message: 'Token-domain mismatch detected. Account is ready; support will finalize integration safely.',
+                });
 
-              throw new Error('This token does not match the website domain entered. Please confirm the WordPress site and token.');
+                await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'update_status', connectorStatus: 'FAILED' }),
+                });
+              } else {
+                setConnectionStatus('CONNECTED');
+                setConnectorSiteMetadata(verifyData.siteMetadata || null);
+                setDraft((prev) => ({
+                  ...prev,
+                  existingWebsiteData: {
+                    ...prev.existingWebsiteData,
+                    currentPlatform: verifyData.siteMetadata?.platform || prev.existingWebsiteData.currentPlatform,
+                  },
+                }));
+                setConnectorCheck({ status: 'ok', message: 'Connector verified and linked to workspace.' });
+              }
             }
+          } else {
+            effectiveSupportNeeded = true;
+            setConnectionStatus('SUPPORT_REQUIRED');
+            setConnectorCheck({ status: 'failed', message: 'No domain provided yet. Account is ready; support can complete integration next.' });
 
-            setConnectionStatus('CONNECTED');
-            setConnectorSiteMetadata(verifyData.siteMetadata || null);
-            setDraft((prev) => ({
-              ...prev,
-              existingWebsiteData: {
-                ...prev.existingWebsiteData,
-                currentPlatform: verifyData.siteMetadata?.platform || prev.existingWebsiteData.currentPlatform,
-              },
-            }));
-            setConnectorCheck({ status: 'ok', message: 'Connector verified and linked to workspace.' });
+            await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'update_status', connectorStatus: 'SUPPORT_REQUIRED' }),
+            });
           }
-        } else {
-          effectiveSupportNeeded = true;
-          setConnectionStatus('SUPPORT_REQUIRED');
-          setConnectorCheck({ status: 'failed', message: 'No domain was provided. Support setup required.' });
-
-          await fetch(`/api/cloud/workspaces/${nextWorkspaceId}/connector`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update_status', connectorStatus: 'SUPPORT_REQUIRED' }),
-          });
         }
       } else if (draft.websiteType === 'EXISTING_WEBSITE' && draft.existingConnectionChoice === 'manual') {
         setConnectionStatus('SUPPORT_REQUIRED');

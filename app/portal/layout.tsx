@@ -13,7 +13,7 @@ export default async function PortalLayout({ children }: { children: React.React
     redirect(target);
   }
   if ((session.user as { requirePasswordChange?: boolean } | null)?.requirePasswordChange) {
-    redirect('/password/change?surface=portal&firstLogin=1');
+    redirect('/password/change?surface=portal&firstLogin=1&next=%2Fportal%3Fwelcome%3D1');
   }
 
   const roles = normalizeRoles(session.user?.roles);

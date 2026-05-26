@@ -101,6 +101,16 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function isFaviconLikeAsset(url: string): boolean {
+  return /fav(?:icon)?/i.test(String(url || ''));
+}
+
+function pickPreferredLogo(candidates: string[]): string {
+  return candidates
+    .map((item) => String(item || '').trim())
+    .find((item) => item && !isFaviconLikeAsset(item)) || '';
+}
+
 function absolutizeEmailImageSources(html: string, appBaseUrl: string) {
   const normalizedBase = normalizeAppBaseUrl(appBaseUrl);
 
@@ -110,11 +120,7 @@ function absolutizeEmailImageSources(html: string, appBaseUrl: string) {
       return match;
     }
 
-    if (!normalizedBase) {
-      const altMatch = match.match(/\balt="([^"]*)"/i);
-      const altText = altMatch ? altMatch[1] : '';
-      return altText ? `<span style="font-size:12px;color:#64748b;">${escapeHtml(altText)}</span>` : '';
-    }
+    if (!normalizedBase) return match;
 
     const absolute = absolutizeUrl(trimmedSrc, normalizedBase);
     return absolute ? `<img${before}src="${escapeHtml(absolute)}"${after}>` : '';
@@ -150,12 +156,7 @@ async function inlineEmailImageSources(html: string, appBaseUrl: string) {
       const dataUri = `data:${contentType};base64,${buffer.toString('base64')}`;
       return { fullMatch, replacement: `<img${before}src="${escapeHtml(dataUri)}"${after}>` };
     } catch {
-      const altMatch = fullMatch.match(/\balt="([^"]*)"/i);
-      const altText = altMatch ? altMatch[1] : '';
-      const fallback = altText
-        ? `<span style="display:inline-block;font-size:12px;line-height:1.2;color:#64748b;">${escapeHtml(altText)}</span>`
-        : '';
-      return { fullMatch, replacement: fallback };
+      return { fullMatch, replacement: fullMatch };
     }
   }));
 
@@ -575,6 +576,25 @@ export async function renderPlatformEmailTemplatePreview(params: {
   }
 
   const vars: EmailTemplateVariables = params.variables || {};
+  const resolvedLogoUrl = pickPreferredLogo([
+    branding.logoUrl,
+    branding.dashboardLogoUrl,
+    branding.portalLoginLogoUrl,
+    config.clientLogo || '',
+  ]);
+  const resolvedFooterLogoUrl = pickPreferredLogo([
+    branding.footerLogoUrl,
+    branding.logoUrl,
+    branding.dashboardLogoUrl,
+    branding.portalLoginLogoUrl,
+    config.clientLogo || '',
+  ]) || resolvedLogoUrl;
+  const resolvedAppBaseUrl =
+    emailSettings.appBaseUrl
+    || (typeof vars.appBaseUrl === 'string' ? vars.appBaseUrl : '')
+    || branding.websiteUrl
+    || config.frontendUrl
+    || '';
   const subject = renderTemplate(template.subject || params.fallbackSubject || 'Marveo notification', vars);
   const preheader = renderTemplate(template.preheader || '', vars);
   const renderedBodyHtml = renderTemplate(template.html || '', vars);
@@ -591,8 +611,8 @@ export async function renderPlatformEmailTemplatePreview(params: {
     bodyHtml,
     brandName: branding.brandName || 'Marveo',
     brandByline: branding.brandByline || '',
-    logoUrl: branding.logoUrl || branding.dashboardLogoUrl || branding.portalLoginLogoUrl || config.clientLogo || '',
-    footerLogoUrl: branding.footerLogoUrl || branding.logoUrl || branding.dashboardLogoUrl || branding.portalLoginLogoUrl || config.clientLogo || '',
+    logoUrl: resolvedLogoUrl,
+    footerLogoUrl: resolvedFooterLogoUrl,
     primaryColor: branding.primaryColor || '#0f172a',
     secondaryColor: branding.secondaryColor || '#0ea5e9',
     websiteUrl: branding.websiteUrl || '',
@@ -612,9 +632,9 @@ export async function renderPlatformEmailTemplatePreview(params: {
     supportEmail: emailSettings.supportEmail || '',
     billingEmail: emailSettings.billingEmail || '',
     deploymentEmail: emailSettings.deploymentEmail || '',
-    appBaseUrl: emailSettings.appBaseUrl || '',
+    appBaseUrl: resolvedAppBaseUrl,
   });
-   const inlinedHtml = await inlineEmailImageSources(html, emailSettings.appBaseUrl || branding.websiteUrl || config.clientLogo || '');
+   const inlinedHtml = await inlineEmailImageSources(html, resolvedAppBaseUrl);
 
   return {
     ok: true,

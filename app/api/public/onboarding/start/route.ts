@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findTemplateForPublicOnboarding, startPublicOnboarding } from '@/lib/commercialOnboarding';
-import { sendPlatformDirectEmail, sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { sendPlatformDirectEmail } from '@/lib/emailNotifications';
 import { buildBillingInvoicePdfBuffer, buildInvoiceEmailHtml } from '@/lib/billing/invoice';
 import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { recoverOnboardingByEmail } from '@/lib/onboarding/sessionRecovery';
@@ -185,24 +185,6 @@ export async function POST(req: NextRequest) {
       // Invoice/notification failures should not block onboarding creation.
       console.error('[public-onboarding-start] invoice workflow failed', error);
     }
-  }
-
-  try {
-    await sendPlatformEmailNotification({
-      templateKey: 'CLIENT_SIGNUP',
-      to: email,
-      variables: {
-        clientName: name || company || email,
-        company: company || '',
-        appBaseUrl,
-        onboardingSessionId: result.onboardingSessionId || '',
-        selectedPlanId,
-        country,
-      },
-    });
-  } catch (error) {
-    // Email notification failures should not block onboarding creation.
-    console.error('[public-onboarding-start] signup notification failed', error);
   }
 
   return NextResponse.json(result, { status: 201 });

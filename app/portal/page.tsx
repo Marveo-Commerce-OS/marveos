@@ -33,6 +33,26 @@ type PublicBranding = {
 };
 
 const HEALTH_AUTO_REFRESH_MS = 60000;
+const PORTAL_TOUR_STORAGE_KEY = 'marveos.portal.tour.dismissed.v1';
+
+const PORTAL_TOUR_STEPS = [
+  {
+    title: 'Branding',
+    body: 'This top section reflects your workspace brand identity and active client environment.',
+  },
+  {
+    title: 'Workspace Areas',
+    body: 'Use these areas to move through setup, content, settings, support, and launch activities.',
+  },
+  {
+    title: 'Support PIN',
+    body: 'Use the support PIN for technical support live chat. Keep it private for account safety.',
+  },
+  {
+    title: 'Website Health',
+    body: 'Track readiness checks for your connected website stack before launch.',
+  },
+];
 
 function stackLabel(stack: StackSegment): string {
   if (stack === 'wordpress') return 'WordPress/WooCommerce';
@@ -76,6 +96,9 @@ export default function PortalPage() {
   const [supportPinError, setSupportPinError] = useState('');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState('');
+  const [welcomeMessage, setWelcomeMessage] = useState('');
+  const [tourOpen, setTourOpen] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
   const workspaceSections = useMemo(
     () => [
       'Dashboard',
@@ -94,6 +117,22 @@ export default function PortalPage() {
   );
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const welcome = url.searchParams.get('welcome');
+    if (welcome === '1') {
+      const name = String(url.searchParams.get('name') || 'Client').trim();
+      setWelcomeMessage(`Dear ${name}, Welcome to Marveos.`);
+      url.searchParams.delete('welcome');
+      url.searchParams.delete('name');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+
+    const tourDismissed = window.localStorage.getItem(PORTAL_TOUR_STORAGE_KEY) === '1';
+    if (!tourDismissed) {
+      setTourOpen(true);
+      setTourStep(0);
+    }
+
     let cancelled = false;
 
     void (async () => {
@@ -217,6 +256,21 @@ export default function PortalPage() {
     }
   }
 
+  function closeTour(dismissPermanently: boolean) {
+    if (dismissPermanently) {
+      window.localStorage.setItem(PORTAL_TOUR_STORAGE_KEY, '1');
+    }
+    setTourOpen(false);
+  }
+
+  function goToNextTourStep() {
+    if (tourStep >= PORTAL_TOUR_STEPS.length - 1) {
+      closeTour(true);
+      return;
+    }
+    setTourStep((current) => Math.min(current + 1, PORTAL_TOUR_STEPS.length - 1));
+  }
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
 
@@ -261,6 +315,21 @@ export default function PortalPage() {
 
       {/* Main */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-16">
+
+        {welcomeMessage ? (
+          <div className="mb-6 w-full max-w-3xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-emerald-800 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm font-semibold font-['Space_Grotesk']">{welcomeMessage}</p>
+              <button
+                type="button"
+                onClick={() => setWelcomeMessage('')}
+                className="rounded-full border border-emerald-300 px-3 py-1 text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="text-center mb-12">
           <p className="text-xs font-semibold uppercase tracking-widest mb-3 font-['Space_Grotesk']" style={{ color: branding.primaryColor }}>
@@ -447,6 +516,55 @@ export default function PortalPage() {
             </button>
           </div>
         )}
+
+        {tourOpen ? (
+          <div className="fixed inset-0 z-40 flex items-end justify-center bg-slate-950/60 p-4 md:items-center">
+            <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-6 text-white shadow-2xl">
+              <p className="text-xs uppercase tracking-[0.2em] text-sky-300 font-['Space_Grotesk']">Workspace Tour</p>
+              <h3 className="mt-2 text-2xl font-bold font-['Space_Grotesk']">{PORTAL_TOUR_STEPS[tourStep]?.title}</h3>
+              <p className="mt-3 text-sm text-slate-200 font-['Space_Grotesk']">{PORTAL_TOUR_STEPS[tourStep]?.body}</p>
+
+              <div className="mt-5 text-xs text-slate-400 font-['Space_Grotesk']">
+                Step {tourStep + 1} of {PORTAL_TOUR_STEPS.length}
+              </div>
+
+              <div className="mt-6 flex flex-wrap justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTourStep((current) => Math.max(0, current - 1))}
+                  disabled={tourStep === 0}
+                  className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  Back
+                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => closeTour(false)}
+                    className="rounded-full border border-slate-500 px-4 py-2 text-sm font-semibold text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => closeTour(true)}
+                    className="rounded-full border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-100"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    type="button"
+                    onClick={goToNextTourStep}
+                    className="rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-slate-950"
+                  >
+                    {tourStep === PORTAL_TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
 
       {/* Footer */}

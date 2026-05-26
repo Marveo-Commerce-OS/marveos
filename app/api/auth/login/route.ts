@@ -207,8 +207,29 @@ function hasConfiguredMasterPassword(store: Awaited<ReturnType<typeof readAdminS
   });
 }
 
-function resolveForcedPasswordChangeRedirect(surface: 'master' | 'portal') {
-  return `/password/change?surface=${surface}&firstLogin=1`;
+function resolveForcedPasswordChangeRedirect(surface: 'master' | 'portal', nextPath?: string) {
+  const base = `/password/change?surface=${surface}&firstLogin=1`;
+  if (!nextPath) return base;
+  return `${base}&next=${encodeURIComponent(nextPath)}`;
+}
+
+function resolvePortalPostLoginRedirect(params: {
+  assignedWorkspaceId?: string;
+  welcomeName?: string;
+  includeWelcome?: boolean;
+}) {
+  const search = new URLSearchParams();
+  if (params.assignedWorkspaceId) {
+    search.set('workspaceId', params.assignedWorkspaceId);
+  }
+  if (params.includeWelcome) {
+    search.set('welcome', '1');
+    if (params.welcomeName) {
+      search.set('name', params.welcomeName);
+    }
+  }
+  const query = search.toString();
+  return `/portal${query ? `?${query}` : ''}`;
 }
 
 const isPortalWordPressBridgeEnabled = () => process.env.MARVEO_ENABLE_PORTAL_WORDPRESS_BRIDGE === 'true';
@@ -675,6 +696,15 @@ export async function POST(req: NextRequest) {
       const passwordEntry = getPasswordEntry(nativeStore.nativeAuth.permissions[identityId]);
       if (passwordEntry && verifyPasswordEntry(password, passwordEntry)) {
         const requiresPasswordChange = Boolean(userState?.invitePending);
+        const portalPostLoginRedirect = resolvePortalPostLoginRedirect({
+          assignedWorkspaceId: userState?.assignedWorkspaceId,
+          includeWelcome: false,
+        });
+        const portalPostFirstLoginRedirect = resolvePortalPostLoginRedirect({
+          assignedWorkspaceId: userState?.assignedWorkspaceId,
+          includeWelcome: true,
+          welcomeName: identity.name,
+        });
 
         if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
           const challenge = await issueLoginOtpChallenge({
@@ -758,7 +788,9 @@ export async function POST(req: NextRequest) {
         clearAttemptState(loginAttemptKey);
         return NextResponse.json({
           success: true,
-          redirect: requiresPasswordChange ? resolveForcedPasswordChangeRedirect('portal') : '/portal',
+          redirect: requiresPasswordChange
+            ? resolveForcedPasswordChangeRedirect('portal', portalPostFirstLoginRedirect)
+            : portalPostLoginRedirect,
         });
       }
 

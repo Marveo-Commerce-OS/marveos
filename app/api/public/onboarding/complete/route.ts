@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readAdminStore } from '@/lib/adminStore';
+import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { generateTempPassword, upsertPasswordEntries } from '@/lib/nativePasswords';
 import { asOptionalTrimmedString, asTrimmedString, enforceRateLimit, parseEmail } from '@/lib/security/requestGuards';
 
 function badRequest(message: string) {
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
   const appBaseUrl = (process.env.MARVEO_APP_BASE_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`).replace(/\/$/, '');
   const loginUrl = `${appBaseUrl}/login`;
   const continueSetupUrl = `${appBaseUrl}/setup/mvp?session=${encodeURIComponent(onboardingSessionId)}`;
-  const changePasswordUrl = `${appBaseUrl}/password/change`;
+  const changePasswordUrl = `${appBaseUrl}/password/change?surface=portal&firstLogin=1`;
 
   const clientName = clientNameInput
     || workspace.name
@@ -57,20 +58,93 @@ export async function POST(req: NextRequest) {
     || clientEmail;
   const workspaceName = workspaceNameInput || workspace.name || 'Marveo Workspace';
 
-  const clientEmailResult = await sendPlatformEmailNotification({
-    templateKey: 'CLIENT_SIGNUP',
-    to: clientEmail,
-    variables: {
-      clientName,
-      workspaceName,
-      appBaseUrl: loginUrl,
-      loginUrl,
-      continueSetupUrl,
-      changePasswordUrl,
-      onboardingSessionId,
-      workspaceId,
-    },
+  const existingNativeIdentityEntry = Object.entries(store.nativeAuth.identities).find(([, row]) => {
+    return String(row.email || '').trim().toLowerCase() === clientEmail.toLowerCase() && row.source === 'NATIVE';
   });
+  const inviteIdentityId = existingNativeIdentityEntry?.[0] || `onboard_${onboarding.identityId}`;
+  const tempPassword = generateTempPassword();
+  const shouldIssueInviteCredentials = !existingNativeIdentityEntry
+    || Boolean(store.users[inviteIdentityId]?.invitePending)
+    || store.nativeAuth.identities[inviteIdentityId]?.status === 'INVITED';
+
+  await updateAdminStore((current) => {
+    const existingIdentity = current.nativeAuth.identities[inviteIdentityId];
+    const nextIdentity = {
+      id: inviteIdentityId,
+      email: clientEmail,
+      name: clientName,
+      userType: 'CLIENT_USER' as const,
+      status: 'INVITED' as const,
+      roles: ['CLIENT_OWNER'],
+      source: 'NATIVE' as const,
+      organizationId: onboarding.organizationId,
+      createdAt: existingIdentity?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...current,
+      users: {
+        ...current.users,
+        [inviteIdentityId]: {
+          ...(current.users[inviteIdentityId] ?? { active: true, portals: ['b2c'] }),
+          active: true,
+          portals: ['b2c'],
+          status: 'INVITED',
+          invitePending: true,
+          masterRole: 'CLIENT_OWNER',
+          assignedWorkspaceId: workspaceId,
+          assignedClientOrganizationId: onboarding.organizationId,
+        },
+      },
+      nativeAuth: {
+        ...current.nativeAuth,
+        identities: {
+          ...current.nativeAuth.identities,
+          [inviteIdentityId]: nextIdentity,
+        },
+        permissions: {
+          ...current.nativeAuth.permissions,
+          [inviteIdentityId]: shouldIssueInviteCredentials
+            ? upsertPasswordEntries(current.nativeAuth.permissions[inviteIdentityId], tempPassword)
+            : (current.nativeAuth.permissions[inviteIdentityId] || []),
+        },
+      },
+    };
+  });
+
+  const clientEmailResult = shouldIssueInviteCredentials
+    ? await sendPlatformEmailNotification({
+        templateKey: 'USER_INVITE',
+        to: clientEmail,
+        variables: {
+          userName: clientName,
+          roleName: 'Client Owner',
+          appBaseUrl,
+          loginUrl,
+          continueSetupUrl,
+          changePasswordUrl,
+          tempPassword,
+          onboardingSessionId,
+          workspaceId,
+          workspaceName,
+        },
+        fallbackSubject: `Welcome to Marveos: ${workspaceName}`,
+      })
+    : await sendPlatformEmailNotification({
+        templateKey: 'CLIENT_SIGNUP',
+        to: clientEmail,
+        variables: {
+          clientName,
+          workspaceName,
+          appBaseUrl,
+          loginUrl,
+          continueSetupUrl,
+          changePasswordUrl,
+          onboardingSessionId,
+          workspaceId,
+        },
+      });
 
   const opsRecipients = Array.from(
     new Set(
