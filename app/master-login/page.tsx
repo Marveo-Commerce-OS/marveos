@@ -233,7 +233,7 @@ function MasterLoginPageContent() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="h-12 w-full rounded-xl text-sm font-semibold text-white"
+                  className="h-12 w-full rounded-xl text-sm font-semibold text-white transition-colors duration-300"
                   style={{ backgroundColor: branding.primaryColor }}
                 >
                   {loading ? 'Verifying...' : otpRequired ? 'Verify code and continue' : 'Sign in to Master Platform'}

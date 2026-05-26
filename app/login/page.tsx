@@ -249,7 +249,7 @@ function LoginPageContent() {
                   style={{
                     backgroundColor: branding.primaryColor,
                   }}
-                  className="mt-2 h-12 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-60"
+                  className="mt-2 h-12 w-full rounded-xl text-sm font-semibold text-white transition-colors duration-300 disabled:opacity-60"
                 >
                   {loading ? 'Verifying...' : otpRequired ? 'Verify code and continue' : 'Sign In to Portal'}
                 </button>

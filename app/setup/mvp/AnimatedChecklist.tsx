@@ -3,10 +3,7 @@ import React from 'react';
 const checklist = [
   'Creating secure workspace',
   'Preparing business profile',
-  'Loading selected template',
-  'Connecting website data',
   'Generating workspace access',
-  'Assigning launch specialist',
   'Preparing launch checklist',
 ];
 

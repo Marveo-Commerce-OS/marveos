@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
 import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
-import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
 import { readAdminStore } from '@/lib/adminStore';
 import SessionInactivityGuard from '@/components/SessionInactivityGuard';
 import PortalLiveChatWidget from '@/components/PortalLiveChatWidget';
@@ -22,11 +21,6 @@ export default async function PortalLayout({ children }: { children: React.React
     const base = '/login?error=unauthorized&from=/portal';
     const withRoles = isDev ? `${base}&roles=${encodeURIComponent(roles.join(','))}` : '/login?error=unauthorized';
     redirect(withRoles);
-  }
-
-  const status = await getRuntimeDeploymentStatus();
-  if (!status.setup_completed || !status.validation_passed) {
-    redirect('/setup');
   }
 
   const store = await readAdminStore();

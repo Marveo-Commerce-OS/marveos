@@ -193,10 +193,13 @@ const CONNECTOR_INSTALL_GUIDE_URL = process.env.NEXT_PUBLIC_CONNECTOR_INSTALL_GU
 
 const INITIAL_PHASES: PhaseItem[] = [
   { key: 'prepare', label: 'Prepare workspace', status: 'pending' },
-  { key: 'connect', label: 'Connect website', status: 'pending' },
-  { key: 'support', label: 'Assign support', status: 'pending' },
-  { key: 'check', label: 'Run launch checks', status: 'pending' },
+  { key: 'connect', label: 'Save business profile', status: 'pending' },
+  { key: 'support', label: 'Prepare workspace access', status: 'pending' },
+  { key: 'check', label: 'Prepare launch checklist', status: 'pending' },
 ];
+
+const PAYMENT_CURRENCIES = ['USD', 'NGN', 'GBP', 'EUR'] as const;
+type PaymentCurrencyCode = (typeof PAYMENT_CURRENCIES)[number];
 
 const DEFAULT_PROFILE_LOOKUPS: ProfileLookupsState = {
   businessTypes: businessTypes.map((option) => option.key),
@@ -332,6 +335,36 @@ function mapCountryToCode(value: string): string {
   return 'US';
 }
 
+function resolveCurrencyFromCountry(country: string): PaymentCurrencyCode {
+  const normalized = country.trim().toLowerCase();
+  if (!normalized) return 'USD';
+  if (normalized === 'ng' || normalized.includes('nigeria')) return 'NGN';
+  if (normalized === 'gb' || normalized.includes('united kingdom')) return 'GBP';
+  if (normalized === 'us' || normalized.includes('united states')) return 'USD';
+  if (normalized === 'ca' || normalized.includes('canada')) return 'USD';
+  if (normalized === 'ae' || normalized.includes('united arab emirates')) return 'USD';
+  if (normalized === 'au' || normalized.includes('australia')) return 'USD';
+  return 'USD';
+}
+
+function normalizePaymentCurrency(value: string, country: string): PaymentCurrencyCode {
+  const normalized = value.trim().toUpperCase();
+  if ((PAYMENT_CURRENCIES as readonly string[]).includes(normalized)) {
+    return normalized as PaymentCurrencyCode;
+  }
+  return resolveCurrencyFromCountry(country);
+}
+
+function resolveSubscriptionModeLabel(subscription: { paymentMode?: string; status?: string } | null | undefined): 'Trial' | 'Paid' | 'Unknown' {
+  const paymentMode = String(subscription?.paymentMode || '').toUpperCase();
+  const status = String(subscription?.status || '').toUpperCase();
+
+  if (paymentMode === 'TRIAL' || status === 'TRIAL') return 'Trial';
+  if (paymentMode === 'PAID') return 'Paid';
+  if (status && status !== 'EXPIRED') return 'Paid';
+  return 'Unknown';
+}
+
 function defaultDraft(): DraftState {
   return {
     wizardStep: 'plan',
@@ -346,8 +379,8 @@ function defaultDraft(): DraftState {
       businessType: 'Retail',
       customBusinessType: '',
       customProfessionName: '',
-      country: 'United States',
-      paymentCurrency: 'USD',
+      country: 'Nigeria',
+      paymentCurrency: 'NGN',
       coverageStates: [],
       coverageCities: [],
       customCoverageAreas: [],
@@ -456,6 +489,7 @@ function SetupMvpPageContent() {
     status: 'checking' | 'allowed' | 'trial_expired' | 'blocked';
     message?: string;
     upgradeUrl?: string;
+    subscriptionMode?: 'Trial' | 'Paid' | 'Unknown';
   }>({ status: 'checking' });
 
   useEffect(() => {
@@ -476,6 +510,14 @@ function SetupMvpPageContent() {
         setDraft((prev) => ({
           ...prev,
           ...restoredDraft,
+          profile: {
+            ...prev.profile,
+            ...(restoredDraft.profile || {}),
+            paymentCurrency: normalizePaymentCurrency(
+              String(restoredDraft.profile?.paymentCurrency ?? prev.profile.paymentCurrency),
+              String(restoredDraft.profile?.country ?? prev.profile.country),
+            ),
+          },
           wizardStep: sanitizedStep ?? prev.wizardStep,
         }));
         if (restoredWorkspaceId) setWorkspaceId(restoredWorkspaceId);
@@ -499,6 +541,20 @@ function SetupMvpPageContent() {
       // Ignore local storage failures.
     }
   }, [draft, workspaceId]);
+
+  useEffect(() => {
+    setDraft((prev) => {
+      const normalized = normalizePaymentCurrency(prev.profile.paymentCurrency, prev.profile.country);
+      if (normalized === prev.profile.paymentCurrency) return prev;
+      return {
+        ...prev,
+        profile: {
+          ...prev.profile,
+          paymentCurrency: normalized,
+        },
+      };
+    });
+  }, [draft.profile.country]);
 
   useEffect(() => {
     let cancelled = false;
@@ -560,6 +616,10 @@ function SetupMvpPageContent() {
           entitled?: boolean;
           reason?: string;
           redirectTo?: string;
+          subscription?: {
+            paymentMode?: string;
+            status?: string;
+          } | null;
           lockBehavior?: {
             allowLoginView?: boolean;
             blockPublishing?: boolean;
@@ -571,7 +631,10 @@ function SetupMvpPageContent() {
         if (cancelled) return;
 
         if (payload?.entitled) {
-          setEntitlementState({ status: 'allowed' });
+          setEntitlementState({
+            status: 'allowed',
+            subscriptionMode: resolveSubscriptionModeLabel(payload.subscription || null),
+          });
           return;
         }
 
@@ -580,6 +643,7 @@ function SetupMvpPageContent() {
             status: 'trial_expired',
             message: 'Your trial has expired. You can still sign in to review your workspace, but publishing and new workspace actions are locked until you upgrade.',
             upgradeUrl: payload.redirectTo || marketingPricingUrl,
+            subscriptionMode: resolveSubscriptionModeLabel(payload.subscription || null),
           });
           return;
         }
@@ -1106,7 +1170,7 @@ function SetupMvpPageContent() {
       }
       withPhaseStatus('prepare', 'done', 'Workspace prepared');
 
-      withPhaseStatus('connect', 'running', 'Saving onboarding details');
+      withPhaseStatus('connect', 'running', 'Saving business profile');
 
       await callOnboardingUpdate(nextWorkspaceId, {
         step: 1,
@@ -1287,9 +1351,9 @@ function SetupMvpPageContent() {
       }
 
       if (isPublicOnboarding) {
-        withPhaseStatus('connect', 'done', 'Onboarding details saved');
+        withPhaseStatus('connect', 'done', 'Business profile saved');
 
-        withPhaseStatus('support', 'running', 'Sending onboarding access notifications');
+        withPhaseStatus('support', 'running', 'Preparing workspace access');
         const completionRes = await fetch('/api/public/onboarding/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1348,9 +1412,9 @@ function SetupMvpPageContent() {
         websiteType: draft.websiteType,
       });
 
-      withPhaseStatus('connect', 'done', 'Website setup details saved');
+      withPhaseStatus('connect', 'done', 'Business profile saved');
 
-      withPhaseStatus('support', 'running', 'Assigning support officer');
+      withPhaseStatus('support', 'running', 'Preparing workspace access');
 
       if (effectiveSupportNeeded) {
         const supportPayload: SupportAssignmentContract = {
@@ -1395,9 +1459,9 @@ function SetupMvpPageContent() {
           websiteType: draft.websiteType,
         });
 
-        withPhaseStatus('support', 'done', 'Support officer assigned');
+        withPhaseStatus('support', 'done', 'Workspace access prepared');
       } else {
-        withPhaseStatus('support', 'done', 'Support assignment not required');
+        withPhaseStatus('support', 'done', 'Workspace access prepared');
       }
 
       withPhaseStatus('check', 'running', 'Checking launch readiness');
@@ -1452,6 +1516,13 @@ function SetupMvpPageContent() {
   const terminalLogs = phases.map((p) => `${p.label}: ${p.note || p.status}`);
   const businessModelOptions = withCurrentOption(profileLookups.businessModels, draft.profile.businessModel);
   const countryOptions = withCurrentOption(profileLookups.countries, draft.profile.country);
+  const selectedPlan = PLAN_OPTIONS.find((option) => option.id === draft.planId);
+  const subscriptionModeLabel = entitlementState.subscriptionMode || 'Unknown';
+  const isPublicOnboardingSession = Boolean(searchParams.get('session'));
+  const readyCtaHref = isPublicOnboardingSession
+    ? '/login?from=%2Fportal&source=onboarding'
+    : (workspaceId ? `/dashboard?workspaceId=${workspaceId}` : '/dashboard');
+  const readyCtaLabel = isPublicOnboardingSession ? 'Continue to login' : 'Open dashboard';
   const sectorOptions = getSectorsForBusinessType(draft.profile.businessType);
   const professionOptions = getProfessionsForSector(draft.profile.sector);
   const professionIsRequired = sectorRequiresProfession(draft.profile.sector);
@@ -1727,7 +1798,17 @@ function SetupMvpPageContent() {
                   <span className="mb-1 block text-xs uppercase tracking-wide text-slate-400">Country</span>
                   <select
                     value={draft.profile.country}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, country: e.target.value } }))}
+                    onChange={(e) => {
+                      const nextCountry = e.target.value;
+                      setDraft((prev) => ({
+                        ...prev,
+                        profile: {
+                          ...prev.profile,
+                          country: nextCountry,
+                          paymentCurrency: normalizePaymentCurrency(prev.profile.paymentCurrency, nextCountry),
+                        },
+                      }));
+                    }}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >
                     {countryOptions.map((option) => (
@@ -1745,7 +1826,7 @@ function SetupMvpPageContent() {
                     onChange={(e) => setDraft((prev) => ({ ...prev, profile: { ...prev.profile, paymentCurrency: e.target.value } }))}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >
-                    {['USD', 'NGN', 'GBP', 'EUR'].map((currency) => (
+                    {PAYMENT_CURRENCIES.map((currency) => (
                       <option key={currency} value={currency} className="bg-slate-900 text-white">{currency}</option>
                     ))}
                   </select>
@@ -2177,20 +2258,15 @@ function SetupMvpPageContent() {
               <h2 className="text-2xl text-white font-semibold">Review and launch</h2>
               <p className="text-sm text-slate-400">Validate this summary, then start installation and orchestration.</p>
               <div className="rounded-2xl border border-slate-600 bg-slate-900/50 p-4 text-slate-200 text-sm space-y-1">
-                <p>Plan: {draft.planId}</p>
-                <p>Onboarding mode: Profile-first</p>
-                <p>Business: {draft.profile.businessName || '-'}</p>
-                <p>Email: {draft.profile.contactEmail || '-'}</p>
-                <p>Support required: {supportNeeded || connectionStatus === 'SUPPORT_REQUIRED' ? 'Yes' : 'No'}</p>
-                <p>Flow summary ready: {flowSummary ? 'Yes' : 'No'}</p>
+                <p>Plan: {(selectedPlan?.name || toLabel(draft.planId))} Plan</p>
+                <p>Setup Flow: Guided onboarding</p>
+                <p>Business Name: {draft.profile.businessName || '-'}</p>
+                <p>Contact Email: {draft.profile.contactEmail || '-'}</p>
+                <p>Subscription Mode: {subscriptionModeLabel}</p>
                 {workspaceEntitlement ? (
                   <>
-                    <p>Active plan entitlement: {workspaceEntitlement.planId}</p>
-                    <p>
-                      Workspace allowance: {workspaceEntitlement.workspaceCount}/{workspaceEntitlement.workspaceLimit}
-                      {' '}
-                      used ({workspaceEntitlement.remainingWorkspaces} remaining)
-                    </p>
+                    <p>Workspace Count: {workspaceEntitlement.workspaceCount}/{workspaceEntitlement.workspaceLimit}</p>
+                    <p>You can create {workspaceEntitlement.remainingWorkspaces} more workspace{workspaceEntitlement.remainingWorkspaces === 1 ? '' : 's'} in this subscription.</p>
                   </>
                 ) : null}
               </div>
@@ -2210,7 +2286,7 @@ function SetupMvpPageContent() {
             <section className="mt-8 space-y-5">
               <h2 className="text-2xl text-white font-semibold">Installing workspace</h2>
               <p className="text-sm text-slate-400">Provisioning infrastructure and syncing onboarding milestones in real time.</p>
-              <AnimatedChecklist progress={Math.min(phases.filter((p) => p.status === 'done').length, 6)} />
+              <AnimatedChecklist progress={Math.min(phases.filter((p) => p.status === 'done').length, phases.length)} />
               <div className="space-y-2">
                 {phases.map((phase) => (
                   <div key={phase.key} className="flex items-center justify-between rounded-xl bg-slate-900/50 border border-slate-700 px-4 py-3">
@@ -2246,7 +2322,7 @@ function SetupMvpPageContent() {
                 <p className="text-sm text-amber-200">You have reached your workspace limit. Upgrade your plan to create another workspace.</p>
               ) : null}
               <div className="flex gap-3">
-                <a href={workspaceId ? `/dashboard?workspaceId=${workspaceId}` : '/dashboard'} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold">Open dashboard</a>
+                <a href={readyCtaHref} className="px-5 py-3 rounded-full bg-emerald-700 text-white font-semibold">{readyCtaLabel}</a>
                 <button
                   onClick={() => {
                     setDraft(defaultDraft());
