@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentWpUser, isAdmin } from '@/lib/auth';
+import { getCurrentWpUser } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
-import { requireSupportAccessSession } from '@/lib/support-access/session';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
+import { upsertOperationalAssignment } from '@/lib/master/operations';
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const allowed = await isAdmin(session.token);
-  if (!allowed) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('supportQueue', 'assign');
 }
 
 function badRequest(message: string) {
@@ -27,17 +18,14 @@ function getWorkspaceContactEmail(workspace: { businessProfile?: Record<string, 
   return String(profile.contactEmail || '').trim().toLowerCase();
 }
 
+function buildSupportTicketId(workspaceId: string): string {
+  const shortWorkspace = workspaceId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase() || 'WS';
+  return `TKT-${Date.now().toString(36).toUpperCase()}-${shortWorkspace}`;
+}
+
 export async function POST(req: NextRequest) {
   const auth = await ensureAdminSession();
   if ('error' in auth) return auth.error;
-
-  const supportUserId = String(auth.session.user?.id ?? auth.session.user?.ID ?? '').trim() || undefined;
-  const supportSession = await requireSupportAccessSession(req, {
-    actorEmail: auth.session.user?.user_email ?? 'unknown',
-    supportUserId,
-    auditTarget: 'master:clients:assign-support',
-  });
-  if ('error' in supportSession) return supportSession.error;
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return badRequest('Invalid JSON body');
@@ -51,6 +39,13 @@ export async function POST(req: NextRequest) {
   if (!supportOfficerName) return badRequest('supportOfficerName is required');
 
   const store = await readAdminStore();
+  const supportOfficer = store.nativeAuth.identities[supportOfficerId];
+  const supportOfficerEmail = String(
+    supportOfficer?.email
+      || store.platformSettings.email.supportEmail
+      || store.platformSettings.email.userOpsEmail
+      || '',
+  ).trim().toLowerCase();
   const targets = Object.values(store.cloud.workspaces)
     .filter((workspace) => getWorkspaceContactEmail(workspace) === clientEmail)
     .filter((workspace) => Boolean(workspace.supportRequired))
@@ -80,11 +75,17 @@ export async function POST(req: NextRequest) {
           assignedBy: actorEmail,
           supportOfficerId,
           supportOfficerName,
+          supportOfficerType: 'CUSTOMER_SUPPORT',
+          ticketId: currentAssignment?.ticketId || buildSupportTicketId(workspace.id),
           priority: currentAssignment?.priority ?? 'MEDIUM',
           reason: currentAssignment?.reason ?? 'Assigned from /master/clients',
           setupType: currentAssignment?.setupType ?? existing.websiteType ?? 'NEW_WEBSITE',
           requiredSkills: currentAssignment?.requiredSkills ?? ['Onboarding'],
           initialNotes: currentAssignment?.initialNotes ?? 'Assigned via client operations view',
+          technicalSupportOfficerId: currentAssignment?.technicalSupportOfficerId,
+          technicalSupportOfficerName: currentAssignment?.technicalSupportOfficerName,
+          escalationStatus: currentAssignment?.escalationStatus ?? 'NONE',
+          escalatedAt: currentAssignment?.escalatedAt,
         },
         updatedAt: now,
       };
@@ -123,6 +124,35 @@ export async function POST(req: NextRequest) {
         workspaceName: workspace.name,
         supportOfficerName,
         workspaceId: workspace.id,
+      },
+    });
+
+    if (supportOfficerEmail && supportOfficerEmail !== clientEmail) {
+      await sendPlatformEmailNotification({
+        templateKey: 'SUPPORT_ASSIGNED_SUPPORT',
+        to: supportOfficerEmail,
+        variables: {
+          supportOfficerName: supportOfficer?.name || supportOfficerName,
+          workspaceName: workspace.name,
+          clientEmail,
+          ticketId: workspace.supportAssignment?.ticketId || 'n/a',
+          priority: workspace.supportAssignment?.priority || 'MEDIUM',
+        },
+      });
+    }
+
+    await upsertOperationalAssignment({
+      entityType: 'support_queue',
+      entityId: workspace.id,
+      workspaceId: workspace.id,
+      assignedToUserId: supportOfficerId,
+      assignedToName: supportOfficerName,
+      assignedRole: String(supportOfficer?.roles?.[0] || 'CUSTOMER_SUPPORT'),
+      assignedBy: actor?.email ?? actorEmail,
+      assignmentStatus: 'assigned',
+      metadata: {
+        ticketId: workspace.supportAssignment?.ticketId || null,
+        priority: workspace.supportAssignment?.priority || 'MEDIUM',
       },
     });
   }

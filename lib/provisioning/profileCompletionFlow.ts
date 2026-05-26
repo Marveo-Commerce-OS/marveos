@@ -193,6 +193,7 @@ export async function provisionAfterProfileCompletion(input: ProfileCompletionIn
       dashboardWidgets: profession.dashboardWidgets,
       sidebarNavigation: profession.sidebarNavigation,
       onboardingQuestions: profession.onboardingQuestions,
+      quickActions: profession.quickActions,
       terminology: profession.terminology,
     },
     workspaceId: provisionedData.workspaceId,

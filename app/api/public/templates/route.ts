@@ -11,6 +11,9 @@ export async function GET(req: NextRequest) {
   const websiteType = req.nextUrl.searchParams.get('websiteType') || undefined;
   const country = req.nextUrl.searchParams.get('country') || undefined;
   const planId = req.nextUrl.searchParams.get('planId') || undefined;
+  const businessType = req.nextUrl.searchParams.get('businessType') || undefined;
+  const sector = req.nextUrl.searchParams.get('sector') || undefined;
+  const professionKey = req.nextUrl.searchParams.get('professionKey') || undefined;
 
   const payload = await getPublicTemplates({
     status,
@@ -18,6 +21,9 @@ export async function GET(req: NextRequest) {
     websiteType,
     country,
     planId,
+    businessType,
+    sector,
+    professionKey,
   });
 
   return NextResponse.json(payload);

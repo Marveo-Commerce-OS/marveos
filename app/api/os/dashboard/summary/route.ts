@@ -59,10 +59,11 @@ export async function GET(req: NextRequest) {
   });
 
   if (!workspace) {
+    const fallbackProfession = resolveProfessionConfig(undefined);
     return NextResponse.json({
       workspaceId: requestedWorkspaceId || '',
-      professionKey: 'generic-service-business',
-      professionName: 'Service Business',
+      professionKey: fallbackProfession.key,
+      professionName: fallbackProfession.professionName,
       widgets: {
         todaysBookings: { count: 0, items: [] },
         pendingDeposits: { count: 0, amount: 0, currency: 'USD', items: [] },
@@ -72,7 +73,9 @@ export async function GET(req: NextRequest) {
         revenueSnapshot: { today: 0, month: 0, currency: 'USD' },
         onboardingChecklist: { total: 0, completed: 0, items: [] },
       },
-      quickActions: [],
+      dashboardWidgets: fallbackProfession.dashboardWidgets,
+      quickActions: fallbackProfession.quickActions,
+      dashboardSignals: {},
     }, { status: 200 });
   }
 

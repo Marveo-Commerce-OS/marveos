@@ -86,3 +86,9 @@ export function revokeSupportSessionById(sessionId: string): SupportSessionRecor
 export function getSupportSessionStoreSnapshot(): Map<string, SupportSessionRecord> {
   return supportSessionStore;
 }
+
+export function clearSupportSessionStore(): number {
+  const count = supportSessionStore.size;
+  supportSessionStore.clear();
+  return count;
+}

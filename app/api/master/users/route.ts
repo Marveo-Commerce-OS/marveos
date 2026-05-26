@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   appendAuditLog,
+  CONTROL_CENTER_MODULE_KEYS,
   readAdminStore,
   updateAdminStore,
   type ManagedUserState,
-  type NativeRole,
 } from '@/lib/adminStore';
 import {
   getCurrentPlatformUser,
@@ -15,14 +15,48 @@ import {
 } from '@/lib/auth';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
 import { generateTempPassword, upsertPasswordEntries } from '@/lib/nativePasswords';
+import { normalizeStoredMediaUrl } from '@/lib/mediaUrls';
+import { normalizeTicketSignature } from '@/lib/tickets/signature';
 
-const ALLOWED_MARVEO_ROLES: NativeRole[] = [
+const DEFAULT_MARVEO_ROLES = [
   'SUPER_ADMIN',
   'ADMIN',
-  'SUPPORT_OFFICER',
+  'CUSTOMER_SUPPORT',
+  'TECHNICAL_SUPPORT',
   'DEPLOYMENT_MANAGER',
   'BILLING_MANAGER',
-];
+] as const;
+const ROLE_ORDER_PRIORITY = [...DEFAULT_MARVEO_ROLES] as const;
+
+function normalizeRoleKey(value: unknown): string {
+  return String(value || '').trim().toUpperCase().replace(/\s+/g, '_');
+}
+
+function listConfiguredRoles(store: Awaited<ReturnType<typeof readAdminStore>>): string[] {
+  const roleSet = new Set<string>(DEFAULT_MARVEO_ROLES);
+
+  for (const role of Object.keys(store.controlCenterRoleVisibility || {})) {
+    const normalized = normalizeRoleKey(role);
+    if (normalized) roleSet.add(normalized);
+  }
+
+  for (const role of Object.keys(store.controlCenterRoleActionPermissions || {})) {
+    const normalized = normalizeRoleKey(role);
+    if (normalized) roleSet.add(normalized);
+  }
+
+  for (const user of Object.values(store.users || {})) {
+    const normalized = normalizeRoleKey(user.masterRole);
+    if (normalized) roleSet.add(normalized);
+  }
+
+  const preferred = ROLE_ORDER_PRIORITY.filter((role) => roleSet.has(role));
+  const custom = Array.from(roleSet)
+    .filter((role) => !ROLE_ORDER_PRIORITY.includes(role as (typeof ROLE_ORDER_PRIORITY)[number]))
+    .sort();
+
+  return [...preferred, ...custom];
+}
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -37,6 +71,34 @@ function roleToLabel(role: string): string {
 
 function statusToLabel(status: string): string {
   return roleToLabel(status);
+}
+
+function titleCaseWords(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function looksLikePlaceholderName(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  if (/^[-_.\s]+$/.test(normalized)) return true;
+  if (/^[-_.\s]*for\s+team$/.test(normalized)) return true;
+  return false;
+}
+
+function toDisplayName(name: string | undefined, email: string | undefined, id: string): string {
+  const trimmedName = String(name || '').trim();
+  if (!looksLikePlaceholderName(trimmedName)) return trimmedName;
+
+  const trimmedEmail = String(email || '').trim();
+  if (trimmedEmail.includes('@')) {
+    const localPart = trimmedEmail.split('@')[0] || '';
+    const cleaned = localPart.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (cleaned) return titleCaseWords(cleaned);
+  }
+
+  return id.startsWith('invite_') ? 'Invited team member' : 'Team member';
 }
 
 function normalizeName(value: unknown): string | null {
@@ -55,15 +117,21 @@ function normalizeEmail(value: unknown): string | null {
 function normalizeAvatarUrl(value: unknown): string | null {
   const url = String(value || '').trim();
   if (!url) return '';
-  if (!/^https?:\/\//i.test(url) && !url.startsWith('/')) return null;
-  return url;
+  const normalized = normalizeStoredMediaUrl(url);
+  if (normalized === null) return null;
+  return normalized;
 }
 
-function normalizeMasterRole(value: unknown): NativeRole | undefined {
+function normalizeMasterRole(value: unknown, allowedRoles: Set<string>): string | undefined {
   const upper = String(value || '').trim().toUpperCase();
   if (!upper) return undefined;
-  if (ALLOWED_MARVEO_ROLES.includes(upper as NativeRole)) return upper as NativeRole;
+  if (upper === 'SUPPORT_OFFICER') return 'CUSTOMER_SUPPORT';
+  if (allowedRoles.has(upper)) return upper;
   return undefined;
+}
+
+function normalizeSignature(value: unknown): string {
+  return normalizeTicketSignature(value);
 }
 
 async function ensureAdmin() {
@@ -83,10 +151,11 @@ function deriveStatus(state: ManagedUserState | undefined): 'ACTIVE' | 'INVITED'
   return 'ACTIVE';
 }
 
-function toNativeRole(value: unknown): NativeRole | null {
+function toNativeRole(value: unknown, allowedRoles: Set<string>): string | null {
   const role = String(value || '').trim().toUpperCase();
   if (!role || role.startsWith('CONNECTED_')) return null;
-  return ALLOWED_MARVEO_ROLES.includes(role as NativeRole) ? (role as NativeRole) : null;
+  if (role === 'SUPPORT_OFFICER') return 'CUSTOMER_SUPPORT';
+  return allowedRoles.has(role) ? role : null;
 }
 
 function resolveConfiguredAppBaseUrl(req: NextRequest, store: Awaited<ReturnType<typeof readAdminStore>>) {
@@ -115,16 +184,20 @@ export async function GET() {
   const auth = await ensureAdmin();
   if ('error' in auth) return auth.error;
 
+  const canMutate = await isSuperAdmin(auth.session.token);
+
   const store = await readAdminStore();
+  const configuredRoles = listConfiguredRoles(store);
+  const allowedRoleSet = new Set(configuredRoles);
 
   const nativeRows = Object.entries(store.nativeAuth.identities).map(([identityId, identity]) => {
     const state = store.users[identityId];
-    const normalizedMasterRole = toNativeRole(state?.masterRole);
-    const inferred = Array.from(new Set<NativeRole>([
+    const normalizedMasterRole = toNativeRole(state?.masterRole, allowedRoleSet);
+    const inferred = Array.from(new Set<string>([
       ...identity.roles,
       ...(normalizedMasterRole ? [normalizedMasterRole] : []),
     ]));
-    const effectiveRole = (state?.masterRole || inferred[0] || null) as NativeRole | null;
+    const effectiveRole = normalizeRoleKey(state?.masterRole) || inferred[0] || null;
     const controlCenterModules = effectiveRole
       ? Object.entries(store.controlCenterRoleVisibility[effectiveRole] || {})
           .filter(([, enabled]) => Boolean(enabled))
@@ -133,20 +206,21 @@ export async function GET() {
 
     return {
       id: identityId,
-      name: identity.name,
+      name: toDisplayName(identity.name, identity.email, identityId),
       username: identity.email,
       email: identity.email,
       avatarUrl: identity.avatarUrl || '',
       rawAuthRole: identity.source === 'WORDPRESS_BRIDGE' ? 'wordpress_bridge' : 'native',
       rawRoles: normalizeRoles(identity.roles),
-      normalizedRole: state?.masterRole || inferred[0] || null,
+      normalizedRole: toNativeRole(state?.masterRole, allowedRoleSet) || inferred[0] || null,
       normalizedRoles: inferred,
-      controlCenterAccess: inferred.some((role) => ['SUPER_ADMIN', 'ADMIN', 'SUPPORT_OFFICER', 'DEPLOYMENT_MANAGER', 'BILLING_MANAGER'].includes(role)),
+      controlCenterAccess: inferred.some((role) => CONTROL_CENTER_MODULE_KEYS.some((moduleKey) => Boolean(store.controlCenterRoleVisibility[role]?.[moduleKey]))),
       controlCenterModules,
       status: deriveStatus(state) || identity.status,
       active: state?.active ?? identity.status === 'ACTIVE',
       assignedWorkspaceId: state?.assignedWorkspaceId || null,
       assignedClientOrganizationId: state?.assignedClientOrganizationId || null,
+      ticketSignature: state?.ticketSignature || '',
       invitePending: Boolean(state?.invitePending),
       source: identity.source === 'WORDPRESS_BRIDGE' ? 'wordpress_bridge' : 'native',
     };
@@ -162,27 +236,28 @@ export async function GET() {
             .map(([module]) => module)
         : [],
       id,
-      name: 'Invited user',
+      name: toDisplayName(store.nativeAuth.identities[id]?.name, store.nativeAuth.identities[id]?.email, id),
       username: id,
-      email: '',
+      email: store.nativeAuth.identities[id]?.email || '',
       avatarUrl: store.nativeAuth.identities[id]?.avatarUrl || '',
       rawAuthRole: state.rawAuthRole || null,
       rawRoles: state.rawAuthRole ? [state.rawAuthRole] : [],
-      normalizedRole: state.masterRole || null,
-      normalizedRoles: state.masterRole ? [state.masterRole] : [],
-      controlCenterAccess: Boolean(state.masterRole && ['SUPER_ADMIN', 'ADMIN', 'SUPPORT_OFFICER', 'DEPLOYMENT_MANAGER', 'BILLING_MANAGER'].includes(state.masterRole)),
+      normalizedRole: toNativeRole(state.masterRole, allowedRoleSet) || null,
+      normalizedRoles: toNativeRole(state.masterRole, allowedRoleSet) ? [toNativeRole(state.masterRole, allowedRoleSet) as string] : [],
+      controlCenterAccess: Boolean(toNativeRole(state.masterRole, allowedRoleSet) && CONTROL_CENTER_MODULE_KEYS.some((moduleKey) => Boolean(store.controlCenterRoleVisibility[toNativeRole(state.masterRole, allowedRoleSet) as string]?.[moduleKey]))),
       status: deriveStatus(state),
       active: state.active,
       assignedWorkspaceId: state.assignedWorkspaceId || null,
       assignedClientOrganizationId: state.assignedClientOrganizationId || null,
+      ticketSignature: state.ticketSignature || '',
       invitePending: Boolean(state.invitePending),
       source: 'invite_scaffold',
     }));
 
   return NextResponse.json({
-    safeRoleChangeEnabled: true,
+    safeRoleChangeEnabled: canMutate,
     users: [...nativeRows, ...inviteOnlyRows],
-    marveoRoles: ALLOWED_MARVEO_ROLES,
+    marveoRoles: configuredRoles,
     warnings: [],
   });
 }
@@ -346,7 +421,9 @@ export async function PATCH(req: NextRequest) {
     : undefined;
   if (requestedAvatarUrl === null) return badRequest('avatarUrl must be a valid URL');
 
-  const requestedRole = normalizeMasterRole(body.masterRole);
+  const store = await readAdminStore();
+  const allowedRoleSet = new Set(listConfiguredRoles(store));
+  const requestedRole = normalizeMasterRole(body.masterRole, allowedRoleSet);
   if (body.masterRole && !requestedRole) {
     return badRequest('masterRole is invalid');
   }
@@ -356,7 +433,10 @@ export async function PATCH(req: NextRequest) {
     ? (nextStatus as 'ACTIVE' | 'INVITED' | 'DISABLED')
     : undefined;
 
-  const store = await readAdminStore();
+  const requestedTicketSignature = Object.prototype.hasOwnProperty.call(body, 'ticketSignature')
+    ? normalizeSignature((body as { ticketSignature?: unknown }).ticketSignature)
+    : undefined;
+
   const identity = store.nativeAuth.identities[userId];
   if ((requestedName !== undefined || requestedEmail !== undefined) && identity?.source === 'WORDPRESS_BRIDGE') {
     return badRequest('Cannot edit name/email for WordPress bridge users.');
@@ -396,6 +476,7 @@ export async function PATCH(req: NextRequest) {
           assignedClientOrganizationId: typeof body.assignedClientOrganizationId === 'string'
             ? body.assignedClientOrganizationId.trim() || undefined
             : existing.assignedClientOrganizationId,
+          ticketSignature: requestedTicketSignature ?? existing.ticketSignature,
         },
       },
       nativeAuth: (requestedName !== undefined || requestedEmail !== undefined || requestedAvatarUrl !== undefined || validStatus !== undefined) && canEditIdentity ? {
@@ -441,7 +522,7 @@ export async function PATCH(req: NextRequest) {
     ok: true,
     userId,
     state: updated.users[userId],
-    safeRoleChangeEnabled: true,
+    safeRoleChangeEnabled: canMutate,
   });
 }
 
@@ -457,7 +538,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== 'object') return badRequest('Invalid JSON body');
 
-  const requestedRole = normalizeMasterRole(body.masterRole);
+  const store = await readAdminStore();
+  const allowedRoleSet = new Set(listConfiguredRoles(store));
+  const requestedRole = normalizeMasterRole(body.masterRole, allowedRoleSet);
   if (!requestedRole) return badRequest('masterRole is required for invite scaffold');
 
   const requestedName = normalizeName((body as { name?: unknown }).name);
@@ -469,7 +552,6 @@ export async function POST(req: NextRequest) {
   const requestedAvatarUrl = normalizeAvatarUrl((body as { avatarUrl?: unknown }).avatarUrl);
   if (requestedAvatarUrl === null) return badRequest('avatarUrl must be a valid URL');
 
-  const store = await readAdminStore();
   const conflict = Object.values(store.nativeAuth.identities).some((row) => row.email.trim().toLowerCase() === requestedEmail);
   if (conflict) return badRequest('email is already in use by another identity');
 

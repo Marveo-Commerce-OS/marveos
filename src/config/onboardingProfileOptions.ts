@@ -31,6 +31,7 @@ export const ONBOARDING_BUSINESS_TYPE_OPTIONS: OnboardingOption[] = [
   { value: 'Service', label: 'Service' },
   { value: 'Ecommerce', label: 'Ecommerce' },
   { value: 'Professional Services', label: 'Professional Services' },
+  { value: 'Professional Services / Technology', label: 'Professional Services / Technology' },
   { value: 'Creative Services', label: 'Creative Services' },
   { value: 'Health & Wellness', label: 'Health & Wellness' },
   { value: 'Education / Training', label: 'Education / Training' },

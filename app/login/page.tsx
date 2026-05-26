@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getConfig } from '@/src/config/client';
+import PublicSupportChatWidget from '@/components/PublicSupportChatWidget';
 
 type PublicBranding = {
   brandName: string;
@@ -21,6 +22,10 @@ function LoginPageContent() {
   const demoMode = process.env.NEXT_PUBLIC_MARVEO_DEMO_MODE === 'true';
   const demoUsername = process.env.NEXT_PUBLIC_MARVEO_DEMO_USERNAME || 'demo-admin';
   const [form, setForm] = useState({ username: '', password: '' });
+  const [otpCode, setOtpCode] = useState('');
+  const [otpChallengeId, setOtpChallengeId] = useState('');
+  const [otpDeliveryHint, setOtpDeliveryHint] = useState('');
+  const [otpRequired, setOtpRequired] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [branding, setBranding] = useState<PublicBranding>({
@@ -73,9 +78,21 @@ function LoginPageContent() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, loginSurface: 'portal' }),
+        body: JSON.stringify({
+          ...form,
+          loginSurface: 'portal',
+          ...(otpRequired ? { otpChallengeId, otpCode } : {}),
+        }),
       });
       const data = await res.json();
+      if (data?.otpRequired) {
+        setOtpRequired(true);
+        setOtpChallengeId(String(data.otpChallengeId || ''));
+        setOtpDeliveryHint(String(data.otpDeliveryHint || ''));
+        setError('');
+        setLoading(false);
+        return;
+      }
       if (!res.ok) {
         setError(data.error || 'Invalid credentials');
         setLoading(false);
@@ -164,7 +181,12 @@ function LoginPageContent() {
                     type="text"
                     required
                     value={form.username}
-                    onChange={(e) => setForm(p => ({ ...p, username: e.target.value }))}
+                    onChange={(e) => {
+                      setForm(p => ({ ...p, username: e.target.value }));
+                      setOtpRequired(false);
+                      setOtpChallengeId('');
+                      setOtpCode('');
+                    }}
                     disabled={loading}
                     className="h-12 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-white placeholder-gray-400/60"
                     placeholder="your username"
@@ -176,7 +198,12 @@ function LoginPageContent() {
                     type="password"
                     required
                     value={form.password}
-                    onChange={(e) => setForm(p => ({ ...p, password: e.target.value }))}
+                    onChange={(e) => {
+                      setForm(p => ({ ...p, password: e.target.value }));
+                      setOtpRequired(false);
+                      setOtpChallengeId('');
+                      setOtpCode('');
+                    }}
                     disabled={loading}
                     className="h-12 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-white placeholder-gray-400/60"
                     placeholder="••••••••"
@@ -187,6 +214,35 @@ function LoginPageContent() {
                     </Link>
                   </div>
                 </div>
+                {otpRequired ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-white/90">Verification code</label>
+                    <input
+                      type="text"
+                      required
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      disabled={loading}
+                      className="h-12 w-full rounded-xl border border-white/20 bg-white/10 px-4 text-white placeholder-gray-400/60"
+                      placeholder="6-digit code"
+                    />
+                    <p className="mt-2 text-xs text-slate-300">
+                      Code sent to {otpDeliveryHint || 'your email'}.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOtpRequired(false);
+                        setOtpChallengeId('');
+                        setOtpCode('');
+                        setError('');
+                      }}
+                      className="mt-2 text-xs text-blue-300 hover:text-blue-200"
+                    >
+                      Send a new code
+                    </button>
+                  </div>
+                ) : null}
                 <button
                   type="submit"
                   disabled={loading}
@@ -195,7 +251,7 @@ function LoginPageContent() {
                   }}
                   className="mt-2 h-12 w-full rounded-xl text-sm font-semibold text-white disabled:opacity-60"
                 >
-                  {loading ? 'Verifying...' : 'Sign In to Portal'}
+                  {loading ? 'Verifying...' : otpRequired ? 'Verify code and continue' : 'Sign In to Portal'}
                 </button>
               </form>
 
@@ -214,6 +270,7 @@ export default function LoginPage() {
   return (
     <Suspense fallback={null}>
       <LoginPageContent />
+      <PublicSupportChatWidget />
     </Suspense>
   );
 }

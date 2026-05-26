@@ -45,6 +45,19 @@ function toneClass(level: 'high' | 'medium' | 'low') {
   return 'border-emerald-200 bg-emerald-50 text-emerald-900';
 }
 
+function formatTimestampUTC(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Invalid date';
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
+}
+
 export default function ReportsBoard({ rows, snapshotMetrics }: Props) {
   const [typeFilter, setTypeFilter] = useState<'all' | 'Incident' | 'Complaint'>('all');
   const [severityFilter, setSeverityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
@@ -302,7 +315,7 @@ export default function ReportsBoard({ rows, snapshotMetrics }: Props) {
                       <td className="px-3 py-2 text-sm text-slate-700">{row.country || 'n/a'}</td>
                       <td className="px-3 py-2 text-sm text-slate-700">{row.status}</td>
                       <td className="px-3 py-2 text-sm text-slate-700">{row.supportStatus}</td>
-                      <td className="px-3 py-2 text-xs text-slate-500">{new Date(row.updatedAt).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{formatTimestampUTC(row.updatedAt)}</td>
                     </tr>
                   ))}
                 </tbody>

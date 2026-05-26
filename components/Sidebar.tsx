@@ -12,6 +12,7 @@ const NAV = [
   { path: '', label: 'Dashboard', icon: LayoutDashboard, exact: true, moduleKey: 'dashboard' },
   { path: '/workspaces', label: 'Cloud Workspaces', icon: CloudCog, moduleKey: 'dashboard' },
   { path: '/deployment', label: 'Deployment Links', icon: ExternalLink, moduleKey: 'dashboard' },
+  { path: '/support', label: 'Support Center', icon: BookOpen, moduleKey: 'dashboard' },
   { path: '/pages', label: 'Pages', icon: FileStack, moduleKey: 'dashboard' },
   { path: '/blog', label: 'Blog', icon: BookOpen, moduleKey: 'blog' },
   { path: '/products', label: 'Products', icon: ShoppingBag, moduleKey: 'products' },

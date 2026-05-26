@@ -288,6 +288,37 @@ function prettyWooCommerceState(value: boolean | undefined): string {
   return value ? 'Installed' : 'Not installed';
 }
 
+function getNewWebsiteDefaults(profile: Pick<ProfileBasics, 'sector' | 'professionKey'>) {
+  const professionKey = profile.professionKey.trim();
+  const sector = profile.sector.trim();
+
+  if (professionKey === 'saas-software-platform') {
+    return { pagesNeeded: ['Home', 'Features', 'Pricing', 'Contact'] };
+  }
+
+  if (professionKey === 'digital-agency') {
+    return { pagesNeeded: ['Home', 'Services', 'Case Studies', 'Contact'] };
+  }
+
+  if (professionKey === 'it-support-company') {
+    return { pagesNeeded: ['Home', 'Services', 'Support Plans', 'Contact'] };
+  }
+
+  if (professionKey === 'software-development-company') {
+    return { pagesNeeded: ['Home', 'Services', 'Process', 'Contact'] };
+  }
+
+  if (professionKey === 'automation-consultant') {
+    return { pagesNeeded: ['Home', 'Services', 'Automation Workflows', 'Contact'] };
+  }
+
+  if (sector === 'technology-software') {
+    return { pagesNeeded: ['Home', 'Services', 'Contact'] };
+  }
+
+  return { pagesNeeded: ['Home', 'About', 'Contact'] };
+}
+
 function mapCountryToCode(value: string): string {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return 'US';
@@ -639,6 +670,9 @@ function SetupMvpPageContent() {
           websiteType: 'NEW_WEBSITE',
           country: countryCode,
           planId: draft.planId,
+          businessType: draft.profile.businessType,
+          sector: draft.profile.sector,
+          professionKey: draft.profile.professionKey,
         });
 
         const response = await fetch(`/api/public/templates?${params.toString()}`, { method: 'GET', cache: 'no-store' });
@@ -1604,6 +1638,12 @@ function SetupMvpPageContent() {
                         ...prev.profile,
                         sector: e.target.value,
                       },
+                      newWebsiteData: prev.websiteType === 'NEW_WEBSITE'
+                        ? {
+                            ...prev.newWebsiteData,
+                            ...getNewWebsiteDefaults({ sector: e.target.value, professionKey: prev.profile.professionKey }),
+                          }
+                        : prev.newWebsiteData,
                     }))}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >
@@ -1625,6 +1665,12 @@ function SetupMvpPageContent() {
                         professionKey: e.target.value,
                         professionLabel: professionOptions.find((item) => item.key === e.target.value)?.label || '',
                       },
+                      newWebsiteData: prev.websiteType === 'NEW_WEBSITE'
+                        ? {
+                            ...prev.newWebsiteData,
+                            ...getNewWebsiteDefaults({ sector: prev.profile.sector, professionKey: e.target.value }),
+                          }
+                        : prev.newWebsiteData,
                     }))}
                     className="w-full bg-transparent text-white focus:outline-none"
                   >

@@ -231,3 +231,26 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true, template: createdTemplate }, { status: 201 });
 }
+
+export async function DELETE() {
+  const auth = await ensureAdminSession();
+  if ('error' in auth) return auth.error;
+
+  const canMutate = await isSuperAdmin(auth.session.token);
+  if (!canMutate) {
+    return NextResponse.json({ ok: false, error: 'Only super admins can clear templates.' }, { status: 403 });
+  }
+
+  const cleared = await updateAdminStore((current) => ({
+    ...current,
+    cloud: {
+      ...current.cloud,
+      commercial: {
+        ...current.cloud.commercial,
+        templates: [],
+      },
+    },
+  }));
+
+  return NextResponse.json({ ok: true, templates: cleared.cloud.commercial.templates });
+}

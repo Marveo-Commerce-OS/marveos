@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin } from '@/lib/auth';
+import { getCurrentPlatformUser, isSuperAdmin } from '@/lib/auth';
 import { PLATFORM_EMAIL_TEMPLATE_KEYS, appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
+import { normalizeStoredMediaUrl } from '@/lib/mediaUrls';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -17,17 +19,7 @@ function normalizeRecipientList(input: unknown): string[] {
 }
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const admin = await isAdmin(session.token);
-  if (!admin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('systemSettings', 'view');
 }
 
 export async function GET() {
@@ -35,18 +27,24 @@ export async function GET() {
   if ('error' in auth) return auth.error;
 
   const store = await readAdminStore();
+  const activeSessions = Object.values(store.nativeAuth.sessions).filter((session) => new Date(session.expiresAt) > new Date());
+  const activeUniqueUsers = new Set(activeSessions.map((session) => session.userId)).size;
   return NextResponse.json({
     accountPlan: store.cloud.accountPlan,
     platformSettings: store.platformSettings,
     trialDefaults: store.cloud.commercial.trialDefaults,
+    sessionStats: {
+      activeSessionCount: activeSessions.length,
+      activeUniqueUsers,
+    },
     supportOfficerPoolSize: Object.values(store.nativeAuth.identities).filter((identity) =>
-      identity.roles.some((role) => role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'SUPPORT_OFFICER'),
+      identity.roles.some((role) => role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'CUSTOMER_SUPPORT' || role === 'TECHNICAL_SUPPORT'),
     ).length,
   });
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('systemSettings', 'update');
   if ('error' in auth) return auth.error;
 
   const canEdit = await isSuperAdmin(auth.session.token);
@@ -204,6 +202,12 @@ export async function PATCH(req: NextRequest) {
   const demoMode = (body.demoMode && typeof body.demoMode === 'object')
     ? (body.demoMode as Record<string, unknown>)
     : {};
+  const sessionSecurity = (body.sessionSecurity && typeof body.sessionSecurity === 'object')
+    ? (body.sessionSecurity as Record<string, unknown>)
+    : {};
+  const loginProtection = (body.loginProtection && typeof body.loginProtection === 'object')
+    ? (body.loginProtection as Record<string, unknown>)
+    : {};
   const templatePublishRules = (body.templatePublishRules && typeof body.templatePublishRules === 'object')
     ? (body.templatePublishRules as Record<string, unknown>)
     : {};
@@ -227,13 +231,48 @@ export async function PATCH(req: NextRequest) {
     return badRequest('supportDefaults.defaultSetupType must be NEW_WEBSITE, EXISTING_WEBSITE, or CUSTOM_HEADLESS.');
   }
 
+  const inactivityEnabled = Boolean(sessionSecurity.inactivityEnabled);
+  const idleTimeoutMinutes = Number(sessionSecurity.idleTimeoutMinutes ?? 30);
+  const idleWarningMinutes = Number(sessionSecurity.idleWarningMinutes ?? 2);
+  const enforceSingleSession = Boolean(sessionSecurity.enforceSingleSession);
+
+  if (!Number.isFinite(idleTimeoutMinutes) || idleTimeoutMinutes < 5 || idleTimeoutMinutes > 240) {
+    return badRequest('sessionSecurity.idleTimeoutMinutes must be between 5 and 240.');
+  }
+  if (!Number.isFinite(idleWarningMinutes) || idleWarningMinutes < 1 || idleWarningMinutes > 30) {
+    return badRequest('sessionSecurity.idleWarningMinutes must be between 1 and 30.');
+  }
+  if (idleWarningMinutes >= idleTimeoutMinutes) {
+    return badRequest('sessionSecurity.idleWarningMinutes must be less than sessionSecurity.idleTimeoutMinutes.');
+  }
+
+  const loginProtectionEnabled = Boolean(loginProtection.enabled);
+  const maxFailedAttempts = Number(loginProtection.maxFailedAttempts ?? 5);
+  const windowMinutes = Number(loginProtection.windowMinutes ?? 10);
+  const lockoutMinutes = Number(loginProtection.lockoutMinutes ?? 15);
+  const requireOtpChallenge = Boolean(loginProtection.requireOtpChallenge);
+  const otpCodeTtlMinutes = Number(loginProtection.otpCodeTtlMinutes ?? 10);
+
+  if (!Number.isFinite(maxFailedAttempts) || maxFailedAttempts < 3 || maxFailedAttempts > 20) {
+    return badRequest('loginProtection.maxFailedAttempts must be between 3 and 20.');
+  }
+  if (!Number.isFinite(windowMinutes) || windowMinutes < 1 || windowMinutes > 60) {
+    return badRequest('loginProtection.windowMinutes must be between 1 and 60.');
+  }
+  if (!Number.isFinite(lockoutMinutes) || lockoutMinutes < 1 || lockoutMinutes > 240) {
+    return badRequest('loginProtection.lockoutMinutes must be between 1 and 240.');
+  }
+  if (!Number.isFinite(otpCodeTtlMinutes) || otpCodeTtlMinutes < 2 || otpCodeTtlMinutes > 30) {
+    return badRequest('loginProtection.otpCodeTtlMinutes must be between 2 and 30.');
+  }
+
   const brandName = typeof branding.brandName === 'string' ? branding.brandName.trim() : 'Marveo';
   const brandByline = typeof branding.brandByline === 'string' ? branding.brandByline.trim() : '';
-  const logoUrl = typeof branding.logoUrl === 'string' ? branding.logoUrl.trim() : '';
-  const dashboardLogoUrl = typeof branding.dashboardLogoUrl === 'string' ? branding.dashboardLogoUrl.trim() : '';
-  const portalLoginLogoUrl = typeof branding.portalLoginLogoUrl === 'string' ? branding.portalLoginLogoUrl.trim() : '';
-  const faviconUrl = typeof branding.faviconUrl === 'string' ? branding.faviconUrl.trim() : '';
-  const footerLogoUrl = typeof branding.footerLogoUrl === 'string' ? branding.footerLogoUrl.trim() : '';
+  const logoUrl = normalizeStoredMediaUrl(branding.logoUrl) || '';
+  const dashboardLogoUrl = normalizeStoredMediaUrl(branding.dashboardLogoUrl) || '';
+  const portalLoginLogoUrl = normalizeStoredMediaUrl(branding.portalLoginLogoUrl) || '';
+  const faviconUrl = normalizeStoredMediaUrl(branding.faviconUrl) || '';
+  const footerLogoUrl = normalizeStoredMediaUrl(branding.footerLogoUrl) || '';
   const primaryColor = typeof branding.primaryColor === 'string' ? branding.primaryColor.trim() : '#0f172a';
   const secondaryColor = typeof branding.secondaryColor === 'string' ? branding.secondaryColor.trim() : '#0ea5e9';
   const websiteUrl = typeof branding.websiteUrl === 'string' ? branding.websiteUrl.trim() : '';
@@ -335,6 +374,20 @@ export async function PATCH(req: NextRequest) {
         demoMode: {
           enabled: Boolean(demoMode.enabled),
           allowOperationalMutations: Boolean(demoMode.allowOperationalMutations),
+        },
+        sessionSecurity: {
+          inactivityEnabled,
+          idleTimeoutMinutes,
+          idleWarningMinutes,
+          enforceSingleSession,
+        },
+        loginProtection: {
+          enabled: loginProtectionEnabled,
+          maxFailedAttempts,
+          windowMinutes,
+          lockoutMinutes,
+          requireOtpChallenge,
+          otpCodeTtlMinutes,
         },
         templatePublishRules: {
           requireArtifactValidation: Boolean(templatePublishRules.requireArtifactValidation),

@@ -101,6 +101,67 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function absolutizeEmailImageSources(html: string, appBaseUrl: string) {
+  const normalizedBase = normalizeAppBaseUrl(appBaseUrl);
+
+  return html.replace(/<img\b([^>]*?)\bsrc="([^"]+)"([^>]*)>/gi, (match, before, src, after) => {
+    const trimmedSrc = String(src || '').trim();
+    if (!trimmedSrc || /^https?:\/\//i.test(trimmedSrc) || /^data:/i.test(trimmedSrc) || /^cid:/i.test(trimmedSrc)) {
+      return match;
+    }
+
+    if (!normalizedBase) {
+      const altMatch = match.match(/\balt="([^"]*)"/i);
+      const altText = altMatch ? altMatch[1] : '';
+      return altText ? `<span style="font-size:12px;color:#64748b;">${escapeHtml(altText)}</span>` : '';
+    }
+
+    const absolute = absolutizeUrl(trimmedSrc, normalizedBase);
+    return absolute ? `<img${before}src="${escapeHtml(absolute)}"${after}>` : '';
+  });
+}
+
+async function inlineEmailImageSources(html: string, appBaseUrl: string) {
+  const absolutized = absolutizeEmailImageSources(html, appBaseUrl);
+  const imageTagPattern = /<img\b([^>]*?)\bsrc="([^"]+)"([^>]*)>/gi;
+
+  const replacements = await Promise.all(Array.from(absolutized.matchAll(imageTagPattern)).map(async (match) => {
+    const fullMatch = match[0];
+    const before = match[1] || '';
+    const src = String(match[2] || '').trim();
+    const after = match[3] || '';
+
+    if (!src || /^data:/i.test(src) || /^cid:/i.test(src)) {
+      return { fullMatch, replacement: fullMatch };
+    }
+
+    try {
+      const response = await fetch(src, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.startsWith('image/')) {
+        throw new Error('Not an image');
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const dataUri = `data:${contentType};base64,${buffer.toString('base64')}`;
+      return { fullMatch, replacement: `<img${before}src="${escapeHtml(dataUri)}"${after}>` };
+    } catch {
+      const altMatch = fullMatch.match(/\balt="([^"]*)"/i);
+      const altText = altMatch ? altMatch[1] : '';
+      const fallback = altText
+        ? `<span style="display:inline-block;font-size:12px;line-height:1.2;color:#64748b;">${escapeHtml(altText)}</span>`
+        : '';
+      return { fullMatch, replacement: fallback };
+    }
+  }));
+
+  return replacements.reduce((current, { fullMatch, replacement }) => current.replace(fullMatch, replacement), absolutized);
+}
+
 function buildMarveoBrandedHtml(params: {
   subject: string;
   preheader: string;
@@ -132,7 +193,7 @@ function buildMarveoBrandedHtml(params: {
 }) {
   const year = new Date().getFullYear();
   const brandName = params.brandName || 'Marveo';
-  const normalizedAppBaseUrl = normalizeAppBaseUrl(params.appBaseUrl);
+  const normalizedAppBaseUrl = normalizeAppBaseUrl(params.appBaseUrl) || normalizeAppBaseUrl(params.websiteUrl);
   const absoluteLogoUrl = absolutizeUrl(params.logoUrl, normalizedAppBaseUrl);
   const absoluteFooterLogoUrl = absolutizeUrl(params.footerLogoUrl || params.logoUrl, normalizedAppBaseUrl);
 
@@ -553,12 +614,13 @@ export async function renderPlatformEmailTemplatePreview(params: {
     deploymentEmail: emailSettings.deploymentEmail || '',
     appBaseUrl: emailSettings.appBaseUrl || '',
   });
+   const inlinedHtml = await inlineEmailImageSources(html, emailSettings.appBaseUrl || branding.websiteUrl || config.clientLogo || '');
 
   return {
     ok: true,
     subject,
     preheader,
-    html,
+      html: inlinedHtml,
     text,
   } as const;
 }

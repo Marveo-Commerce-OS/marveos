@@ -3,44 +3,132 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  LayoutDashboard,
-  Building2,
+  AlertTriangle,
+  BookOpen,
   Briefcase,
-  Rocket,
-  LifeBuoy,
-  ShieldCheck,
-  PlugZap,
-  LayoutTemplate,
-  Users,
+  Building2,
   CreditCard,
   FileBarChart2,
+  Inbox,
+  LayoutDashboard,
+  LayoutTemplate,
+  Landmark,
+  LifeBuoy,
   LineChart,
+  LogOut,
+  PlugZap,
+  Rocket,
   ScrollText,
   Settings,
-  LogOut,
-  ChevronDown,
+  ShieldCheck,
+  Ticket,
+  Users,
 } from 'lucide-react';
 import { getConfig } from '@/src/config/client';
 import type { ControlCenterModuleKey } from '@/lib/adminStore';
+import type { SidebarItem } from '@/lib/master/roleDashboard';
 
-const MASTER_NAV = [
-  { href: '/master', label: 'Overview', icon: LayoutDashboard, exact: true, moduleKey: 'overview' as const },
-  { href: '/master/clients', label: 'Clients', icon: Building2, moduleKey: 'clients' as const },
-  { href: '/master/workspaces', label: 'Workspaces', icon: Briefcase, moduleKey: 'workspaces' as const },
-  { href: '/master/mvp-deployments', label: 'Deployment Queue', icon: Rocket, moduleKey: 'deploymentQueue' as const },
-  { href: '/master/support', label: 'Support Queue', icon: LifeBuoy, moduleKey: 'supportQueue' as const },
-  { href: '/master/launch-readiness', label: 'Launch Readiness', icon: ShieldCheck, moduleKey: 'launchReadiness' as const },
-  { href: '/master/connectors', label: 'Connectors', icon: PlugZap, moduleKey: 'connectors' as const },
-  { href: '/master/templates', label: 'Templates', icon: LayoutTemplate, moduleKey: 'templates' as const },
-  { href: '/master/team', label: 'Team', icon: Users, moduleKey: 'team' as const },
-  { href: '/master/billing', label: 'Plans & Billing', icon: CreditCard, moduleKey: 'plansBilling' as const },
-  { href: '/master/reports', label: 'Reports', icon: FileBarChart2, moduleKey: 'reports' as const },
-  { href: '/master/analytics', label: 'Analytics', icon: LineChart, moduleKey: 'analytics' as const },
-  { href: '/master/audit-logs', label: 'Audit Logs', icon: ScrollText, moduleKey: 'auditLogs' as const },
-  { href: '/master/system-settings', label: 'System Settings', icon: Settings, moduleKey: 'systemSettings' as const },
-];
+type Props = {
+  displayName: string;
+  email: string;
+  allowedModules: ControlCenterModuleKey[];
+  dashboardLogoUrl: string;
+  brandName: string;
+  navItems?: SidebarItem[];
+  surfaceLabel?: string;
+  roleLabel?: string;
+  isSuperAdmin?: boolean;
+};
+
+type LocalChevronProps = {
+  size?: number;
+  className?: string;
+};
+
+function ChevronLeftIcon({ size = 16, className }: LocalChevronProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width={size} height={size} className={className} aria-hidden="true">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon({ size = 16, className }: LocalChevronProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width={size} height={size} className={className} aria-hidden="true">
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ size = 16, className }: LocalChevronProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width={size} height={size} className={className} aria-hidden="true">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function resolveIconForItem(item: SidebarItem) {
+  const key = item.key;
+
+  if (key === 'overview' || key === 'myDashboard') return LayoutDashboard;
+  if (key === 'clients') return Building2;
+  if (key === 'workspaces') return Briefcase;
+  if (key === 'deploymentQueue' || key === 'deployments') return Rocket;
+  if (key === 'launchReadiness') return ShieldCheck;
+  if (key === 'connectors' || key === 'connectorIssues') return PlugZap;
+  if (key === 'templates') return LayoutTemplate;
+  if (key === 'finance' || key.includes('finance')) return Landmark;
+  if (key === 'reports') return FileBarChart2;
+  if (key === 'analytics') return LineChart;
+  if (key === 'systemSettings') return Settings;
+  if (key === 'rolePrivileges') return Users;
+  if (key === 'auditLogs') return ScrollText;
+
+  if (key === 'tickets' || key === 'technicalTickets') return Ticket;
+  if (key === 'complaints' || key.includes('complaint')) return AlertTriangle;
+  if (key === 'enquiries') return Inbox;
+  if (key === 'definedReplies') return BookOpen;
+  if (key === 'billing' || key === 'subscriptions') return CreditCard;
+  if (key === 'paymentIssues') return AlertTriangle;
+  if (key === 'supportCenter' || key === 'supportQueue' || key === 'supportSessions' || key === 'liveChatPanel') return LifeBuoy;
+
+  return LayoutDashboard;
+}
+
+function isItemActive(pathname: string, item: SidebarItem) {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  const target = item.href.split('#')[0]?.replace(/\/+$/, '') || '/';
+
+  if (item.exact) return normalized === target;
+  if (target === '/master') return normalized === '/master';
+  return normalized === target || normalized.startsWith(`${target}/`);
+}
+
+function normalizePath(pathname: string): string {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
+function normalizeItemHref(item: SidebarItem): string {
+  return item.href.split('#')[0]?.replace(/\/+$/, '') || '/';
+}
+
+function filterByAllowedModules(items: SidebarItem[], allowedModuleSet: Set<ControlCenterModuleKey>): SidebarItem[] {
+  return items
+    .filter((item) => {
+      if (!item.moduleKey) return true;
+      return allowedModuleSet.has(item.moduleKey);
+    })
+    .map((item) => {
+      if (!item.children) return item;
+      const children = filterByAllowedModules(item.children, allowedModuleSet);
+      return { ...item, children };
+    })
+    .filter((item) => (item.children ? item.children.length > 0 : true));
+}
 
 export default function MasterSidebar({
   displayName,
@@ -48,20 +136,36 @@ export default function MasterSidebar({
   allowedModules,
   dashboardLogoUrl,
   brandName,
-}: {
-  displayName: string;
-  email: string;
-  allowedModules: ControlCenterModuleKey[];
-  dashboardLogoUrl: string;
-  brandName: string;
-}) {
+  navItems,
+  surfaceLabel,
+  roleLabel,
+  isSuperAdmin,
+}: Props) {
   const pathname = usePathname();
   const router = useRouter();
   const config = getConfig();
+
   const [profile, setProfile] = useState<{ displayName: string; email: string; avatarUrl?: string } | null>(null);
-  const [billingMenuOpen, setBillingMenuOpen] = useState(pathname.startsWith('/master/billing'));
-  const allowedModuleSet = new Set(allowedModules);
-  const visibleNav = MASTER_NAV.filter((item) => allowedModuleSet.has(item.moduleKey));
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const collapsedPreferenceLoadedRef = useRef(false);
+  const [collapsed, setCollapsed] = useState(false);
+
+  const allowedModuleSet = useMemo(() => new Set(allowedModules), [allowedModules]);
+
+  const resolvedNavItems = useMemo(() => {
+    const items = navItems ?? [];
+    return filterByAllowedModules(items, allowedModuleSet);
+  }, [allowedModuleSet, navItems]);
+
+  const autoOpenGroups = useMemo<Record<string, boolean>>(() => {
+    const next: Record<string, boolean> = {};
+    for (const item of resolvedNavItems) {
+      if (!item.children?.length) continue;
+      const active = item.children.some((child) => isItemActive(pathname, child)) || isItemActive(pathname, item);
+      if (active) next[item.key] = true;
+    }
+    return next;
+  }, [pathname, resolvedNavItems]);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +192,24 @@ export default function MasterSidebar({
     };
   }, [displayName, email]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storedCollapsed = window.localStorage.getItem('marveo.master.sidebar.collapsed') === '1';
+    collapsedPreferenceLoadedRef.current = true;
+    const frame = window.requestAnimationFrame(() => {
+      setCollapsed(storedCollapsed);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!collapsedPreferenceLoadedRef.current) return;
+    window.localStorage.setItem('marveo.master.sidebar.collapsed', collapsed ? '1' : '0');
+  }, [collapsed]);
+
   const resolvedName = profile?.displayName ?? displayName;
   const resolvedEmail = profile?.email ?? email;
   const resolvedAvatarUrl = profile?.avatarUrl;
@@ -99,86 +221,141 @@ export default function MasterSidebar({
   }
 
   return (
-    <aside className="h-screen w-72 shrink-0 border-r border-slate-200 bg-white flex flex-col">
-      <div className="border-b border-slate-200 px-5 py-4">
-        {resolvedLogoUrl ? (
-          <div className="relative mb-2 h-10 w-40">
-            <Image
-              src={resolvedLogoUrl}
-              alt={brandName || config.clientName}
-              fill
-              className="object-contain object-left"
-              priority
-              unoptimized
-            />
+    <aside className={`relative z-40 h-screen shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-y-hidden overflow-x-visible transition-[width] duration-200 ${collapsed ? 'w-20' : 'w-72'}`}>
+      <div className={`border-b border-slate-200 ${collapsed ? 'px-2 py-3' : 'px-5 py-4'}`}>
+        <div className={`flex ${collapsed ? 'justify-center' : 'justify-between'} items-start gap-2`}>
+          <div className={collapsed ? 'hidden' : 'block'}>
+            {resolvedLogoUrl ? (
+              <div className="relative mb-2 h-10 w-40">
+                <Image
+                  src={resolvedLogoUrl}
+                  alt={brandName || config.clientName}
+                  fill
+                  className="object-contain object-left"
+                  priority
+                  unoptimized
+                />
+              </div>
+            ) : (
+              <h2 className="text-lg font-bold text-slate-900">{brandName || 'Marveo'}</h2>
+            )}
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+              {surfaceLabel || 'Control Center'}
+            </p>
+            {isSuperAdmin ? (
+              <span className="mt-2 inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                Super Admin
+              </span>
+            ) : roleLabel ? (
+              <span className="mt-2 inline-flex rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-700">
+                {roleLabel}
+              </span>
+            ) : null}
           </div>
-        ) : (
-          <h2 className="text-lg font-bold text-slate-900">{brandName || 'Marveo'}</h2>
-        )}
-        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Control Center</p>
+
+          <button
+            type="button"
+            onClick={() => setCollapsed((prev) => !prev)}
+            className="rounded-lg border border-slate-200 p-2 text-slate-600 hover:bg-slate-100"
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? <ChevronRightIcon size={16} /> : <ChevronLeftIcon size={16} />}
+          </button>
+        </div>
       </div>
 
-      <nav className="space-y-1 p-3">
-        {visibleNav.map(({ href, label, icon: Icon, exact, moduleKey }) => {
-          if (moduleKey === 'plansBilling') {
-            const active = pathname.startsWith('/master/billing');
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overflow-x-visible p-3">
+        {resolvedNavItems.map((item) => {
+          const Icon = resolveIconForItem(item);
+          const active = isItemActive(pathname, item);
+          const hasChildren = Boolean(item.children?.length);
+
+          if (hasChildren && !collapsed) {
+            const open = Boolean(openGroups[item.key] ?? autoOpenGroups[item.key]);
+            const parentOnlyActive = normalizePath(pathname) === normalizeItemHref(item);
             return (
-              <div key={href}>
+              <div key={item.key}>
                 <button
                   type="button"
-                  onClick={() => setBillingMenuOpen((current) => !current)}
+                  onClick={() => setOpenGroups((prev) => ({ ...prev, [item.key]: !open }))}
                   className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                    active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                    parentOnlyActive ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
                   <span className="flex items-center gap-3">
                     <Icon size={16} />
-                    {label}
+                    {item.label}
                   </span>
-                  <ChevronDown size={14} className={billingMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                  <ChevronDownIcon size={14} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
                 </button>
 
-                {billingMenuOpen ? (
+                {open ? (
                   <div className="mt-1 ml-7 space-y-1 border-l border-slate-200 pl-3">
-                    <Link
-                      href="/master/billing#plans"
-                      className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                    >
-                      Plans
-                      <span className="mt-0.5 block text-[11px] font-normal text-slate-500">All plans and setup</span>
-                    </Link>
-                    <Link
-                      href="/master/billing#subscriptions"
-                      className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                    >
-                      Billing
-                      <span className="mt-0.5 block text-[11px] font-normal text-slate-500">Commercial subscriptions only</span>
-                    </Link>
+                    {item.children?.map((child) => {
+                      const childActive = isItemActive(pathname, child);
+                      return (
+                        <Link
+                          key={child.key}
+                          href={child.href}
+                          className={`block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                            childActive ? 'bg-slate-200 text-slate-900' : 'text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {child.label}
+                        </Link>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
             );
           }
 
-          const active = exact ? pathname === href : pathname.startsWith(href);
+          if (hasChildren && collapsed) {
+            const childActive = item.children?.some((child) => isItemActive(pathname, child)) ?? false;
+            return (
+              <div key={item.key} className="relative">
+                <button
+                  type="button"
+                  className={`flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                    childActive ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                  aria-label={item.label}
+                  title={item.label}
+                  onClick={() => {
+                    setCollapsed(false);
+                    setOpenGroups((prev) => ({ ...prev, [item.key]: true }));
+                  }}
+                >
+                  <Icon size={16} />
+                </button>
+              </div>
+            );
+          }
+
           return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
-                active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              <Icon size={16} />
-              {label}
-            </Link>
+            <div key={item.key} className="relative">
+              <Link
+                href={item.href}
+                title={item.label}
+                className={`flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+                  collapsed ? 'justify-center' : 'gap-3'
+                } ${
+                  active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Icon size={16} />
+                {collapsed ? null : item.label}
+              </Link>
+            </div>
           );
         })}
       </nav>
 
-      <div className="mt-auto border-t border-slate-200 p-3">
-        <div className="mb-2 rounded-xl bg-slate-100 px-3 py-2">
-          <div className="flex items-center gap-3">
+      <div className="border-t border-slate-200 p-3">
+        <div className={`mb-2 rounded-xl bg-slate-100 ${collapsed ? 'px-2 py-2' : 'px-3 py-2'}`}>
+          <div className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'}`}>
             <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-slate-200 relative">
               {resolvedAvatarUrl ? (
                 <Image src={resolvedAvatarUrl} alt={resolvedName || 'User avatar'} fill className="object-cover" sizes="36px" />
@@ -186,19 +363,27 @@ export default function MasterSidebar({
                 <Image src="/images/avatar-placeholder.svg" alt="User avatar placeholder" fill className="object-cover" sizes="36px" />
               )}
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-slate-900 truncate">{resolvedName}</p>
-              <p className="text-xs text-slate-600 truncate">{resolvedEmail}</p>
-              <Link href="/master/profile" className="mt-1 inline-block text-[11px] font-medium text-slate-600 underline">Manage profile</Link>
-            </div>
+            {collapsed ? null : (
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-slate-900 truncate">{resolvedName}</p>
+                <p className="text-xs text-slate-600 truncate">{resolvedEmail}</p>
+                {isSuperAdmin ? (
+                  <p className="mt-1 text-[11px] font-semibold text-indigo-700">Role: Super Admin</p>
+                ) : roleLabel ? (
+                  <p className="mt-1 text-[11px] font-semibold text-slate-700">Role: {roleLabel}</p>
+                ) : null}
+                <Link href="/master/profile" className="mt-1 inline-block text-[11px] font-medium text-slate-600 underline">Manage profile</Link>
+              </div>
+            )}
           </div>
         </div>
         <button
           onClick={logout}
-          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
+          title="Sign out"
+          className={`flex w-full items-center rounded-xl px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 ${collapsed ? 'justify-center' : 'gap-2'}`}
         >
           <LogOut size={16} />
-          Sign out
+          {collapsed ? null : 'Sign out'}
         </button>
       </div>
     </aside>

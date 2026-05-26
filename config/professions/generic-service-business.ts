@@ -21,6 +21,7 @@ export const genericServiceBusinessProfession: ProfessionConfig = {
     { label: 'Payments', href: '/os/payments', module: 'payments' },
     { label: 'Team', href: '/os/team', module: 'team' },
     { label: 'Reports', href: '/os/reports', module: 'reports' },
+    { label: 'Support Center', href: '/os/support' },
   ],
   onboardingQuestions: [
     { id: 'services-summary', label: 'What services do you offer?', type: 'text' },
@@ -34,6 +35,14 @@ export const genericServiceBusinessProfession: ProfessionConfig = {
     order: 'Service Request',
     customer: 'Client',
   },
+  quickActions: [
+    'Add Lead',
+    'Add Client',
+    'Create Invoice',
+    'Add Team Member',
+    'View Reports',
+    'Request Support',
+  ],
 };
 
 export default genericServiceBusinessProfession;

@@ -25,7 +25,8 @@ export const CLIENT_PLATFORM_ROLES = ['customer', 'subscriber'] as const;
 export const MARVEO_INTERNAL_ROLES = [
   'SUPER_ADMIN',
   'ADMIN',
-  'SUPPORT_OFFICER',
+  'CUSTOMER_SUPPORT',
+  'TECHNICAL_SUPPORT',
   'DEPLOYMENT_MANAGER',
   'BILLING_MANAGER',
 ] as const;
@@ -55,15 +56,11 @@ const WP_ROLE_TO_MARVEO_ROLE: Record<string, MarveoRole[]> = {
   administrator: [
     'SUPER_ADMIN',
     'ADMIN',
-    'SUPPORT_OFFICER',
-    'DEPLOYMENT_MANAGER',
     'BILLING_MANAGER',
     'CONNECTED_WORDPRESS_ADMIN',
   ],
   shop_manager: [
     'ADMIN',
-    'SUPPORT_OFFICER',
-    'DEPLOYMENT_MANAGER',
     'BILLING_MANAGER',
     'CONNECTED_WOOCOMMERCE_MANAGER',
   ],
@@ -93,6 +90,10 @@ export function normalizeMarveoRoles(value: unknown): MarveoRole[] {
     if (!raw) continue;
 
     const upper = raw.toUpperCase();
+    if (upper === 'SUPPORT_OFFICER') {
+      resolved.add('CUSTOMER_SUPPORT');
+      continue;
+    }
     if (MARVEO_ROLE_SET.has(upper)) {
       resolved.add(upper as MarveoRole);
       continue;
@@ -117,10 +118,17 @@ export function hasClientMasterAccess(roles: MarveoRole[]): boolean {
 }
 
 export async function resolveManagedUserState(userId: unknown): Promise<ManagedUserState | null> {
-  const numericId = Number(userId);
-  if (!Number.isFinite(numericId) || numericId <= 0) return null;
+  const rawId = String(userId ?? '').trim();
+  if (!rawId) return null;
   const store = await readAdminStore();
-  return store.users[String(numericId)] ?? null;
+  if (store.users[rawId]) return store.users[rawId] ?? null;
+
+  const numericId = Number(rawId);
+  if (Number.isFinite(numericId) && numericId > 0) {
+    return store.users[String(numericId)] ?? null;
+  }
+
+  return null;
 }
 
 export async function resolveSessionMarveoRoles(sessionUser: unknown): Promise<{
@@ -135,7 +143,9 @@ export async function resolveSessionMarveoRoles(sessionUser: unknown): Promise<{
   const rawPrimaryRole = rawRoles[0] ? String(rawRoles[0]) : null;
   const userId = userObj?.id ?? userObj?.ID;
   const userState = await resolveManagedUserState(userId);
-  const masterRole = userState?.masterRole ?? null;
+  const masterRole = userState?.masterRole
+    ? (normalizeMarveoRoles([userState.masterRole])[0] ?? null)
+    : null;
 
   const merged = [...rawRoles, ...(masterRole ? [masterRole] : [])];
   const marveoRoles = normalizeMarveoRoles(merged);

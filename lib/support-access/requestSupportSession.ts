@@ -95,3 +95,9 @@ export function markSupportOtpVerified(challengeId: string): SupportOtpChallenge
 export function deleteSupportOtpChallenge(challengeId: string) {
   supportOtpStore.delete(challengeId);
 }
+
+export function clearSupportOtpStore(): number {
+  const count = supportOtpStore.size;
+  supportOtpStore.clear();
+  return count;
+}

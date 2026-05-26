@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
     keepAlive: true,
   },
   images: {
+    localPatterns: [
+      { pathname: '/api/media/file/**' },
+      { pathname: '/images/**' },
+    ],
     remotePatterns: [
       // Gravatar for user avatars
       { protocol: 'https', hostname: 'secure.gravatar.com' },

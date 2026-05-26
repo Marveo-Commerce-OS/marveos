@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, isAdmin } from '@/lib/auth';
 import { PLATFORM_EMAIL_TEMPLATE_KEYS } from '@/lib/adminStore';
 import { sendPlatformTestEmail } from '@/lib/emailNotifications';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -30,17 +30,7 @@ function reasonToMessage(reason: string): string {
 }
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const admin = await isAdmin(session.token);
-  if (!admin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('systemSettings', 'update');
 }
 
 export async function POST(req: NextRequest) {

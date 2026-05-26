@@ -97,6 +97,39 @@ export default function MasterTemplatesPage() {
     }
   }
 
+  async function clearTemplates() {
+    setError('');
+    setMessage('');
+
+    const confirmed = window.confirm('Clear all templates from the master catalog? This cannot be undone from this page.');
+    if (!confirmed) return;
+
+    const res = await fetch('/api/master/templates', { method: 'DELETE' });
+    const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !data?.ok) {
+      setError(data?.error || 'Failed to clear templates.');
+      return;
+    }
+
+    setMessage('Template catalog cleared.');
+    await loadTemplates();
+  }
+
+  async function resyncTemplates() {
+    setError('');
+    setMessage('');
+
+    const res = await fetch('/api/master/templates/resync', { method: 'POST' });
+    const data = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+    if (!res.ok || !data?.ok) {
+      setError(data?.error || 'Failed to resync templates.');
+      return;
+    }
+
+    setMessage('Template catalog resynced from the default registry.');
+    await loadTemplates();
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadTemplates();
@@ -225,16 +258,23 @@ export default function MasterTemplatesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-900">Templates</h1>
-        <p className="mt-2 text-sm text-slate-600">Master is the source of truth for template metadata used by public website and setup onboarding.</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Templates</h1>
+          <p className="mt-2 text-sm text-slate-600">Master is the source of truth for template metadata used by public website and setup onboarding.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => void loadTemplates()} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50">Refresh</button>
+          <button type="button" onClick={() => void clearTemplates()} className="rounded-full border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100">Clear templates</button>
+          <button type="button" onClick={() => void resyncTemplates()} className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Resync templates</button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total templates</p>
           <p className="mt-2 text-2xl font-bold text-slate-900">{stats.total}</p>
-          <p className="mt-2 text-xs text-slate-500">Live data</p>
+          <p className="mt-2 text-xs text-slate-500">Registry snapshot</p>
         </div>
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
           <p className="text-xs font-semibold uppercase tracking-wide">Active and public</p>

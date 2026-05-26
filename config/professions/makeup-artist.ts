@@ -9,6 +9,7 @@ export const makeupArtistProfession: ProfessionConfig = {
     'todaysBookings',
     'pendingDeposits',
     'newWhatsAppEnquiries',
+    'whatsappStatus',
     'aiAssistantStatus',
     'revenueSnapshot',
     'availabilitySetup',
@@ -24,6 +25,7 @@ export const makeupArtistProfession: ProfessionConfig = {
     { label: 'Team', href: '/os/team', module: 'team' },
     { label: 'WhatsApp', href: '/os/whatsapp', module: 'whatsapp' },
     { label: 'Reports', href: '/os/reports', module: 'reports' },
+    { label: 'Support Center', href: '/os/support' },
   ],
   onboardingQuestions: [
     { id: 'offers-bridal-makeup', label: 'Do you offer bridal makeup?', type: 'boolean' },
@@ -44,6 +46,14 @@ export const makeupArtistProfession: ProfessionConfig = {
     order: 'Booking',
     customer: 'Client',
   },
+  quickActions: [
+    'Add Booking',
+    'Add Service',
+    'Send Payment Link',
+    'Set Availability',
+    'Connect WhatsApp',
+    'Request Website Support',
+  ],
 };
 
 export default makeupArtistProfession;

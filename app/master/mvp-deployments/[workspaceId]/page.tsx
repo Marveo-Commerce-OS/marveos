@@ -25,6 +25,18 @@ type Workspace = {
 	currentStep: number;
 	status: string;
 	selectedTemplateId?: string;
+	selectedModules?: string[];
+	architecture?: string;
+	launchGuardLastCheckedAt?: string;
+	deploymentReadiness?: {
+		onboardingComplete?: boolean;
+		architectureValidated?: boolean;
+		apisReachable?: boolean;
+		modulesValid?: boolean;
+		frontendValidated?: boolean;
+		contentMapped?: boolean;
+		integrationsConfigured?: boolean;
+	};
 	connectorStatus?: string;
 	connectorSiteMetadata?: ConnectorSiteMetadata | null;
 	businessProfile?: Record<string, unknown>;
@@ -62,6 +74,35 @@ type GuardResponse = {
 	ready: boolean;
 	missingRequirements: string[];
 	recoveryActions: string[];
+};
+
+type ChecklistStatus =
+	| 'completed'
+	| 'in_progress'
+	| 'awaiting_client'
+	| 'awaiting_support'
+	| 'blocked'
+	| 'optional'
+	| 'not_started';
+
+type ChecklistOwner = 'client' | 'support' | 'system';
+
+type ChecklistSectionKey =
+	| 'workspace_setup'
+	| 'website_setup'
+	| 'deployment_integration'
+	| 'launch_readiness';
+
+type InternalChecklistItem = {
+	key: string;
+	title: string;
+	section: ChecklistSectionKey;
+	owner: ChecklistOwner;
+	status: ChecklistStatus;
+	required: boolean;
+	blocking: boolean;
+	dependsOn?: string[];
+	description?: string;
 };
 
 type AuditLog = {
@@ -161,10 +202,6 @@ function prettyAuditDetails(value: string | undefined): string {
 		.join('; ');
 }
 
-function pretty(value: unknown): string {
-	return JSON.stringify(value, null, 2);
-}
-
 function statusBadge(value?: string) {
 	const raw = String(value || 'unknown').toLowerCase();
 	if (raw.includes('ready') || raw.includes('live') || raw.includes('launched') || raw.includes('assigned')) return 'bg-emerald-100 text-emerald-700';
@@ -172,6 +209,376 @@ function statusBadge(value?: string) {
 	if (raw.includes('progress') || raw.includes('deploy')) return 'bg-blue-100 text-blue-700';
 	if (raw.includes('wait') || raw.includes('pending')) return 'bg-amber-100 text-amber-700';
 	return 'bg-slate-100 text-slate-700';
+}
+
+const SECTION_CONFIG: Array<{ key: ChecklistSectionKey; title: string }> = [
+	{ key: 'workspace_setup', title: 'Workspace Setup' },
+	{ key: 'website_setup', title: 'Website Setup' },
+	{ key: 'deployment_integration', title: 'Deployment & Integration' },
+	{ key: 'launch_readiness', title: 'Launch Readiness' },
+];
+
+const STATUS_META: Record<ChecklistStatus, { label: string; badgeClass: string }> = {
+	completed: { label: 'Completed', badgeClass: 'bg-emerald-100 text-emerald-700' },
+	in_progress: { label: 'In Progress', badgeClass: 'bg-blue-100 text-blue-700' },
+	awaiting_client: { label: 'Awaiting Client', badgeClass: 'bg-amber-100 text-amber-700' },
+	awaiting_support: { label: 'Awaiting Support', badgeClass: 'bg-indigo-100 text-indigo-700' },
+	blocked: { label: 'Blocked', badgeClass: 'bg-red-100 text-red-700' },
+	optional: { label: 'Optional', badgeClass: 'bg-slate-100 text-slate-600' },
+	not_started: { label: 'Not Started', badgeClass: 'bg-slate-200 text-slate-700' },
+};
+
+const OWNER_META: Record<ChecklistOwner, { label: string; badgeClass: string }> = {
+	client: { label: 'Client', badgeClass: 'bg-amber-50 text-amber-800 border border-amber-200' },
+	support: { label: 'Support', badgeClass: 'bg-indigo-50 text-indigo-800 border border-indigo-200' },
+	system: { label: 'System', badgeClass: 'bg-slate-100 text-slate-700 border border-slate-200' },
+};
+
+function hasProfileData(workspace: Workspace): boolean {
+	if (workspace.businessProfile && Object.keys(workspace.businessProfile).length > 0) return true;
+	if (workspace.collectedBusinessData && Object.keys(workspace.collectedBusinessData).length > 0) return true;
+	return false;
+}
+
+function hasDomainData(workspace: Workspace): boolean {
+	const fromProfile = String((workspace.businessProfile || {}).domain || '').trim();
+	const fromCollected = String((workspace.collectedBusinessData || {}).domain || '').trim();
+	const fromBase = String(workspace.contentBaseUrl || '').trim();
+	return Boolean(fromProfile || fromCollected || fromBase);
+}
+
+function hasFrontendDomain(workspace: Workspace): boolean {
+	return Boolean(String((workspace.collectedBusinessData || {}).frontendDomain || '').trim());
+}
+
+function hasBackendSubdomain(workspace: Workspace): boolean {
+	return Boolean(String((workspace.collectedBusinessData || {}).backendCmsSubdomain || '').trim());
+}
+
+function isStatusAtLeastReadyForReview(onboardingStatus?: string): boolean {
+	return ['READY_FOR_REVIEW', 'READY_FOR_LAUNCH', 'LIVE'].includes(String(onboardingStatus || '').toUpperCase());
+}
+
+function isStatusAtLeastReadyForLaunch(onboardingStatus?: string): boolean {
+	return ['READY_FOR_LAUNCH', 'LIVE'].includes(String(onboardingStatus || '').toUpperCase());
+}
+
+function isLive(onboardingStatus?: string): boolean {
+	return String(onboardingStatus || '').toUpperCase() === 'LIVE';
+}
+
+function deriveInternalChecklistItems(
+	workspace: Workspace,
+	checklist: ChecklistResponse | null,
+	guard: GuardResponse | null,
+): InternalChecklistItem[] {
+	const websiteType = String(workspace.websiteType || '').toUpperCase();
+	const connectorStatus = String(workspace.connectorStatus || '').toUpperCase();
+	const connectionMethod = String((workspace.collectedBusinessData || {}).connectionMethod || '').toLowerCase();
+	const isNewWebsite = websiteType === 'NEW_WEBSITE';
+	const isExistingWebsite = websiteType === 'EXISTING_WEBSITE';
+	const isCustomHeadless = websiteType === 'CUSTOM_HEADLESS';
+	const manualSupportFlow = isExistingWebsite && connectionMethod === 'manual';
+
+	const supportAssigned = String(workspace.supportAssignment?.status || '').toUpperCase() === 'ASSIGNED';
+	const deploymentStarted =
+		Number(workspace.currentStep || 0) >= 7 || ['DEPLOYING', 'READY_FOR_REVIEW', 'READY_FOR_LAUNCH', 'LIVE'].includes(String(workspace.onboardingStatus || '').toUpperCase());
+	const deploymentCompleted = isStatusAtLeastReadyForReview(workspace.onboardingStatus);
+	const guardPassed = Boolean(guard?.ready);
+	const qaCompleted = isStatusAtLeastReadyForReview(workspace.onboardingStatus);
+	const clientReviewReady = qaCompleted;
+	const clientApproved = isStatusAtLeastReadyForLaunch(workspace.onboardingStatus);
+	const launchAuthorized = isLive(workspace.onboardingStatus);
+	const hasIntegrationContext = Boolean(
+		isCustomHeadless ||
+		String((workspace.collectedBusinessData || {}).apiDetails || '').trim() ||
+		String((workspace.collectedBusinessData || {}).integrationNotes || '').trim(),
+	);
+
+	const envApplied = Boolean(workspace.deploymentReadiness?.architectureValidated);
+	const connectorInstalled =
+		connectorStatus === 'CONNECTED' ||
+		connectorStatus === 'PENDING_VERIFICATION' ||
+		connectorStatus === 'TOKEN_GENERATED' ||
+		manualSupportFlow;
+	const connectorVerified = connectorStatus === 'CONNECTED';
+	const syncValidated = guardPassed || Boolean(workspace.deploymentReadiness?.contentMapped && workspace.deploymentReadiness?.frontendValidated);
+
+	const professionApplied = Boolean(
+		String((workspace.businessProfile || {}).professionKey || '').trim() ||
+		String((workspace.collectedBusinessData || {}).professionKey || '').trim() ||
+		String((workspace.collectedBusinessData || {}).businessType || '').trim(),
+	);
+	const modulesActivated = Array.isArray(workspace.selectedModules) && workspace.selectedModules.length > 0;
+	const websitePathSelected = Boolean(workspace.websiteType);
+	const templateOrConnectorSelected = Boolean(
+		String(workspace.selectedTemplateId || '').trim() || connectorStatus === 'CONNECTED' || connectorStatus === 'PENDING_VERIFICATION' || connectorStatus === 'TOKEN_GENERATED',
+	);
+	const websiteContentPrepared =
+		(isNewWebsite && Boolean(workspace.selectedTemplateId)) ||
+		(isExistingWebsite && (connectorStatus === 'CONNECTED' || manualSupportFlow)) ||
+		(isCustomHeadless && hasIntegrationContext);
+
+	const requiredFrontendDomain = isNewWebsite;
+	const requiredBackendSubdomain = isNewWebsite;
+
+	const items: InternalChecklistItem[] = [
+		{
+			key: 'workspace_created',
+			title: 'Workspace Created',
+			section: 'workspace_setup',
+			owner: 'system',
+			status: workspace.id ? 'completed' : 'not_started',
+			required: true,
+			blocking: true,
+			description: 'Workspace record exists and can be tracked in internal operations.',
+		},
+		{
+			key: 'business_profile_completed',
+			title: 'Business Profile Completed',
+			section: 'workspace_setup',
+			owner: 'client',
+			status: hasProfileData(workspace) ? 'completed' : 'awaiting_client',
+			required: true,
+			blocking: true,
+			description: 'Core business onboarding details are captured.',
+		},
+		{
+			key: 'profession_config_applied',
+			title: 'Profession Config Applied',
+			section: 'workspace_setup',
+			owner: 'support',
+			status: professionApplied ? 'completed' : 'awaiting_support',
+			required: true,
+			blocking: true,
+			description: 'Profession-specific setup profile is selected and applied.',
+		},
+		{
+			key: 'modules_activated',
+			title: 'Modules Activated',
+			section: 'workspace_setup',
+			owner: 'support',
+			status: modulesActivated ? 'completed' : 'awaiting_support',
+			required: true,
+			blocking: true,
+			description: 'Required operational modules are enabled for this workspace.',
+		},
+		{
+			key: 'support_owner_assigned',
+			title: 'Support Owner Assigned',
+			section: 'workspace_setup',
+			owner: 'support',
+			status: supportAssigned ? 'completed' : 'awaiting_support',
+			required: true,
+			blocking: true,
+			description: 'A support owner is assigned for deployment and handoff.',
+		},
+
+		{
+			key: 'website_path_selected',
+			title: 'Website Path Selected',
+			section: 'website_setup',
+			owner: 'client',
+			status: websitePathSelected ? 'completed' : 'awaiting_client',
+			required: true,
+			blocking: true,
+			description: 'Website delivery path is selected (new, existing, or custom headless).',
+		},
+		{
+			key: 'template_or_connector_selected',
+			title: 'Template or Connector Selected',
+			section: 'website_setup',
+			owner: 'support',
+			status: templateOrConnectorSelected ? 'completed' : 'awaiting_support',
+			required: true,
+			blocking: true,
+			description: 'Template or connector path is selected for workspace delivery.',
+		},
+		{
+			key: 'website_content_prepared',
+			title: 'Website Content Prepared',
+			section: 'website_setup',
+			owner: 'client',
+			status: websiteContentPrepared ? 'completed' : 'awaiting_client',
+			required: true,
+			blocking: true,
+			description: 'Core website content or source context is ready for deployment.',
+		},
+		{
+			key: 'domain_submitted',
+			title: 'Domain Submitted',
+			section: 'website_setup',
+			owner: 'client',
+			status: hasDomainData(workspace) ? 'completed' : 'awaiting_client',
+			required: true,
+			blocking: true,
+			description: 'Primary domain is provided for launch routing.',
+		},
+		{
+			key: 'frontend_domain_connected',
+			title: 'Frontend Domain Connected',
+			section: 'website_setup',
+			owner: 'client',
+			status: requiredFrontendDomain ? (hasFrontendDomain(workspace) ? 'completed' : 'awaiting_client') : 'optional',
+			required: requiredFrontendDomain,
+			blocking: requiredFrontendDomain,
+			description: 'Frontend domain is connected where headless frontend routing is required.',
+		},
+		{
+			key: 'cms_backend_subdomain_connected',
+			title: 'CMS / Backend Subdomain Connected',
+			section: 'website_setup',
+			owner: 'support',
+			status: requiredBackendSubdomain ? (hasBackendSubdomain(workspace) ? 'completed' : 'awaiting_support') : 'optional',
+			required: requiredBackendSubdomain,
+			blocking: requiredBackendSubdomain,
+			description: 'Backend CMS subdomain is connected for internal/editor operations.',
+		},
+
+		{
+			key: 'deployment_started',
+			title: 'Deployment Started',
+			section: 'deployment_integration',
+			owner: 'system',
+			status: deploymentStarted ? 'completed' : 'not_started',
+			required: true,
+			blocking: true,
+			description: 'Deployment workflow has been initiated.',
+		},
+		{
+			key: 'deployment_completed',
+			title: 'Deployment Completed',
+			section: 'deployment_integration',
+			owner: 'system',
+			status: deploymentCompleted ? 'completed' : deploymentStarted ? 'in_progress' : 'not_started',
+			required: true,
+			blocking: true,
+			dependsOn: ['deployment_started'],
+			description: 'Deployment pipeline reached a review-ready state.',
+		},
+		{
+			key: 'environment_variables_applied',
+			title: 'Environment Variables Applied',
+			section: 'deployment_integration',
+			owner: 'support',
+			status: envApplied ? 'completed' : deploymentStarted ? 'awaiting_support' : 'not_started',
+			required: true,
+			blocking: true,
+			description: 'Required deployment/runtime environment configuration has been applied.',
+		},
+		{
+			key: 'connector_installed',
+			title: 'Connector Installed',
+			section: 'deployment_integration',
+			owner: 'support',
+			status: isCustomHeadless ? 'optional' : connectorInstalled ? 'completed' : manualSupportFlow ? 'awaiting_support' : 'not_started',
+			required: !isCustomHeadless,
+			blocking: !isCustomHeadless,
+			dependsOn: ['deployment_started'],
+			description: 'Connector is installed or provisioning path is confirmed.',
+		},
+		{
+			key: 'connector_verified',
+			title: 'Connector Verified',
+			section: 'deployment_integration',
+			owner: 'support',
+			status: isCustomHeadless ? 'optional' : connectorVerified ? 'completed' : connectorInstalled ? 'in_progress' : 'not_started',
+			required: !isCustomHeadless,
+			blocking: !isCustomHeadless,
+			dependsOn: ['connector_installed'],
+			description: 'Connector connectivity and expected capabilities are verified.',
+		},
+		{
+			key: 'sync_validation_passed',
+			title: 'Sync Validation Passed',
+			section: 'deployment_integration',
+			owner: 'system',
+			status: syncValidated ? 'completed' : guard?.missingRequirements?.length ? 'blocked' : deploymentStarted ? 'in_progress' : 'not_started',
+			required: true,
+			blocking: true,
+			dependsOn: ['connector_verified'],
+			description: 'Data/content sync validation has passed across required surfaces.',
+		},
+
+		{
+			key: 'launch_guard_passed',
+			title: 'Launch Guard Passed',
+			section: 'launch_readiness',
+			owner: 'system',
+			status: guardPassed ? 'completed' : guard?.missingRequirements?.length ? 'blocked' : 'not_started',
+			required: true,
+			blocking: true,
+			description: 'Launch guard validation indicates no blocking deployment requirements.',
+		},
+		{
+			key: 'internal_qa_completed',
+			title: 'Internal QA Completed',
+			section: 'launch_readiness',
+			owner: 'support',
+			status: qaCompleted ? 'completed' : deploymentCompleted ? 'in_progress' : 'awaiting_support',
+			required: true,
+			blocking: true,
+			dependsOn: ['sync_validation_passed', 'launch_guard_passed'],
+			description: 'Internal QA and readiness checks are completed by support/operations.',
+		},
+		{
+			key: 'client_review_ready',
+			title: 'Client Review Ready',
+			section: 'launch_readiness',
+			owner: 'support',
+			status: clientReviewReady ? 'completed' : 'optional',
+			required: false,
+			blocking: false,
+			dependsOn: ['internal_qa_completed'],
+			description: 'Client-facing review package/readiness confirmation is prepared.',
+		},
+		{
+			key: 'client_approval_received',
+			title: 'Client Approval Received',
+			section: 'launch_readiness',
+			owner: 'client',
+			status: clientApproved ? 'completed' : clientReviewReady ? 'awaiting_client' : 'not_started',
+			required: true,
+			blocking: true,
+			dependsOn: ['client_review_ready'],
+			description: 'Client has approved launch readiness and deployment go-ahead.',
+		},
+		{
+			key: 'launch_authorized',
+			title: 'Launch Authorized',
+			section: 'launch_readiness',
+			owner: 'support',
+			status: launchAuthorized ? 'completed' : clientApproved ? 'in_progress' : 'not_started',
+			required: true,
+			blocking: true,
+			dependsOn: ['client_approval_received'],
+			description: 'Final internal authorization completed for production launch.',
+		},
+	];
+
+	// Internal master/support checklist model only; a separate client-facing checklist will live in OS Setup Center.
+	return items;
+}
+
+function countSectionRequired(items: InternalChecklistItem[]) {
+	const required = items.filter((item) => item.required).length;
+	const completed = items.filter((item) => item.required && item.status === 'completed').length;
+	return { required, completed };
+}
+
+function overallReadinessLabel(items: InternalChecklistItem[]): 'Not Ready' | 'In Progress' | 'Ready for Review' | 'Ready to Launch' {
+	const blockingRemaining = items.filter((item) => item.required && item.blocking && item.status !== 'completed').length;
+	const internalQa = items.find((item) => item.key === 'internal_qa_completed');
+	const clientApproval = items.find((item) => item.key === 'client_approval_received');
+
+	if (blockingRemaining === 0) return 'Ready to Launch';
+	if (internalQa?.status === 'completed' && (clientApproval?.status === 'awaiting_client' || clientApproval?.status === 'completed')) {
+		return 'Ready for Review';
+	}
+
+	const requiredCompleted = items.filter((item) => item.required && item.status === 'completed').length;
+	if (requiredCompleted > 0) return 'In Progress';
+	return 'Not Ready';
 }
 
 export default function MasterDeploymentDetailPage() {
@@ -193,6 +600,31 @@ export default function MasterDeploymentDetailPage() {
 			.filter((item) => item.target === workspaceId)
 			.slice(0, 8);
 	}, [auditNotes, workspaceId]);
+
+	const internalChecklistItems = useMemo(
+		() => (workspace ? deriveInternalChecklistItems(workspace, checklist, guard) : []),
+		[workspace, checklist, guard],
+	);
+
+	const groupedChecklist = useMemo(
+		() =>
+			SECTION_CONFIG.map((section) => {
+				const items = internalChecklistItems.filter((item) => item.section === section.key);
+				return {
+					...section,
+					items,
+					progress: countSectionRequired(items),
+				};
+			}),
+		[internalChecklistItems],
+	);
+
+	const totalRequired = internalChecklistItems.filter((item) => item.required).length;
+	const totalRequiredCompleted = internalChecklistItems.filter((item) => item.required && item.status === 'completed').length;
+	const blockingRemaining = internalChecklistItems.filter(
+		(item) => item.required && item.blocking && item.status !== 'completed',
+	).length;
+	const overallReadiness = overallReadinessLabel(internalChecklistItems);
 
 	async function loadDetails() {
 		if (!workspaceId) return;
@@ -415,10 +847,13 @@ export default function MasterDeploymentDetailPage() {
 				</div>
 			</div>
 
-			<div className="grid lg:grid-cols-2 gap-4">
+			<div className="space-y-4">
 				<div className="rounded-2xl border border-slate-200 bg-white p-4">
-					<div className="flex items-center justify-between">
-						<p className="text-sm text-slate-500">Launch checklist</p>
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<div>
+							<p className="text-sm text-slate-500">Internal deployment checklist</p>
+							<p className="text-xs text-slate-500 mt-1">Master/Support internal readiness model. Client-facing checklist will be delivered separately in OS Setup Center.</p>
+						</div>
 						<button
 							onClick={() => refreshChecklist()}
 							disabled={busy}
@@ -427,28 +862,79 @@ export default function MasterDeploymentDetailPage() {
 							Refresh checklist
 						</button>
 					</div>
-					{checklist ? (
-						<div className="mt-3 space-y-2">
-							{checklist.items.map((item) => (
-								<div key={item.key} className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2">
-									<p className="text-sm text-slate-700">{item.label}</p>
-									<span className={`text-xs font-semibold px-2 py-1 rounded-full ${item.completed ? 'bg-emerald-100 text-emerald-700' : item.required ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}>
-										{item.completed ? 'Done' : item.required ? 'Pending' : 'Optional'}
-									</span>
-								</div>
-							))}
+
+					<div className="mt-4 grid gap-3 sm:grid-cols-3">
+						<div className="rounded-xl border border-slate-100 p-3">
+							<p className="text-xs uppercase tracking-wide text-slate-500">Required Completed</p>
+							<p className="mt-1 text-lg font-semibold text-slate-900">{totalRequiredCompleted} / {totalRequired}</p>
 						</div>
-					) : (
-						<p className="text-sm text-slate-600 mt-3">Checklist not available.</p>
-					)}
+						<div className="rounded-xl border border-slate-100 p-3">
+							<p className="text-xs uppercase tracking-wide text-slate-500">Blocking Remaining</p>
+							<p className="mt-1 text-lg font-semibold text-slate-900">{blockingRemaining}</p>
+						</div>
+						<div className="rounded-xl border border-slate-100 p-3">
+							<p className="text-xs uppercase tracking-wide text-slate-500">Overall Readiness</p>
+							<p className="mt-1 text-lg font-semibold text-slate-900">{overallReadiness}</p>
+						</div>
+					</div>
+				</div>
+
+				<div className="grid gap-4 lg:grid-cols-2">
+					{groupedChecklist.map((section) => (
+						<div key={section.key} className="rounded-2xl border border-slate-200 bg-white p-4">
+							<div className="flex items-center justify-between gap-2">
+								<p className="text-sm font-semibold text-slate-900">{section.title}</p>
+								<p className="text-xs text-slate-500">
+									{section.progress.completed} / {section.progress.required} required completed
+								</p>
+							</div>
+							<div className="mt-3 space-y-2">
+								{section.items.map((item) => {
+									const statusMeta = STATUS_META[item.status];
+									const ownerMeta = OWNER_META[item.owner];
+
+									return (
+										<div key={item.key} className="rounded-xl border border-slate-100 px-3 py-3">
+											<div className="flex flex-wrap items-center justify-between gap-2">
+												<p className="text-sm font-medium text-slate-800">{item.title}</p>
+												<div className="flex flex-wrap items-center gap-2">
+													<span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${ownerMeta.badgeClass}`}>{ownerMeta.label}</span>
+													<span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${statusMeta.badgeClass}`}>{statusMeta.label}</span>
+												</div>
+											</div>
+											{item.description ? <p className="mt-1 text-xs text-slate-600">{item.description}</p> : null}
+											<div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+												<span>{item.required ? 'Required' : 'Optional'}</span>
+												<span>•</span>
+												<span>{item.blocking ? 'Blocking' : 'Non-blocking'}</span>
+												{item.dependsOn?.length ? (
+													<>
+														<span>•</span>
+														<span>Depends on: {item.dependsOn.map(toLabel).join(', ')}</span>
+													</>
+												) : null}
+											</div>
+										</div>
+									);
+								})}
+							</div>
+						</div>
+					))}
 				</div>
 
 				<div className="rounded-2xl border border-slate-200 bg-white p-4">
-					<p className="text-sm text-slate-500">Blockers and guidance</p>
+					<p className="text-sm text-slate-500">Operational guidance</p>
 					<div className="mt-3 space-y-3">
 						<div>
-							<p className="text-xs uppercase tracking-wide text-slate-500">Checklist blockers</p>
-							<p className="text-sm text-slate-700 mt-1">{checklist?.blockers?.length ? checklist.blockers.map((item) => toLabel(item)).join('; ') : 'No checklist blockers.'}</p>
+							<p className="text-xs uppercase tracking-wide text-slate-500">Internal blockers</p>
+							<p className="text-sm text-slate-700 mt-1">
+								{internalChecklistItems.filter((item) => item.required && item.blocking && item.status !== 'completed').length
+									? internalChecklistItems
+										.filter((item) => item.required && item.blocking && item.status !== 'completed')
+										.map((item) => item.title)
+										.join('; ')
+									: 'No internal blocking items.'}
+							</p>
 						</div>
 						<div>
 							<p className="text-xs uppercase tracking-wide text-slate-500">Launch guard missing requirements</p>
@@ -464,13 +950,25 @@ export default function MasterDeploymentDetailPage() {
 
 			<div className="grid lg:grid-cols-2 gap-4">
 				<div className="rounded-2xl border border-slate-200 bg-white p-4">
-					<p className="text-sm text-slate-500">Business profile</p>
-					<pre className="mt-3 rounded-xl bg-slate-950 text-slate-100 text-xs p-3 overflow-x-auto">{pretty(workspace.businessProfile || {})}</pre>
+					<p className="text-sm text-slate-500">Business setup summary</p>
+					<div className="mt-3 space-y-2 text-sm text-slate-700">
+						<p><span className="font-semibold text-slate-900">Business type:</span> {String((workspace.businessProfile || {}).businessType || (workspace.collectedBusinessData || {}).businessType || 'Not provided')}</p>
+						<p><span className="font-semibold text-slate-900">Primary domain:</span> {String((workspace.businessProfile || {}).domain || (workspace.collectedBusinessData || {}).domain || workspace.contentBaseUrl || 'Not provided')}</p>
+						<p><span className="font-semibold text-slate-900">Connection method:</span> {String((workspace.collectedBusinessData || {}).connectionMethod || 'Not selected')}</p>
+						<p><span className="font-semibold text-slate-900">Frontend domain:</span> {String((workspace.collectedBusinessData || {}).frontendDomain || 'Not connected')}</p>
+						<p><span className="font-semibold text-slate-900">Backend subdomain:</span> {String((workspace.collectedBusinessData || {}).backendCmsSubdomain || 'Not connected')}</p>
+					</div>
 				</div>
 
 				<div className="rounded-2xl border border-slate-200 bg-white p-4">
-					<p className="text-sm text-slate-500">Collected setup payload</p>
-					<pre className="mt-3 rounded-xl bg-slate-950 text-slate-100 text-xs p-3 overflow-x-auto">{pretty(workspace.collectedBusinessData || {})}</pre>
+					<p className="text-sm text-slate-500">Operational readiness summary</p>
+					<div className="mt-3 space-y-2 text-sm text-slate-700">
+						<p><span className="font-semibold text-slate-900">Modules selected:</span> {Array.isArray(workspace.selectedModules) && workspace.selectedModules.length > 0 ? workspace.selectedModules.length : 0}</p>
+						<p><span className="font-semibold text-slate-900">Architecture:</span> {workspace.architecture ? toLabel(workspace.architecture) : 'Not set'}</p>
+						<p><span className="font-semibold text-slate-900">Connector verification:</span> {prettyValue(normalizedConnectorStatus)}</p>
+						<p><span className="font-semibold text-slate-900">Launch guard:</span> {guard?.ready ? 'Passed' : 'Pending'}</p>
+						<p><span className="font-semibold text-slate-900">Last updated:</span> {new Date(workspace.updatedAt).toLocaleString()}</p>
+					</div>
 				</div>
 			</div>
 

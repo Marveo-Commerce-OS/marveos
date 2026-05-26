@@ -230,6 +230,45 @@ export async function POST(req: NextRequest) {
   }
 
   const store = await readAdminStore();
+
+  if (ownership.workspaceOwnership === 'client') {
+    const scopedSubscription = store.cloud.commercial.subscriptions[ownership.clientSubscriptionId];
+    if (!scopedSubscription) {
+      return NextResponse.json(
+        {
+          error: 'Client subscription link is missing for this workspace request.',
+          hint: 'Link this client to an active subscription before creating a workspace.',
+        },
+        { status: 409 },
+      );
+    }
+
+    if (!isEntitledCommercialSubscriptionStatus(scopedSubscription.status)) {
+      return NextResponse.json(
+        {
+          error: 'Subscription not entitled for workspace provisioning',
+          hint: 'Only ACTIVE or TRIAL subscriptions can provision client workspaces.',
+        },
+        { status: 402 },
+      );
+    }
+
+    if (ownership.clientOrganizationId && scopedSubscription.organizationId !== ownership.clientOrganizationId) {
+      return NextResponse.json(
+        {
+          error: 'Client subscription does not match the selected organization scope.',
+          hint: 'Resolve organization-subscription linkage before provisioning.',
+        },
+        { status: 409 },
+      );
+    }
+
+    if (!subscriptionPlanId) {
+      subscriptionPlanId = scopedSubscription.planId;
+      legacyAccountPlan = toLegacyAccountPlan(scopedSubscription.planId, store.cloud.accountPlan);
+    }
+  }
+
   const entitlement = resolveWorkspaceEntitlement(store, {
     subscriptionPlanId,
     accountPlan: legacyAccountPlan,

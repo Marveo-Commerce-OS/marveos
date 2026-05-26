@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
-import { readAdminStore, type WorkspaceOrchestration } from '@/lib/adminStore';
+import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, isSuperAdmin, normalizeRoles } from '@/lib/auth';
+import { ensureWorkspaceSupportChatPin, readAdminStore, type WorkspaceOrchestration } from '@/lib/adminStore';
 import { hasProfessionConfig, resolveProfessionConfig } from '@/config/professions';
 import { buildWorkspaceDashboardSummary } from '@/modules/reports';
 
@@ -35,6 +35,124 @@ function formatCurrency(amount: number, currency: string): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
+}
+
+const WIDGET_TITLE_MAP: Record<string, string> = {
+  todaysbookings: "Today's Bookings",
+  pendingdeposits: 'Pending Deposits',
+  newwhatsappenquiries: 'New WhatsApp Enquiries',
+  whatsappsetupstatus: 'WhatsApp Setup Status',
+  aiassistantstatus: 'AI Assistant Status',
+  revenuesnapshot: 'Revenue Snapshot',
+  availabilitiesetup: 'Availability Setup',
+  onboardingchecklist: 'Onboarding Checklist',
+  quickactions: 'Quick Actions',
+};
+
+function normalizeWidgetLabel(value: string): string {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function displayWidgetTitle(value: string): string {
+  return WIDGET_TITLE_MAP[normalizeWidgetLabel(value)] || value;
+}
+
+function widgetCountLabel(count: number, singular: string, plural: string = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function widgetBodyFor(widget: string, summary: ReturnType<typeof buildWorkspaceDashboardSummary>, isMakeupProfession: boolean): string {
+  const normalized = normalizeWidgetLabel(widget);
+  const signals = summary.dashboardSignals;
+
+  switch (normalized) {
+    case 'todays bookings':
+      return summary.widgets.todaysBookings.count > 0
+        ? `${widgetCountLabel(summary.widgets.todaysBookings.count, 'booking')} scheduled today.`
+        : 'No bookings yet. Once clients confirm appointments, they will appear here.';
+    case 'pending deposits':
+      return summary.widgets.pendingDeposits.count > 0
+        ? `${widgetCountLabel(summary.widgets.pendingDeposits.count, 'pending deposit')} totaling ${formatCurrency(summary.widgets.pendingDeposits.amount, summary.widgets.pendingDeposits.currency)}.`
+        : 'No pending deposits yet. Deposit requests will show up here once booking payments begin.';
+    case 'new whatsapp enquiries':
+    case 'new leads':
+      return summary.widgets.newEnquiries.count > 0
+        ? `${widgetCountLabel(summary.widgets.newEnquiries.count, 'new enquiry')} need attention.`
+        : 'No enquiries yet. Connect your channels and new requests will arrive here.';
+    case 'ai assistant status':
+      return summary.widgets.aiAssistantStatus.enabled
+        ? 'AI Assistant is enabled for this workspace.'
+        : 'AI Assistant is not enabled yet. Configure it when your service catalog and response rules are ready.';
+    case 'whatsapp setup status':
+      return summary.widgets.whatsappStatus.connected
+        ? 'WhatsApp is connected and ready for inbound conversations.'
+        : `${summary.widgets.whatsappStatus.label}. Connect WhatsApp so Marveo can help you capture enquiries.`;
+    case 'revenue snapshot':
+    case 'monthly revenue':
+      return (summary.widgets.revenueSnapshot.today > 0 || summary.widgets.revenueSnapshot.month > 0)
+        ? `Today: ${formatCurrency(summary.widgets.revenueSnapshot.today, summary.widgets.revenueSnapshot.currency)}. Month: ${formatCurrency(summary.widgets.revenueSnapshot.month, summary.widgets.revenueSnapshot.currency)}.`
+        : 'Revenue data will appear after your first confirmed transactions.';
+    case 'availability setup':
+      return 'Set your availability so clients know when they can book.';
+    case 'onboarding checklist':
+      return `${summary.widgets.onboardingChecklist.completed}/${summary.widgets.onboardingChecklist.total} completed. ${isMakeupProfession ? 'Finish setup to unlock smoother client operations.' : 'Complete setup to personalize your workspace.'}`;
+    case 'quick actions':
+      return isMakeupProfession
+        ? 'Use quick actions to prepare your service catalog and availability.'
+        : 'Use quick actions to finish setup and start operations.';
+    case 'open tickets':
+    case 'support tickets':
+    case 'client tickets':
+      return `${widgetCountLabel(Number(signals.openTicketsCount || 0), 'open ticket')} waiting for review.`;
+    case 'live chat queue':
+      return `${widgetCountLabel(Number(signals.liveChatQueueCount || 0), 'live chat conversation')} waiting in the queue.`;
+    case 'website enquiries':
+      return `${widgetCountLabel(Number(signals.websiteEnquiriesCount || 0), 'website enquiry')} ready for follow-up.`;
+    case 'active clients':
+      return `${widgetCountLabel(Number(signals.activeClientsCount || 0), 'active client')} in the workspace.`;
+    case 'active subscriptions':
+      return `${widgetCountLabel(Number(signals.activeSubscriptionsCount || 0), 'active subscription')} currently billed.`;
+    case 'support response time':
+      return `Average response time: ${String(signals.supportResponseTime || 'Not tracked yet')}.`;
+    case 'onboarding requests':
+      return `${widgetCountLabel(Number(signals.onboardingRequestsCount || 0), 'onboarding request')} awaiting review.`;
+    case 'website setup status':
+      return `Website setup is ${String(signals.websiteSetupStatus || 'pending')}.`;
+    case 'active projects':
+      return `${widgetCountLabel(Number(signals.activeProjectsCount || 0), 'active project')} in progress.`;
+    case 'pending milestones':
+      return `${widgetCountLabel(Number(signals.pendingMilestonesCount || 0), 'pending milestone')} need attention.`;
+    case 'open client tickets':
+      return `${widgetCountLabel(Number(signals.openClientTicketsCount || 0), 'open client ticket')} waiting for review.`;
+    case 'delivery risk':
+      return `Delivery risk is ${String(signals.deliveryRisk || 'On track')}.`;
+    case 'team workload':
+      return String(signals.teamWorkload || 'No team workload data yet.');
+    case 'urgent issues':
+      return `${widgetCountLabel(Number(signals.urgentIssuesCount || 0), 'urgent issue')} need immediate attention.`;
+    case 'assigned technicians':
+      return `${widgetCountLabel(Number(signals.assignedTechniciansCount || 0), 'assigned technician')} available for support.`;
+    case 'sla watch':
+      return Number(signals.urgentIssuesCount || 0) > 0
+        ? 'SLA watch is active because urgent issues are open.'
+        : 'SLA watch is on track right now.';
+    case 'resolved this month':
+      return `${widgetCountLabel(Number(signals.resolvedThisMonthCount || 0), 'resolved ticket')} closed this month.`;
+    case 'campaign leads':
+      return `${widgetCountLabel(Number(signals.campaignLeadsCount || 0), 'campaign lead')} captured from campaigns.`;
+    case 'pending invoices':
+      return `${widgetCountLabel(Number(signals.pendingInvoicesCount || 0), 'pending invoice')} awaiting payment.`;
+    case 'new consultation requests':
+      return `${widgetCountLabel(Number(signals.newConsultationRequestsCount || 0), 'consultation request')} waiting for review.`;
+    case 'active automation projects':
+      return `${widgetCountLabel(Number(signals.activeAutomationProjectsCount || 0), 'automation project')} in progress.`;
+    case 'pending proposals':
+      return `${widgetCountLabel(Number(signals.pendingProposalsCount || 0), 'pending proposal')} waiting for client approval.`;
+    case 'workflow opportunities':
+      return `${widgetCountLabel(Number(signals.workflowOpportunitiesCount || 0), 'workflow opportunity')} ready to automate.`;
+    default:
+      return `Monitor ${displayWidgetTitle(widget)} from your workspace data.`;
+  }
 }
 
 export default async function OsDashboardPage() {
@@ -74,56 +192,16 @@ export default async function OsDashboardPage() {
     professionKey: profession.key,
     professionName: profession.professionName,
   });
+  const isRootSuperAdmin = await isSuperAdmin(session.token);
+  const canViewSupportPin = hasClientWorkspaceAccess(roles) || isRootSuperAdmin;
+  const supportPin = canViewSupportPin ? await ensureWorkspaceSupportChatPin(workspace.id) : null;
+  const maskedSupportPin = supportPin ? `${'*'.repeat(Math.max(0, supportPin.length - 2))}${supportPin.slice(-2)}` : null;
   const checklist = summary.widgets.onboardingChecklist.items;
 
-  const widgetCards = [
-    {
-      title: "Today's Bookings",
-      body: summary.widgets.todaysBookings.count > 0
-        ? `${summary.widgets.todaysBookings.count} booking(s) scheduled today.`
-        : 'No bookings yet. Once clients confirm appointments, they will appear here.',
-    },
-    {
-      title: 'Pending Deposits',
-      body: summary.widgets.pendingDeposits.count > 0
-        ? `${summary.widgets.pendingDeposits.count} pending deposit(s) totaling ${formatCurrency(summary.widgets.pendingDeposits.amount, summary.widgets.pendingDeposits.currency)}.`
-        : 'No pending deposits yet. Deposit requests will show up here once booking payments begin.',
-    },
-    {
-      title: 'New Enquiries',
-      body: summary.widgets.newEnquiries.count > 0
-        ? `${summary.widgets.newEnquiries.count} new enquiry/enquiries need attention.`
-        : 'No enquiries yet. Connect your channels and new requests will arrive here.',
-    },
-    {
-      title: 'WhatsApp Setup Status',
-      body: summary.widgets.whatsappStatus.connected
-        ? 'WhatsApp is connected and ready for inbound conversations.'
-        : `${summary.widgets.whatsappStatus.label}. Connect WhatsApp so Marveo can help you capture enquiries.`,
-    },
-    {
-      title: 'AI Assistant Status',
-      body: summary.widgets.aiAssistantStatus.enabled
-        ? 'AI Assistant is enabled for this workspace.'
-        : 'AI Assistant is not enabled yet. Configure it when your service catalog and response rules are ready.',
-    },
-    {
-      title: 'Revenue Snapshot',
-      body: (summary.widgets.revenueSnapshot.today > 0 || summary.widgets.revenueSnapshot.month > 0)
-        ? `Today: ${formatCurrency(summary.widgets.revenueSnapshot.today, summary.widgets.revenueSnapshot.currency)}. Month: ${formatCurrency(summary.widgets.revenueSnapshot.month, summary.widgets.revenueSnapshot.currency)}.`
-        : 'Revenue data will appear after your first confirmed bookings and payment captures.',
-    },
-    {
-      title: 'Onboarding Checklist',
-      body: `${summary.widgets.onboardingChecklist.completed}/${summary.widgets.onboardingChecklist.total} completed. ${isMakeupProfession ? 'Finish setup to unlock smoother client operations.' : 'Complete setup to personalize your workspace.'}`,
-    },
-    {
-      title: 'Quick Actions',
-      body: isMakeupProfession
-        ? 'Set your availability so clients know when they can book.'
-        : 'Use quick actions to finish setup and start operations.',
-    },
-  ];
+  const widgetCards = (summary.dashboardWidgets.length > 0 ? summary.dashboardWidgets : profession.dashboardWidgets).map((widget) => ({
+    title: displayWidgetTitle(widget),
+    body: widgetBodyFor(widget, summary, isMakeupProfession),
+  }));
 
   const quickActions = summary.quickActions.map((action) => String(action));
 
@@ -158,6 +236,20 @@ export default async function OsDashboardPage() {
             </article>
           ))}
         </section>
+
+        {canViewSupportPin ? (
+          <section className="rounded-2xl border border-sky-100 bg-sky-50 p-5">
+            <h2 className="text-base font-semibold text-slate-900">Support PIN</h2>
+            <p className="mt-2 text-sm text-slate-600">Use this PIN only for technical support live chat. General enquiry chat does not require a PIN.</p>
+            <div className="mt-3 inline-flex rounded-2xl border border-sky-200 bg-white px-4 py-3">
+              <span className="text-2xl font-bold tracking-[0.3em] text-sky-900">{isRootSuperAdmin ? (supportPin || '------') : (maskedSupportPin || '------')}</span>
+            </div>
+            {!isRootSuperAdmin ? <p className="mt-2 text-xs text-slate-500">Masked for session safety. Reveal is restricted to authorized secure views.</p> : null}
+            <div className="mt-3">
+              <Link href="/os/support/live-chat" className="inline-flex rounded-full bg-sky-600 px-4 py-2 text-sm font-semibold text-white">Open Live Support Chat</Link>
+            </div>
+          </section>
+        ) : null}
 
         <section className="grid gap-4 lg:grid-cols-2">
           <article className="rounded-2xl border border-slate-200 bg-white p-5">

@@ -1,4 +1,5 @@
 import type { WorkspaceOrchestration } from '@/lib/adminStore';
+import { resolveProfessionConfig } from '@/config/professions';
 
 export interface DashboardSummaryWidgets {
   todaysBookings: {
@@ -40,7 +41,9 @@ export interface DashboardSummary {
   professionKey: string;
   professionName: string;
   widgets: DashboardSummaryWidgets;
+  dashboardWidgets: string[];
   quickActions: unknown[];
+  dashboardSignals: Record<string, string | number | boolean>;
 }
 
 export interface BuildDashboardSummaryInput {
@@ -93,6 +96,38 @@ function amountFromItem(item: unknown): number {
   return toNumber(row.amount ?? row.depositAmount ?? row.total ?? 0);
 }
 
+function countItemsByKeys(
+  collected: Record<string, unknown>,
+  keys: string[],
+  predicate?: (item: unknown) => boolean,
+): number {
+  for (const key of keys) {
+    const candidate = asArray(collected[key]);
+    if (candidate.length === 0) continue;
+    return predicate ? candidate.filter(predicate).length : candidate.length;
+  }
+
+  return 0;
+}
+
+function countItemsByKeysWithDateFilter(
+  collected: Record<string, unknown>,
+  keys: string[],
+  dateFilter: (date: string | null, row: Record<string, unknown>) => boolean,
+): number {
+  for (const key of keys) {
+    const candidate = asArray(collected[key]);
+    if (candidate.length === 0) continue;
+    return candidate.filter((item) => {
+      const row = asRecord(item);
+      const date = normalizeDate(row.date ?? row.dateTime ?? row.scheduledAt ?? row.createdAt ?? row.updatedAt);
+      return dateFilter(date, row);
+    }).length;
+  }
+
+  return 0;
+}
+
 function checklistFromCollected(collected: Record<string, unknown>, professionKey: string): Array<{ key: string; label: string; done: boolean }> {
   const checklist = asArray(collected.onboardingChecklist)
     .map((item) => {
@@ -129,31 +164,88 @@ function checklistFromCollected(collected: Record<string, unknown>, professionKe
   ];
 }
 
-function quickActionsForProfession(professionKey: string): string[] {
-  if (professionKey === 'makeup-artist') {
-    return [
-      'Add Booking',
-      'Add Service',
-      'Send Payment Link',
-      'Set Availability',
-      'Connect WhatsApp',
-      'Request Website Support',
-    ];
-  }
+function buildDashboardSignals(workspace: WorkspaceOrchestration, collected: Record<string, unknown>): Record<string, string | number | boolean> {
+  const activeClientsCount = countItemsByKeys(collected, ['activeClients', 'clients']);
+  const activeSubscriptionsCount = countItemsByKeys(collected, ['activeSubscriptions', 'subscriptions']);
+  const openTicketsCount = countItemsByKeys(collected, ['openTickets', 'tickets', 'supportTickets', 'clientTickets']);
+  const urgentIssuesCount = countItemsByKeys(collected, ['urgentIssues']);
+  const liveChatQueueCount = countItemsByKeys(collected, ['liveChatQueue', 'liveChatSessions', 'chatQueue']);
+  const websiteEnquiriesCount = countItemsByKeys(collected, ['websiteEnquiries', 'websiteLeads', 'enquiries']);
+  const newLeadsCount = countItemsByKeys(collected, ['newLeads', 'leads', 'enquiries', 'websiteEnquiries', 'consultationRequests', 'newConsultations']);
+  const pendingInvoicesCount = countItemsByKeys(collected, ['pendingInvoices', 'invoices'], (item) => {
+    const row = asRecord(item);
+    const status = String(row.status || row.state || '').trim().toLowerCase();
+    return !status || ['pending', 'unpaid', 'overdue', 'open'].includes(status);
+  });
+  const activeProjectsCount = countItemsByKeys(collected, ['activeProjects', 'projects']);
+  const pendingMilestonesCount = countItemsByKeys(collected, ['pendingMilestones', 'milestones']);
+  const openClientTicketsCount = countItemsByKeys(collected, ['openClientTickets', 'clientTickets', 'tickets']);
+  const consultationRequestsCount = countItemsByKeys(collected, ['consultationRequests', 'newConsultations']);
+  const onboardingRequestsCount = countItemsByKeys(collected, ['onboardingRequests', 'setupRequests']);
+  const activeAutomationProjectsCount = countItemsByKeys(collected, ['activeAutomationProjects', 'automationProjects']);
+  const pendingProposalsCount = countItemsByKeys(collected, ['pendingProposals', 'proposals']);
+  const workflowOpportunitiesCount = countItemsByKeys(collected, ['workflowOpportunities', 'opportunities']);
+  const assignedTechniciansCount = countItemsByKeys(collected, ['assignedTechnicians', 'technicians']);
+  const clientSitesCount = countItemsByKeys(collected, ['clientSites', 'sites']);
+  const teamTasksCount = countItemsByKeys(collected, ['teamTasks', 'tasks']);
+  const campaignLeadsCount = countItemsByKeys(collected, ['campaignLeads', 'adsLeads', 'campaignEnquiries']);
+  const supportResponseTime = String(collected.supportResponseTime || collected.responseTime || collected.supportResponseTimeLabel || 'Not tracked yet');
+  const deliveryRisk = String(collected.deliveryRisk || collected.riskLevel || 'On track');
+  const teamWorkload = String(collected.teamWorkload || (assignedTechniciansCount > 0 ? `${assignedTechniciansCount} active team member(s)` : 'No team workload data yet'));
+  const websiteSetupStatus = workspace.connectorStatus === 'CONNECTED'
+    ? 'Connected'
+    : String(collected.websiteSetupStatus || 'Setup pending');
+  const supportContracts = countItemsByKeys(collected, ['supportContracts', 'contracts']);
 
-  return [
-    'Add Lead',
-    'Add Service',
-    'Send Payment Link',
-    'Invite Team Member',
-    'Connect WhatsApp',
-    'Request Support',
-  ];
+  const resolvedThisMonthCount = countItemsByKeysWithDateFilter(
+    collected,
+    ['resolvedTickets', 'tickets', 'supportTickets'],
+    (date, row) => {
+      if (!date || !date.startsWith(monthIsoPrefix())) return false;
+      const status = String(row.status || row.state || '').trim().toLowerCase();
+      return ['resolved', 'closed', 'done', 'complete', 'completed'].includes(status);
+    },
+  );
+
+  const newConsultationRequestsCount = consultationRequestsCount;
+
+  return {
+    newLeadsCount,
+    openTicketsCount,
+    urgentIssuesCount,
+    liveChatQueueCount,
+    websiteEnquiriesCount,
+    activeClientsCount,
+    activeSubscriptionsCount,
+    pendingInvoicesCount,
+    activeProjectsCount,
+    pendingMilestonesCount,
+    openClientTicketsCount,
+    consultationRequestsCount,
+    onboardingRequestsCount,
+    newConsultationRequestsCount,
+    activeAutomationProjectsCount,
+    pendingProposalsCount,
+    workflowOpportunitiesCount,
+    assignedTechniciansCount,
+    clientSitesCount,
+    teamTasksCount,
+    campaignLeadsCount,
+    supportResponseTime,
+    deliveryRisk,
+    teamWorkload,
+    websiteSetupStatus,
+    resolvedThisMonthCount,
+    supportContracts,
+    monthlyRevenue: toNumber(asRecord(collected.revenueSnapshot).month) || 0,
+    todayRevenue: toNumber(asRecord(collected.revenueSnapshot).today) || 0,
+  };
 }
 
 export function buildWorkspaceDashboardSummary(input: BuildDashboardSummaryInput): DashboardSummary {
   const workspace = input.workspace;
   const collected = asRecord(workspace.collectedBusinessData);
+  const profession = resolveProfessionConfig(input.professionKey);
   const selectedModules = new Set((workspace.selectedModules || []).map((item) => String(item || '').trim().toLowerCase()));
 
   const bookingItems = pickFirstArray(collected, ['todaysBookings', 'bookingsToday']);
@@ -200,11 +292,12 @@ export function buildWorkspaceDashboardSummary(input: BuildDashboardSummaryInput
   const whatsappConnected = Boolean(collected.whatsappConnected) || workspace.connectorStatus === 'CONNECTED';
   const whatsappEnabled = selectedModules.has('whatsapp');
   const aiEnabled = Boolean(collected.aiAssistantEnabled || collected.aiEnabled);
+  const dashboardSignals = buildDashboardSignals(workspace, collected);
 
   return {
     workspaceId: workspace.id,
-    professionKey: input.professionKey,
-    professionName: input.professionName,
+    professionKey: profession.key,
+    professionName: profession.professionName,
     widgets: {
       todaysBookings: {
         count: todaysBookings.length,
@@ -241,6 +334,8 @@ export function buildWorkspaceDashboardSummary(input: BuildDashboardSummaryInput
         items: checklist,
       },
     },
-    quickActions: quickActionsForProfession(input.professionKey),
+    dashboardWidgets: profession.dashboardWidgets.length > 0 ? profession.dashboardWidgets : resolveProfessionConfig(undefined).dashboardWidgets,
+    quickActions: profession.quickActions.length > 0 ? profession.quickActions : resolveProfessionConfig(undefined).quickActions,
+    dashboardSignals,
   };
 }

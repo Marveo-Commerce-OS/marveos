@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { getConfig } from '@/src/config/client';
+import { normalizeStoredMediaUrl } from '@/lib/mediaUrls';
+import { normalizeTicketSignature, resolveTicketSignature } from '@/lib/tickets/signature';
 
 function getWpApiUrl(): string {
   const config = getConfig();
@@ -50,10 +52,13 @@ export async function GET() {
   const fallbackName = session.user?.user_display_name ?? '';
   const fallbackEmail = session.user?.user_email ?? '';
   const userId = session.user?.id != null ? String(session.user.id) : undefined;
+  const sessionRoles = Array.isArray(session.user?.roles) ? session.user.roles.map((role) => String(role).trim().toUpperCase()) : [];
 
   let name = fallbackName;
   let email = fallbackEmail;
   let avatarUrl: string | undefined;
+  let role = sessionRoles[0] || '';
+  let signature = '';
 
   if (session.authSource === 'native' && userId) {
     const store = await readAdminStore();
@@ -62,12 +67,23 @@ export async function GET() {
       name = identity.name || name;
       email = identity.email || email;
       avatarUrl = identity.avatarUrl || undefined;
+      role = String(store.users[userId]?.masterRole || identity.roles[0] || role || '').trim().toUpperCase();
+      signature = resolveTicketSignature({
+        storedSignature: store.users[userId]?.ticketSignature || '',
+        displayName: name,
+        role,
+      });
     }
   } else if (session.authSource === 'wordpress_bridge') {
     const wp = await tryFetchWordPressProfile(session.token);
     if (wp?.name) name = wp.name;
     if (wp?.email) email = wp.email;
     if (wp?.avatarUrl) avatarUrl = wp.avatarUrl;
+    signature = resolveTicketSignature({
+      storedSignature: '',
+      displayName: name,
+      role,
+    });
   }
 
   return NextResponse.json({
@@ -79,6 +95,8 @@ export async function GET() {
       avatarUrl,
       authSource: session.authSource,
       roles: Array.isArray(session.user?.roles) ? session.user?.roles : [],
+      role,
+      ticketSignature: signature,
       requirePasswordChange: Boolean((session.user as { requirePasswordChange?: boolean } | null)?.requirePasswordChange),
     },
   });
@@ -100,8 +118,13 @@ function normalizeProfileEmail(value: unknown): string | null {
 function normalizeAvatarUrl(value: unknown): string | null {
   const normalized = String(value || '').trim();
   if (!normalized) return '';
-  if (!/^https?:\/\//i.test(normalized) && !normalized.startsWith('/')) return null;
-  return normalized;
+  const stored = normalizeStoredMediaUrl(normalized);
+  if (stored === null) return null;
+  return stored;
+}
+
+function normalizeProfileSignature(value: unknown): string {
+  return normalizeTicketSignature(value);
 }
 
 export async function PATCH(req: Request) {
@@ -119,6 +142,7 @@ export async function PATCH(req: Request) {
     displayName?: unknown;
     email?: unknown;
     avatarUrl?: unknown;
+    ticketSignature?: unknown;
   } | null;
   if (!body || typeof body !== 'object') {
     return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
@@ -135,6 +159,8 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'avatarUrl must be a valid URL.' }, { status: 400 });
   }
 
+  const ticketSignature = normalizeProfileSignature(body.ticketSignature);
+
   const store = await readAdminStore();
   const identity = store.nativeAuth.identities[userId];
   if (!identity) return NextResponse.json({ error: 'Profile not found.' }, { status: 404 });
@@ -148,6 +174,13 @@ export async function PATCH(req: Request) {
 
   const updated = await updateAdminStore((current) => ({
     ...current,
+    users: {
+      ...current.users,
+      [userId]: {
+        ...(current.users[userId] ?? { active: true, portals: ['b2c'] }),
+        ticketSignature,
+      },
+    },
     nativeAuth: {
       ...current.nativeAuth,
       identities: {
@@ -164,6 +197,7 @@ export async function PATCH(req: Request) {
   }));
 
   const nextIdentity = updated.nativeAuth.identities[userId];
+  const nextRole = String(updated.users[userId]?.masterRole || nextIdentity.roles[0] || '').trim().toUpperCase();
 
   return NextResponse.json({
     ok: true,
@@ -174,6 +208,12 @@ export async function PATCH(req: Request) {
       avatarUrl: nextIdentity.avatarUrl,
       authSource: 'native',
       roles: Array.isArray(session.user?.roles) ? session.user?.roles : [],
+      role: nextRole,
+      ticketSignature: resolveTicketSignature({
+        storedSignature: updated.users[userId]?.ticketSignature || '',
+        displayName: nextIdentity.name,
+        role: nextRole,
+      }),
       requirePasswordChange: false,
     },
   });

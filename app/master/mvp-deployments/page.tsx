@@ -114,9 +114,11 @@ export default function MasterDeploymentsPage() {
 	const [busyWorkspace, setBusyWorkspace] = useState('');
 	const [globalPlan, setGlobalPlan] = useState('starter');
 	const [copiedWorkspaceId, setCopiedWorkspaceId] = useState<string | null>(null);
+	const [searchTerm, setSearchTerm] = useState('');
 
 	const queueRows = useMemo(() => {
-		return workspaces.map((workspace) => {
+		const term = searchTerm.trim().toLowerCase();
+		const baseRows = workspaces.map((workspace) => {
 			const checklist = checklistByWorkspace[workspace.id];
 			const guard = guardByWorkspace[workspace.id];
 			return {
@@ -125,10 +127,23 @@ export default function MasterDeploymentsPage() {
 				guard,
 			};
 		});
-	}, [workspaces, checklistByWorkspace, guardByWorkspace]);
+		if (!term) return baseRows;
+		return baseRows.filter(({ workspace }) => {
+			const blob = [
+				workspace.name,
+				workspace.id,
+				workspace.planId || '',
+				workspace.websiteType || '',
+				workspace.onboardingStatus || workspace.status,
+				workspace.supportAssignment?.supportOfficerName || '',
+			].join(' ').toLowerCase();
+			return blob.includes(term);
+		});
+	}, [workspaces, checklistByWorkspace, guardByWorkspace, searchTerm]);
 
-	async function loadQueue() {
-		setLoading(true);
+	async function loadQueue(options?: { silent?: boolean }) {
+		const silent = Boolean(options?.silent);
+		if (!silent) setLoading(true);
 		setError('');
 		try {
 			const res = await fetch('/api/cloud/workspaces', { cache: 'no-store' });
@@ -174,7 +189,7 @@ export default function MasterDeploymentsPage() {
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Failed to load queue');
 		} finally {
-			setLoading(false);
+			if (!silent) setLoading(false);
 		}
 	}
 
@@ -203,9 +218,23 @@ export default function MasterDeploymentsPage() {
 
 	async function assignSupportPlaceholder(workspace: Workspace) {
 		setBusyWorkspace(workspace.id);
+		const previousSupport = workspace.supportAssignment;
+		setWorkspaces((current) =>
+			current.map((row) =>
+				row.id === workspace.id
+					? {
+						...row,
+						supportAssignment: {
+							status: 'ASSIGNED',
+							supportOfficerName: 'Marveo Support Queue',
+						},
+					}
+					: row,
+			),
+		);
 		try {
 			const setupType = workspace.websiteType || (workspace.status === 'onboarding' ? 'EXISTING_WEBSITE' : 'NEW_WEBSITE');
-			await fetch(`/api/cloud/workspaces/${workspace.id}/support-assignment`, {
+			const res = await fetch(`/api/cloud/workspaces/${workspace.id}/support-assignment`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -217,9 +246,26 @@ export default function MasterDeploymentsPage() {
 					initialNotes: 'Placeholder assignment from deployment queue',
 					supportOfficerId: 'support-queue',
 					supportOfficerName: 'Marveo Support Queue',
+					supportOfficerType: 'CUSTOMER_SUPPORT',
 				}),
 			});
-			await loadQueue();
+			if (!res.ok) {
+				const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+				throw new Error(payload?.error || 'Support assignment update failed');
+			}
+			void loadQueue({ silent: true });
+		} catch (err) {
+			setWorkspaces((current) =>
+				current.map((row) =>
+					row.id === workspace.id
+						? {
+							...row,
+							supportAssignment: previousSupport,
+						}
+						: row,
+				),
+			);
+			setError(err instanceof Error ? err.message : 'Support assignment update failed');
 		} finally {
 			setBusyWorkspace('');
 		}
@@ -249,7 +295,7 @@ export default function MasterDeploymentsPage() {
 				</div>
 				<div className="flex gap-2">
 					<button
-						onClick={() => loadQueue()}
+						onClick={() => void loadQueue({ silent: true })}
 						disabled={loading}
 						className="px-4 py-2 rounded-full bg-slate-900 text-white text-sm font-semibold disabled:opacity-60"
 					>
@@ -273,96 +319,86 @@ export default function MasterDeploymentsPage() {
 				</div>
 			)}
 
+			<div className="rounded-2xl border border-slate-200 bg-white p-4">
+				<label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter deployment queue</label>
+				<input
+					value={searchTerm}
+					onChange={(e) => setSearchTerm(e.target.value)}
+					placeholder="Search by workspace, id, plan, status, support"
+					className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+				/>
+			</div>
+
 			{loading ? (
 				<div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">Loading deployment queue...</div>
 			) : queueRows.length === 0 ? (
 				<div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">No onboarding workspaces found yet.</div>
 			) : (
-				<div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-					<div className="overflow-x-auto">
-						<table className="w-full min-w-[1250px]">
-							<thead className="bg-slate-50 border-b border-slate-200">
-								<tr>
-									{['Workspace', 'Plan', 'Website Type', 'Onboarding Status', 'Current Step', 'Deployment', 'Support', 'Launch Readiness', 'Blockers', 'Created', 'Actions'].map((header) => (
-										<th key={header} className="px-4 py-3 text-left text-xs uppercase tracking-wide text-slate-500 font-semibold">
-											{header}
-										</th>
-									))}
-								</tr>
-							</thead>
-							<tbody>
-								{queueRows.map(({ workspace, checklist, guard }) => (
-									<tr key={workspace.id} className="border-b border-slate-100 align-top hover:bg-slate-50/70 transition-colors">
-										<td className="px-4 py-3">
-											<p className="font-semibold text-slate-900">{workspace.name}</p>
-											<p className="text-xs text-slate-500 mt-1">{workspace.id}</p>
-										</td>
-										<td className="px-4 py-3 text-sm text-slate-700 capitalize">{workspace.planId || globalPlan}</td>
-										<td className="px-4 py-3 text-sm text-slate-700">{prettyWebsiteType(workspace.websiteType)}</td>
-										<td className="px-4 py-3">
-											<span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeClass(workspace.onboardingStatus || workspace.status)}`}>
-												{prettyStatus(workspace.onboardingStatus || workspace.status)}
-											</span>
-										</td>
-										<td className="px-4 py-3 text-sm text-slate-700">{prettyStep(workspace.onboardingStepKey, workspace.currentStep)}</td>
-										<td className="px-4 py-3">
-											<span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeClass(guard?.ready ? 'READY' : workspace.status)}`}>
-												{guard?.ready ? 'Ready' : prettyStatus(workspace.status)}
-											</span>
-										</td>
-										<td className="px-4 py-3">
-											<span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeClass(workspace.supportAssignment?.status || 'UNASSIGNED')}`}>
-												{prettyStatus(workspace.supportAssignment?.status || 'UNASSIGNED')}
-											</span>
-											{workspace.supportAssignment?.supportOfficerName && (
-												<p className="text-xs text-slate-500 mt-1">{workspace.supportAssignment.supportOfficerName}</p>
-											)}
-										</td>
-										<td className="px-4 py-3">
-											<span className={`text-xs font-semibold px-2 py-1 rounded-full ${badgeClass(checklist?.readyForLaunch ? 'READY_FOR_LAUNCH' : 'WAITING')}`}>
-												{checklist?.readyForLaunch ? 'Ready for launch' : 'Needs review'}
-											</span>
-										</td>
-										<td className="px-4 py-3 text-xs text-slate-600 max-w-xs">
-											<ul className="space-y-1">
-												{prettyBlockers(checklist, guard).map((item) => (
-													<li key={`${workspace.id}-${item}`} className="leading-4">{item}</li>
-												))}
-											</ul>
-										</td>
-										<td className="px-4 py-3 text-sm text-slate-700">{new Date(workspace.createdAt).toLocaleDateString()}</td>
-										<td className="px-4 py-3">
-											<div className="flex flex-col gap-2">
-												<button
-													onClick={() => refreshChecklist(workspace.id)}
-													disabled={busyWorkspace === workspace.id}
-													className="text-xs px-3 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-												>
-													Refresh checklist
-												</button>
-												<button
-													onClick={() => assignSupportPlaceholder(workspace)}
-													disabled={busyWorkspace === workspace.id}
-													className="text-xs px-3 py-1.5 rounded-full bg-indigo-100 text-indigo-800 font-semibold hover:bg-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
-												>
-													Assign/update support
-												</button>
-												<Link href={`/master/mvp-deployments/${workspace.id}`} className="text-xs px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-center hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 transition-colors cursor-pointer">
-													View workspace
-												</Link>
-												<button
-													onClick={() => copyWorkspaceId(workspace.id)}
-													title="Copy workspace ID"
-													className="text-xs px-3 py-1.5 rounded-full bg-slate-200 text-slate-800 font-semibold hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-colors cursor-pointer"
-												>
-													{copiedWorkspaceId === workspace.id ? 'Copied!' : 'Copy workspace ID'}
-												</button>
-											</div>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
+				<div className="rounded-2xl border border-slate-200 bg-white p-4">
+					<div className="space-y-3">
+						{queueRows.map(({ workspace, checklist, guard }) => (
+							<div key={workspace.id} className="rounded-xl border border-slate-200 p-4">
+								<div className="flex flex-wrap items-start justify-between gap-3">
+									<div>
+										<p className="font-semibold text-slate-900">{workspace.name}</p>
+										<p className="text-xs text-slate-500 mt-1">{workspace.id}</p>
+									</div>
+									<div className="flex flex-wrap items-center gap-2 text-xs">
+										<span className={`font-semibold px-2 py-1 rounded-full ${badgeClass(workspace.onboardingStatus || workspace.status)}`}>{prettyStatus(workspace.onboardingStatus || workspace.status)}</span>
+										<span className={`font-semibold px-2 py-1 rounded-full ${badgeClass(checklist?.readyForLaunch ? 'READY_FOR_LAUNCH' : 'WAITING')}`}>{checklist?.readyForLaunch ? 'Ready for launch' : 'Needs review'}</span>
+									</div>
+								</div>
+
+								<div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-4">
+									<div>
+										<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Plan / Website</p>
+										<p className="capitalize">{workspace.planId || globalPlan}</p>
+										<p className="text-xs text-slate-500">{prettyWebsiteType(workspace.websiteType)}</p>
+									</div>
+									<div>
+										<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Step / Deployment</p>
+										<p>{prettyStep(workspace.onboardingStepKey, workspace.currentStep)}</p>
+										<p className="text-xs text-slate-500">{guard?.ready ? 'Ready' : prettyStatus(workspace.status)}</p>
+									</div>
+									<div>
+										<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Support</p>
+										<p>{prettyStatus(workspace.supportAssignment?.status || 'UNASSIGNED')}</p>
+										<p className="text-xs text-slate-500">{workspace.supportAssignment?.supportOfficerName || 'Unassigned'}</p>
+									</div>
+									<div>
+										<p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Blockers</p>
+										<p className="text-xs leading-5">{prettyBlockers(checklist, guard).join('; ')}</p>
+									</div>
+								</div>
+
+								<div className="mt-3 flex flex-wrap items-center gap-2">
+									<button
+										onClick={() => refreshChecklist(workspace.id)}
+										disabled={busyWorkspace === workspace.id}
+										className="text-xs px-3 py-1.5 rounded-full bg-slate-100 text-slate-800 font-semibold hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+									>
+										Refresh checklist
+									</button>
+									<button
+										onClick={() => assignSupportPlaceholder(workspace)}
+										disabled={busyWorkspace === workspace.id}
+										className="text-xs px-3 py-1.5 rounded-full bg-indigo-100 text-indigo-800 font-semibold hover:bg-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+									>
+										Assign/update support
+									</button>
+									<Link href={`/master/mvp-deployments/${workspace.id}`} className="text-xs px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-center hover:bg-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 transition-colors cursor-pointer">
+										View workspace
+									</Link>
+									<button
+										onClick={() => copyWorkspaceId(workspace.id)}
+										title="Copy workspace ID"
+										className="text-xs px-3 py-1.5 rounded-full bg-slate-200 text-slate-800 font-semibold hover:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 transition-colors cursor-pointer"
+									>
+										{copiedWorkspaceId === workspace.id ? 'Copied!' : 'Copy workspace ID'}
+									</button>
+								</div>
+							</div>
+						))}
 					</div>
 				</div>
 			)}

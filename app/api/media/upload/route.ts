@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Return a same-origin URL that can stream private blobs via the server.
-    const proxyUrl = `/api/media/file?pathname=${encodeURIComponent(result.pathname)}`;
+    const proxyUrl = `/api/media/file/${encodeURIComponent(result.pathname)}`;
     return NextResponse.json({ ok: true, key, blob_url: result.url, source_url: proxyUrl });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Upload failed';

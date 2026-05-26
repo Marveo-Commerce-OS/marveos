@@ -1,6 +1,9 @@
 import { redirect } from 'next/navigation';
 import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
 import { getRuntimeDeploymentStatus } from '@/src/lib/deploymentStatus';
+import { readAdminStore } from '@/lib/adminStore';
+import SessionInactivityGuard from '@/components/SessionInactivityGuard';
+import PortalLiveChatWidget from '@/components/PortalLiveChatWidget';
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const isDev = process.env.NODE_ENV !== 'production';
@@ -26,5 +29,18 @@ export default async function PortalLayout({ children }: { children: React.React
     redirect('/setup');
   }
 
-  return <>{children}</>;
+  const store = await readAdminStore();
+
+  return (
+    <>
+      <SessionInactivityGuard
+        enabled={store.platformSettings.sessionSecurity.inactivityEnabled}
+        idleTimeoutMinutes={store.platformSettings.sessionSecurity.idleTimeoutMinutes}
+        idleWarningMinutes={store.platformSettings.sessionSecurity.idleWarningMinutes}
+        loginRedirectPath="/login?reason=inactive"
+      />
+      {children}
+      <PortalLiveChatWidget />
+    </>
+  );
 }

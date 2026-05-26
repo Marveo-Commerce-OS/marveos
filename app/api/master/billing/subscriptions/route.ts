@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin, normalizeMarveoRoles } from '@/lib/auth';
+import { getCurrentPlatformUser, isSuperAdmin, normalizeMarveoRoles } from '@/lib/auth';
 import {
   appendAuditLog,
   readAdminStore,
@@ -10,6 +10,8 @@ import {
   type CommercialSubscriptionStatus,
 } from '@/lib/adminStore';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
+import { appendOperationalActivityEvent, appendOperationalAuditEvent } from '@/lib/master/operations';
 
 type SubscriptionRow = {
   id: string;
@@ -44,17 +46,7 @@ type BillingCycleChangeRow = {
 };
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const allowed = await isAdmin(session.token);
-  if (!allowed) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('plansBilling', 'view');
 }
 
 async function resolveActorContext(token: string) {
@@ -245,7 +237,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('plansBilling', 'approve');
   if ('error' in auth) return auth.error;
 
   const canMutate = await isSuperAdmin(auth.session.token);
@@ -284,7 +276,7 @@ export async function PATCH(req: NextRequest) {
 
   let nextStatus: CommercialSubscriptionStatus | null = null;
   let deletedSubscriptionIds: string[] = [];
-  let deletedWorkspaceIds: string[] = [];
+  const deletedWorkspaceIds: string[] = [];
   let changedCycleRequestId: string | null = null;
 
   await updateAdminStore((current) => {
@@ -555,6 +547,30 @@ export async function PATCH(req: NextRequest) {
         : `subscription:${subscriptionId}`,
     details: `action=${action};status=${nextStatus || 'unchanged'};deleted=${deletedSubscriptionIds.length};deletedWorkspaces=${deletedWorkspaceIds.length};cycleRequest=${changedCycleRequestId || 'none'}`,
   });
+
+  await appendOperationalAuditEvent({
+    actor: auditedActor?.email ?? String(auth.session.user?.user_email ?? 'unknown'),
+    action: `billing.${String(action || '').toLowerCase()}`,
+    entity: 'subscription',
+    entityId: subscriptionId || changedCycleRequestId || 'bulk',
+    metadata: {
+      deletedCount: deletedSubscriptionIds.length,
+      deletedWorkspaceCount: deletedWorkspaceIds.length,
+      nextStatus: nextStatus || 'unchanged',
+    },
+  });
+
+  if (action === 'SUSPEND' || action === 'MARK_TRIAL_EXPIRED') {
+    await appendOperationalActivityEvent({
+      type: 'payment_failed',
+      actor: auditedActor?.email ?? String(auth.session.user?.user_email ?? 'unknown'),
+      target: subscriptionId,
+      metadata: {
+        action,
+        status: nextStatus || 'unchanged',
+      },
+    });
+  }
 
   const refreshed = await readAdminStore();
   const targetSub = refreshed.cloud.commercial.subscriptions[subscriptionId];

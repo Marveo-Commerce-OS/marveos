@@ -1,6 +1,7 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
 type AccountPlan = 'starter' | 'business' | 'enterprise';
 type PaymentProvider = 'NONE' | 'PAYSTACK' | 'STRIPE';
@@ -11,30 +12,6 @@ type CurrencyCode = 'USD' | 'GBP' | 'NGN';
 type EmailProvider = 'SMTP' | 'RESEND' | 'SES_SMTP' | 'WORDPRESS_MAILER';
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 type SetupType = 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
-type MarveoRole =
-  | 'SUPER_ADMIN'
-  | 'ADMIN'
-  | 'SUPPORT_OFFICER'
-  | 'DEPLOYMENT_MANAGER'
-  | 'BILLING_MANAGER'
-  | 'CLIENT_OWNER'
-  | 'CLIENT_STAFF';
-
-type AdminModuleKey =
-  | 'overview'
-  | 'clients'
-  | 'workspaces'
-  | 'deploymentQueue'
-  | 'supportQueue'
-  | 'launchReadiness'
-  | 'connectors'
-  | 'templates'
-  | 'team'
-  | 'plansBilling'
-  | 'reports'
-  | 'analytics'
-  | 'auditLogs'
-  | 'systemSettings';
 
 type EmailTemplateKey =
   | 'CLIENT_SIGNUP'
@@ -47,9 +24,18 @@ type EmailTemplateKey =
   | 'BILLING_NOTICE'
   | 'BILLING_SUSPENDED'
   | 'BILLING_REACTIVATED'
+  | 'SUPPORT_ACCESS_REQUESTED'
+  | 'SUPPORT_ACCESS_REQUESTED_SUPPORT'
+  | 'SUPPORT_ACCESS_APPROVED'
+  | 'SUPPORT_ACCESS_APPROVED_SUPPORT'
   | 'USER_INVITE'
   | 'USER_STATUS_CHANGED'
   | 'SUPPORT_ASSIGNED'
+  | 'SUPPORT_ASSIGNED_SUPPORT'
+  | 'TICKET_ASSIGNED'
+  | 'TICKET_ASSIGNED_SUPPORT'
+  | 'TICKET_REPLY_CLIENT'
+  | 'TICKET_REPLY_SUPPORT'
   | 'CONNECTOR_FAILED'
   | 'SYSTEM_FAILURE_ALERT';
 
@@ -103,6 +89,20 @@ type SettingsResponse = {
     demoMode: {
       enabled: boolean;
       allowOperationalMutations: boolean;
+    };
+    sessionSecurity: {
+      inactivityEnabled: boolean;
+      idleTimeoutMinutes: number;
+      idleWarningMinutes: number;
+      enforceSingleSession: boolean;
+    };
+    loginProtection: {
+      enabled: boolean;
+      maxFailedAttempts: number;
+      windowMinutes: number;
+      lockoutMinutes: number;
+      requireOtpChallenge: boolean;
+      otpCodeTtlMinutes: number;
     };
     templatePublishRules: {
       requireArtifactValidation: boolean;
@@ -165,37 +165,11 @@ type SettingsResponse = {
       text: string;
     }>;
   };
+  sessionStats: {
+    activeSessionCount: number;
+    activeUniqueUsers: number;
+  };
   supportOfficerPoolSize: number;
-};
-
-type TeamUserRow = {
-  id: string;
-  name: string;
-  username: string;
-  email: string;
-  avatarUrl?: string;
-  rawAuthRole?: string | null;
-  assignedWorkspaceId?: string | null;
-  assignedClientOrganizationId?: string | null;
-  source?: 'native' | 'wordpress_bridge' | 'invite_scaffold';
-  normalizedRole: MarveoRole | null;
-  controlCenterAccess?: boolean;
-  controlCenterModules?: string[];
-  status: 'ACTIVE' | 'INVITED' | 'DISABLED';
-  active: boolean;
-};
-
-type UsersApiResponse = {
-  users: TeamUserRow[];
-  marveoRoles: MarveoRole[];
-  error?: string;
-};
-
-type AccessControlResponse = {
-  roles: MarveoRole[];
-  modules: AdminModuleKey[];
-  roleModuleVisibility: Record<MarveoRole, Record<AdminModuleKey, boolean>>;
-  error?: string;
 };
 
 const MENU = [
@@ -219,9 +193,18 @@ const EMAIL_TEMPLATE_KEYS: EmailTemplateKey[] = [
   'BILLING_NOTICE',
   'BILLING_SUSPENDED',
   'BILLING_REACTIVATED',
+  'SUPPORT_ACCESS_REQUESTED',
+  'SUPPORT_ACCESS_REQUESTED_SUPPORT',
+  'SUPPORT_ACCESS_APPROVED',
+  'SUPPORT_ACCESS_APPROVED_SUPPORT',
   'USER_INVITE',
   'USER_STATUS_CHANGED',
   'SUPPORT_ASSIGNED',
+  'SUPPORT_ASSIGNED_SUPPORT',
+  'TICKET_ASSIGNED',
+  'TICKET_ASSIGNED_SUPPORT',
+  'TICKET_REPLY_CLIENT',
+  'TICKET_REPLY_SUPPORT',
   'CONNECTOR_FAILED',
   'SYSTEM_FAILURE_ALERT',
 ];
@@ -237,9 +220,18 @@ const EMAIL_TEMPLATE_LABELS: Record<EmailTemplateKey, string> = {
   BILLING_NOTICE: 'Billing Notice',
   BILLING_SUSPENDED: 'Billing Suspended',
   BILLING_REACTIVATED: 'Billing Reactivated',
+  SUPPORT_ACCESS_REQUESTED: 'Support Access Requested',
+  SUPPORT_ACCESS_REQUESTED_SUPPORT: 'Support Access Requested (Support)',
+  SUPPORT_ACCESS_APPROVED: 'Support Access Approved',
+  SUPPORT_ACCESS_APPROVED_SUPPORT: 'Support Access Approved (Support)',
   USER_INVITE: 'User Invite',
   USER_STATUS_CHANGED: 'User Status Changed',
   SUPPORT_ASSIGNED: 'Support Assigned',
+  SUPPORT_ASSIGNED_SUPPORT: 'Support Assigned (Support)',
+  TICKET_ASSIGNED: 'Ticket Assigned',
+  TICKET_ASSIGNED_SUPPORT: 'Ticket Assigned (Support)',
+  TICKET_REPLY_CLIENT: 'Ticket Reply (Client)',
+  TICKET_REPLY_SUPPORT: 'Ticket Reply (Support)',
   CONNECTOR_FAILED: 'Connector Failed',
   SYSTEM_FAILURE_ALERT: 'System Failure Alert',
 };
@@ -275,28 +267,6 @@ export default function MasterSystemSettingsPage() {
   const [notice, setNotice] = useState('');
   const [data, setData] = useState<SettingsResponse | null>(null);
 
-  const [accessLoading, setAccessLoading] = useState(true);
-  const [accessSaving, setAccessSaving] = useState(false);
-  const [accessError, setAccessError] = useState('');
-  const [accessNotice, setAccessNotice] = useState('');
-  const [usersPayload, setUsersPayload] = useState<UsersApiResponse | null>(null);
-  const [accessPayload, setAccessPayload] = useState<AccessControlResponse | null>(null);
-  const [inviteRole, setInviteRole] = useState<MarveoRole>('SUPPORT_OFFICER');
-  const [inviteName, setInviteName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteWorkspaceId, setInviteWorkspaceId] = useState('');
-  const [inviteClientOrgId, setInviteClientOrgId] = useState('');
-  const [inviteAvatarUrl, setInviteAvatarUrl] = useState('');
-  const [busyUserId, setBusyUserId] = useState('');
-  const [editUserId, setEditUserId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState({
-    name: '',
-    email: '',
-    assignedWorkspaceId: '',
-    assignedClientOrganizationId: '',
-    rawAuthRole: '',
-    avatarUrl: '',
-  });
   const [previewTemplateKey, setPreviewTemplateKey] = useState<EmailTemplateKey>('CLIENT_SIGNUP');
   const [previewVariablesJson, setPreviewVariablesJson] = useState('{\n  "clientName": "Acme Stores",\n  "workspaceName": "acme-main",\n  "appBaseUrl": "https://app.marveo.com"\n}');
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -331,7 +301,6 @@ export default function MasterSystemSettingsPage() {
 
   useEffect(() => {
     void loadSettings();
-    void loadAccessControl();
     void loadDbHealth();
   }, []);
 
@@ -366,37 +335,6 @@ export default function MasterSystemSettingsPage() {
     return parsed as Record<string, string | number | boolean | null>;
   }
 
-  async function loadAccessControl() {
-    setAccessLoading(true);
-    setAccessError('');
-    try {
-      const [accessRes, usersRes] = await Promise.all([
-        fetch('/api/master/access-control', { cache: 'no-store' }),
-        fetch('/api/master/users', { cache: 'no-store' }),
-      ]);
-
-      const accessBody = (await accessRes.json().catch(() => null)) as AccessControlResponse | null;
-      const usersBody = (await usersRes.json().catch(() => null)) as UsersApiResponse | null;
-
-      if (!accessRes.ok || !accessBody) {
-        throw new Error(accessBody?.error || 'Failed to load access control matrix.');
-      }
-      if (!usersRes.ok || !usersBody) {
-        throw new Error(usersBody?.error || 'Failed to load users.');
-      }
-
-      setAccessPayload(accessBody);
-      setUsersPayload(usersBody);
-      if (usersBody.marveoRoles.length > 0) {
-        setInviteRole(usersBody.marveoRoles[0]);
-      }
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to load access control data.');
-    } finally {
-      setAccessLoading(false);
-    }
-  }
-
   async function saveSystemSettings() {
     if (!data) return;
     setSaving(true);
@@ -413,6 +351,8 @@ export default function MasterSystemSettingsPage() {
         paymentProviders: data.platformSettings.paymentProviders,
         billingCurrencyPolicy: data.platformSettings.billingCurrencyPolicy,
         demoMode: data.platformSettings.demoMode,
+        sessionSecurity: data.platformSettings.sessionSecurity,
+        loginProtection: data.platformSettings.loginProtection,
         templatePublishRules: data.platformSettings.templatePublishRules,
         supportDefaults: data.platformSettings.supportDefaults,
         branding: data.platformSettings.branding,
@@ -445,109 +385,6 @@ export default function MasterSystemSettingsPage() {
     }
   }
 
-  async function saveAccessControl() {
-    if (!accessPayload) return;
-    setAccessSaving(true);
-    setAccessError('');
-    setAccessNotice('');
-
-    try {
-      const res = await fetch('/api/master/access-control', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleModuleVisibility: accessPayload.roleModuleVisibility }),
-      });
-      const body = (await res.json().catch(() => null)) as AccessControlResponse & { ok?: boolean; error?: string };
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error || 'Failed to save access control settings.');
-      }
-
-      setAccessPayload({
-        roles: body.roles,
-        modules: body.modules,
-        roleModuleVisibility: body.roleModuleVisibility,
-      });
-      setAccessNotice('Access control matrix updated.');
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to save access control settings.');
-    } finally {
-      setAccessSaving(false);
-    }
-  }
-
-  async function updateUser(userId: string, patch: { masterRole?: MarveoRole | null; status?: 'ACTIVE' | 'INVITED' | 'DISABLED' }) {
-    setBusyUserId(userId);
-    setAccessError('');
-    setAccessNotice('');
-
-    try {
-      const res = await fetch('/api/master/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          ...(patch.masterRole ? { masterRole: patch.masterRole } : {}),
-          ...(patch.status ? { status: patch.status } : {}),
-        }),
-      });
-
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error || 'Failed to update user role/status.');
-      }
-
-      setAccessNotice('User role/status updated.');
-      await loadAccessControl();
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to update user role/status.');
-    } finally {
-      setBusyUserId('');
-    }
-  }
-
-  async function createPendingUser() {
-    setBusyUserId('invite');
-    setAccessError('');
-    setAccessNotice('');
-
-    try {
-      const name = inviteName.trim();
-      const email = inviteEmail.trim();
-      if (!name) throw new Error('Name is required.');
-      if (!email) throw new Error('Email is required.');
-
-      const res = await fetch('/api/master/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          masterRole: inviteRole,
-          name,
-          email,
-          avatarUrl: inviteAvatarUrl.trim() || undefined,
-          assignedWorkspaceId: inviteWorkspaceId.trim() || undefined,
-          assignedClientOrganizationId: inviteClientOrgId.trim() || undefined,
-        }),
-      });
-
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; inviteId?: string } | null;
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error || 'Failed to create pending user.');
-      }
-
-      setAccessNotice(`Staged user created and invite sent to ${email.toLowerCase()}.`);
-      setInviteName('');
-      setInviteEmail('');
-      setInviteWorkspaceId('');
-      setInviteClientOrgId('');
-      setInviteAvatarUrl('');
-      await loadAccessControl();
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to create pending user.');
-    } finally {
-      setBusyUserId('');
-    }
-  }
-
   async function uploadMedia(file: File): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
@@ -559,75 +396,6 @@ export default function MasterSystemSettingsPage() {
     const media = (await res.json().catch(() => null)) as { source_url?: string } | null;
     if (!media?.source_url) throw new Error('Upload failed');
     return media.source_url;
-  }
-
-  async function saveUserProfile(userId: string) {
-    setBusyUserId(userId);
-    setAccessError('');
-    setAccessNotice('');
-
-    try {
-      const name = editDraft.name.trim();
-      const email = editDraft.email.trim();
-      if (!name) throw new Error('Name is required.');
-      if (!email) throw new Error('Email is required.');
-
-      const res = await fetch('/api/master/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          name,
-          email,
-          rawAuthRole: editDraft.rawAuthRole.trim() || undefined,
-          assignedWorkspaceId: editDraft.assignedWorkspaceId.trim() || undefined,
-          assignedClientOrganizationId: editDraft.assignedClientOrganizationId.trim() || undefined,
-          avatarUrl: editDraft.avatarUrl.trim() || undefined,
-        }),
-      });
-
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error || 'Failed to update user profile.');
-      }
-
-      setAccessNotice('User profile updated.');
-      setEditUserId(null);
-      await loadAccessControl();
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to update user profile.');
-    } finally {
-      setBusyUserId('');
-    }
-  }
-
-  async function deleteUser(userId: string) {
-    const confirmed = window.confirm('Delete this user record? This cannot be undone.');
-    if (!confirmed) return;
-
-    setBusyUserId(userId);
-    setAccessError('');
-    setAccessNotice('');
-
-    try {
-      const res = await fetch('/api/master/users', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
-      });
-      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error || 'Failed to delete user.');
-      }
-
-      setAccessNotice('User record deleted.');
-      if (editUserId === userId) setEditUserId(null);
-      await loadAccessControl();
-    } catch (err) {
-      setAccessError(err instanceof Error ? err.message : 'Failed to delete user.');
-    } finally {
-      setBusyUserId('');
-    }
   }
 
   async function runEmailPreview() {
@@ -835,8 +603,6 @@ export default function MasterSystemSettingsPage() {
     }
   }
 
-  const users = useMemo(() => usersPayload?.users ?? [], [usersPayload]);
-
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
@@ -870,15 +636,6 @@ export default function MasterSystemSettingsPage() {
           >
             {saving ? 'Saving settings...' : 'Save settings'}
           </button>
-          {activeSection === 'access' ? (
-            <button
-              onClick={() => void saveAccessControl()}
-              disabled={accessSaving || !accessPayload}
-              className="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              {accessSaving ? 'Saving access...' : 'Save access control'}
-            </button>
-          ) : null}
         </div>
       </div>
 
@@ -1687,6 +1444,247 @@ export default function MasterSystemSettingsPage() {
                 />
                 Require support approval for template publish
               </label>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Session and inactivity security</h3>
+              <p className="mt-1 text-xs text-slate-600">Show inactivity warning popup and sign users out automatically when unattended.</p>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Active sessions</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">{data.sessionStats.activeSessionCount}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs uppercase tracking-wide text-slate-500">Active users</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">{data.sessionStats.activeUniqueUsers}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={data.platformSettings.sessionSecurity.inactivityEnabled}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        sessionSecurity: {
+                          ...prev.platformSettings.sessionSecurity,
+                          inactivityEnabled: e.target.checked,
+                        },
+                      },
+                    } : prev)}
+                  />
+                  Enable inactivity warning and auto sign-out
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={data.platformSettings.sessionSecurity.enforceSingleSession}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        sessionSecurity: {
+                          ...prev.platformSettings.sessionSecurity,
+                          enforceSingleSession: e.target.checked,
+                        },
+                      },
+                    } : prev)}
+                  />
+                  Allow only one active session per user
+                </label>
+
+                <label className="text-sm text-slate-700">
+                  Idle timeout (minutes)
+                  <input
+                    type="number"
+                    min={5}
+                    max={240}
+                    value={data.platformSettings.sessionSecurity.idleTimeoutMinutes}
+                    onChange={(e) => {
+                      const nextValue = Number(e.target.value || 30);
+                      setData((prev) => {
+                        if (!prev) return prev;
+                        const timeout = Number.isFinite(nextValue) ? Math.min(240, Math.max(5, nextValue)) : 30;
+                        const warning = Math.min(prev.platformSettings.sessionSecurity.idleWarningMinutes, timeout - 1);
+                        return {
+                          ...prev,
+                          platformSettings: {
+                            ...prev.platformSettings,
+                            sessionSecurity: {
+                              ...prev.platformSettings.sessionSecurity,
+                              idleTimeoutMinutes: timeout,
+                              idleWarningMinutes: Math.max(1, warning),
+                            },
+                          },
+                        };
+                      });
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+
+                <label className="text-sm text-slate-700">
+                  Warning popup lead time (minutes)
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={data.platformSettings.sessionSecurity.idleWarningMinutes}
+                    onChange={(e) => {
+                      const nextValue = Number(e.target.value || 2);
+                      setData((prev) => {
+                        if (!prev) return prev;
+                        const maxWarning = Math.max(1, prev.platformSettings.sessionSecurity.idleTimeoutMinutes - 1);
+                        return {
+                          ...prev,
+                          platformSettings: {
+                            ...prev.platformSettings,
+                            sessionSecurity: {
+                              ...prev.platformSettings.sessionSecurity,
+                              idleWarningMinutes: Number.isFinite(nextValue)
+                                ? Math.min(30, Math.max(1, Math.min(maxWarning, nextValue)))
+                                : 2,
+                            },
+                          },
+                        };
+                      });
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-sm font-semibold text-slate-900">Login anti-spam protection</h3>
+              <p className="mt-1 text-xs text-slate-600">Throttle repeated failed logins and apply temporary lockout for suspicious attempts.</p>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700 lg:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={data.platformSettings.loginProtection.enabled}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          enabled: e.target.checked,
+                        },
+                      },
+                    } : prev)}
+                  />
+                  Enable anti-spam login throttling
+                </label>
+
+                <label className="text-sm text-slate-700">
+                  Max failed attempts
+                  <input
+                    type="number"
+                    min={3}
+                    max={20}
+                    value={data.platformSettings.loginProtection.maxFailedAttempts}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          maxFailedAttempts: Math.min(20, Math.max(3, Number(e.target.value || 5))),
+                        },
+                      },
+                    } : prev)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+
+                <label className="text-sm text-slate-700">
+                  Window (minutes)
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={data.platformSettings.loginProtection.windowMinutes}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          windowMinutes: Math.min(60, Math.max(1, Number(e.target.value || 10))),
+                        },
+                      },
+                    } : prev)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+
+                <label className="text-sm text-slate-700 lg:col-span-2">
+                  Lockout duration (minutes)
+                  <input
+                    type="number"
+                    min={1}
+                    max={240}
+                    value={data.platformSettings.loginProtection.lockoutMinutes}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          lockoutMinutes: Math.min(240, Math.max(1, Number(e.target.value || 15))),
+                        },
+                      },
+                    } : prev)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-sm text-slate-700 lg:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={data.platformSettings.loginProtection.requireOtpChallenge}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          requireOtpChallenge: e.target.checked,
+                        },
+                      },
+                    } : prev)}
+                  />
+                  Require OTP code after password verification
+                </label>
+
+                <label className="text-sm text-slate-700 lg:col-span-2">
+                  OTP code expiry (minutes)
+                  <input
+                    type="number"
+                    min={2}
+                    max={30}
+                    value={data.platformSettings.loginProtection.otpCodeTtlMinutes}
+                    onChange={(e) => setData((prev) => prev ? {
+                      ...prev,
+                      platformSettings: {
+                        ...prev.platformSettings,
+                        loginProtection: {
+                          ...prev.platformSettings.loginProtection,
+                          otpCodeTtlMinutes: Math.min(30, Math.max(2, Number(e.target.value || 10))),
+                        },
+                      },
+                    } : prev)}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -2544,6 +2542,11 @@ export default function MasterSystemSettingsPage() {
                 />
               </label>
 
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 lg:col-span-2">
+                <p className="font-semibold">Core settings</p>
+                <p className="mt-1 text-xs text-blue-800">Use these base URLs for pilot/live environments so app and API links are always environment-specific.</p>
+              </div>
+
               <label className="text-sm text-slate-700">
                 App base URL
                 <input
@@ -2581,7 +2584,7 @@ export default function MasterSystemSettingsPage() {
               </label>
 
               <label className="text-sm text-slate-700">
-                Support portal URL
+                Workspace support URL
                 <input
                   value={data.platformSettings.email.supportPortalUrl}
                   onChange={(e) => setData((prev) => prev ? {
@@ -2596,6 +2599,9 @@ export default function MasterSystemSettingsPage() {
                   } : prev)}
                   className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Use /os/support for workspace operations. /master/support is internal queue tooling for Marveo team members.
+                </p>
               </label>
 
               <label className="text-sm text-slate-700">
@@ -2945,361 +2951,26 @@ export default function MasterSystemSettingsPage() {
 
       {activeSection === 'access' ? (
         <div className="space-y-4">
-          {accessError ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{accessError}</div>
-          ) : null}
-          {accessNotice ? (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{accessNotice}</div>
-          ) : null}
-
-          {accessLoading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
-              Loading access control...
+          <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <h2 className="text-lg font-semibold text-slate-900">Access control moved</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Role Privileges Matrix and User Provisioning now live under Roles and Privileges.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Link
+                href="/master/role-privileges"
+                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+              >
+                Open role privileges matrix
+              </Link>
+              <Link
+                href="/master/team"
+                className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Open user provisioning
+              </Link>
             </div>
-          ) : (
-            <>
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <h2 className="text-lg font-semibold text-slate-900">Role privileges matrix</h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Define module-level rights for each role, similar to enterprise RBAC controls used by products like GitHub and Zoho.
-                </p>
-                {accessPayload ? (
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full min-w-[1000px]">
-                      <thead>
-                        <tr className="border-b border-slate-200">
-                          <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Role</th>
-                          {accessPayload.modules.map((moduleKey) => (
-                            <th key={moduleKey} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {toLabel(moduleKey)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {accessPayload.roles.map((role) => (
-                          <tr key={role} className="border-b border-slate-100">
-                            <td className="px-3 py-2 text-sm font-semibold text-slate-800">{toLabel(role)}</td>
-                            {accessPayload.modules.map((moduleKey) => (
-                              <td key={`${role}-${moduleKey}`} className="px-3 py-2 text-sm text-slate-700">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean(accessPayload.roleModuleVisibility[role]?.[moduleKey])}
-                                  onChange={(e) => setAccessPayload((prev) => {
-                                    if (!prev) return prev;
-                                    return {
-                                      ...prev,
-                                      roleModuleVisibility: {
-                                        ...prev.roleModuleVisibility,
-                                        [role]: {
-                                          ...prev.roleModuleVisibility[role],
-                                          [moduleKey]: e.target.checked,
-                                        },
-                                      },
-                                    };
-                                  })}
-                                />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-white p-5">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-900">User provisioning</h2>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Manage internal role assignment and account status. Creating a staged user record sends an invite email immediately.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      value={inviteName}
-                      onChange={(e) => setInviteName(e.target.value)}
-                      placeholder="Full name"
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      disabled={busyUserId === 'invite'}
-                    />
-                    <input
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="Email"
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      disabled={busyUserId === 'invite'}
-                    />
-                    <label className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-600">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={busyUserId === 'invite'}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          void (async () => {
-                            try {
-                              setBusyUserId('invite');
-                              const url = await uploadMedia(file);
-                              setInviteAvatarUrl(url);
-                              setAccessNotice('Avatar uploaded.');
-                            } catch (err) {
-                              setAccessError(err instanceof Error ? err.message : 'Avatar upload failed');
-                            } finally {
-                              setBusyUserId('');
-                            }
-                          })();
-                        }}
-                      />
-                      Upload avatar
-                    </label>
-                    <select
-                      value={inviteRole}
-                      onChange={(e) => setInviteRole(e.target.value as MarveoRole)}
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      disabled={busyUserId === 'invite'}
-                    >
-                      {(usersPayload?.marveoRoles ?? [inviteRole]).map((role) => (
-                        <option key={role} value={role}>{toLabel(role)}</option>
-                      ))}
-                    </select>
-                    <input
-                      value={inviteWorkspaceId}
-                      onChange={(e) => setInviteWorkspaceId(e.target.value)}
-                      placeholder="Workspace ID (optional)"
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      disabled={busyUserId === 'invite'}
-                    />
-                    <input
-                      value={inviteClientOrgId}
-                      onChange={(e) => setInviteClientOrgId(e.target.value)}
-                      placeholder="Client org ID (optional)"
-                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      disabled={busyUserId === 'invite'}
-                    />
-                    <button
-                      onClick={() => void createPendingUser()}
-                      disabled={busyUserId === 'invite'}
-                      className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      Create staged user
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full min-w-[980px]">
-                    <thead>
-                      <tr className="border-b border-slate-200">
-                        {['User', 'Role', 'Control Center Access', 'Status', 'Actions'].map((header) => (
-                          <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {header}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {users.map((user) => {
-                        const rowBusy = busyUserId === user.id;
-                        const editing = editUserId === user.id;
-                        return (
-                          <Fragment key={user.id}>
-                            <tr className="border-b border-slate-100">
-                              <td className="px-3 py-2 text-sm text-slate-700">
-                                <p className="font-semibold text-slate-900">{user.name}</p>
-                                <p className="text-xs text-slate-500">{user.email || user.username}</p>
-                                {(user.assignedWorkspaceId || user.assignedClientOrganizationId) ? (
-                                  <p className="mt-1 text-[11px] text-slate-400">
-                                    {user.assignedWorkspaceId ? `WS: ${user.assignedWorkspaceId}` : null}
-                                    {user.assignedWorkspaceId && user.assignedClientOrganizationId ? ' · ' : null}
-                                    {user.assignedClientOrganizationId ? `Org: ${user.assignedClientOrganizationId}` : null}
-                                  </p>
-                                ) : null}
-                              </td>
-                              <td className="px-3 py-2 text-sm text-slate-700">
-                                <select
-                                  value={user.normalizedRole || ''}
-                                  onChange={(e) => {
-                                    const role = e.target.value as MarveoRole;
-                                    if (!role) return;
-                                    void updateUser(user.id, { masterRole: role });
-                                  }}
-                                  className="rounded-xl border border-slate-300 px-2 py-1 text-xs"
-                                  disabled={rowBusy}
-                                >
-                                  <option value="">Unassigned</option>
-                                  {(usersPayload?.marveoRoles ?? []).map((role) => (
-                                    <option key={`${user.id}-${role}`} value={role}>{toLabel(role)}</option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-3 py-2 text-xs text-slate-700">
-                                {user.controlCenterAccess ? (
-                                  <div>
-                                    <p className="font-semibold text-emerald-700">Enabled</p>
-                                    <p className="mt-1 text-slate-600">
-                                      {(user.controlCenterModules && user.controlCenterModules.length > 0)
-                                        ? user.controlCenterModules.map(toLabel).join(', ')
-                                        : 'No modules assigned'}
-                                    </p>
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-500">No control center access</span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 text-sm text-slate-700">{toLabel(user.status)}</td>
-                              <td className="px-3 py-2 text-sm text-slate-700">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <button
-                                    onClick={() => void updateUser(user.id, { status: user.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED' })}
-                                    disabled={rowBusy}
-                                    className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 disabled:opacity-60"
-                                  >
-                                    {user.status === 'DISABLED' ? 'Re-enable' : 'Disable'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (editing) {
-                                        setEditUserId(null);
-                                        return;
-                                      }
-                                      setEditUserId(user.id);
-                                      setEditDraft({
-                                        name: user.name || '',
-                                        email: user.email || '',
-                                        avatarUrl: user.avatarUrl || '',
-                                        assignedWorkspaceId: user.assignedWorkspaceId || '',
-                                        assignedClientOrganizationId: user.assignedClientOrganizationId || '',
-                                        rawAuthRole: user.rawAuthRole || '',
-                                      });
-                                    }}
-                                    disabled={rowBusy}
-                                    className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 disabled:opacity-60"
-                                  >
-                                    {editing ? 'Close' : 'Edit'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => void deleteUser(user.id)}
-                                    disabled={rowBusy}
-                                    className="rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-60"
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                            {editing ? (
-                              <tr className="border-b border-slate-100 bg-slate-50/50">
-                                <td colSpan={5} className="px-3 py-4">
-                                  <div className="grid gap-3 md:grid-cols-6">
-                                    <input
-                                      value={editDraft.name}
-                                      onChange={(e) => setEditDraft((prev) => ({ ...prev, name: e.target.value }))}
-                                      placeholder="Full name"
-                                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                      disabled={rowBusy}
-                                    />
-                                    <input
-                                      type="email"
-                                      value={editDraft.email}
-                                      onChange={(e) => setEditDraft((prev) => ({ ...prev, email: e.target.value }))}
-                                      placeholder="Email"
-                                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                      disabled={rowBusy}
-                                    />
-                                    <div className="flex items-center gap-2">
-                                      <label className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-600">
-                                        <input
-                                          type="file"
-                                          accept="image/*"
-                                          className="hidden"
-                                          disabled={rowBusy}
-                                          onChange={(e) => {
-                                            const file = e.target.files?.[0];
-                                            if (!file) return;
-                                            void (async () => {
-                                              try {
-                                                setBusyUserId(user.id);
-                                                const url = await uploadMedia(file);
-                                                setEditDraft((prev) => ({ ...prev, avatarUrl: url }));
-                                                setAccessNotice('Avatar uploaded.');
-                                              } catch (err) {
-                                                setAccessError(err instanceof Error ? err.message : 'Avatar upload failed');
-                                              } finally {
-                                                setBusyUserId('');
-                                              }
-                                            })();
-                                          }}
-                                        />
-                                        Avatar
-                                      </label>
-                                      <input
-                                        value={editDraft.avatarUrl}
-                                        onChange={(e) => setEditDraft((prev) => ({ ...prev, avatarUrl: e.target.value }))}
-                                        placeholder="Avatar URL"
-                                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                        disabled={rowBusy}
-                                      />
-                                    </div>
-                                    <input
-                                      value={editDraft.assignedWorkspaceId}
-                                      onChange={(e) => setEditDraft((prev) => ({ ...prev, assignedWorkspaceId: e.target.value }))}
-                                      placeholder="Workspace ID"
-                                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                      disabled={rowBusy}
-                                    />
-                                    <input
-                                      value={editDraft.assignedClientOrganizationId}
-                                      onChange={(e) => setEditDraft((prev) => ({ ...prev, assignedClientOrganizationId: e.target.value }))}
-                                      placeholder="Client org ID"
-                                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                      disabled={rowBusy}
-                                    />
-                                    <input
-                                      value={editDraft.rawAuthRole}
-                                      onChange={(e) => setEditDraft((prev) => ({ ...prev, rawAuthRole: e.target.value }))}
-                                      placeholder="Raw auth role"
-                                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                                      disabled={rowBusy}
-                                    />
-                                  </div>
-                                  <div className="mt-3 flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => void saveUserProfile(user.id)}
-                                      disabled={rowBusy}
-                                      className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                                    >
-                                      Save profile
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditUserId(null)}
-                                      disabled={rowBusy}
-                                      className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 disabled:opacity-60"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ) : null}
-                          </Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
+          </div>
         </div>
       ) : null}
     </div>

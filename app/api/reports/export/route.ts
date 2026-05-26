@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 import { getConfig } from '@/src/config/client';
 
@@ -54,8 +54,8 @@ async function fetchOrders(date_min: string, date_max: string): Promise<Order[]>
 }
 
 export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const auth = await requireActionPermission('reports', 'export');
+  if ('error' in auth) return auth.error;
 
   const { searchParams } = new URL(req.url);
   const format = searchParams.get('format') ?? 'excel';

@@ -10,20 +10,24 @@ import {
   type MarveoRole,
 } from '@/lib/auth';
 import MasterSidebar from '@/components/MasterSidebar';
+import SessionInactivityGuard from '@/components/SessionInactivityGuard';
 import { CONTROL_CENTER_MODULE_KEYS, readAdminStore, type ControlCenterModuleKey } from '@/lib/adminStore';
+import { resolveMasterRoleDashboard, type MasterInternalRole } from '@/lib/master/roleDashboard';
 import { resolveRequiredModuleForPath } from './_lib/moduleAccess';
+import { resolveModuleActionPermissions } from '@/lib/master/permissions/resolver';
 
-const INTERNAL_ROLE_PRIORITY: MarveoRole[] = [
+const INTERNAL_ROLE_PRIORITY: MasterInternalRole[] = [
   'SUPER_ADMIN',
   'ADMIN',
+  'TECHNICAL_SUPPORT',
+  'CUSTOMER_SUPPORT',
   'DEPLOYMENT_MANAGER',
-  'SUPPORT_OFFICER',
   'BILLING_MANAGER',
 ];
 
-function resolveEffectiveInternalRole(masterRole: MarveoRole | null, marveoRoles: MarveoRole[]): MarveoRole | null {
-  if (masterRole && INTERNAL_ROLE_PRIORITY.includes(masterRole)) {
-    return masterRole;
+function resolveEffectiveInternalRole(masterRole: MarveoRole | null, marveoRoles: MarveoRole[]): MasterInternalRole | null {
+  if (masterRole && INTERNAL_ROLE_PRIORITY.includes(masterRole as MasterInternalRole)) {
+    return masterRole as MasterInternalRole;
   }
 
   for (const role of INTERNAL_ROLE_PRIORITY) {
@@ -33,6 +37,15 @@ function resolveEffectiveInternalRole(masterRole: MarveoRole | null, marveoRoles
   }
 
   return null;
+}
+
+function roleLabel(role: string | null): string {
+  const normalized = String(role || '').trim();
+  if (!normalized) return '';
+  return normalized
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export default async function MasterLayout({ children }: { children: React.ReactNode }) {
@@ -65,12 +78,27 @@ export default async function MasterLayout({ children }: { children: React.React
   const superAdmin = await isSuperAdmin(session.token);
   const store = await readAdminStore();
   const effectiveRole = resolveEffectiveInternalRole(roleContext.masterRole, roles);
+  const dashboard = effectiveRole ? resolveMasterRoleDashboard(effectiveRole) : null;
+  const resolvedRoleLabel = roleLabel(roleContext.masterRole || effectiveRole);
 
-  const allowedModules: ControlCenterModuleKey[] = superAdmin
-    ? [...CONTROL_CENTER_MODULE_KEYS]
-    : (effectiveRole
-        ? CONTROL_CENTER_MODULE_KEYS.filter((moduleKey) => Boolean(store.controlCenterRoleVisibility[effectiveRole]?.[moduleKey]))
-        : []);
+  const allowedModules: ControlCenterModuleKey[] = (() => {
+    if (superAdmin) return [...CONTROL_CENTER_MODULE_KEYS];
+    if (!effectiveRole || !dashboard) return [];
+
+    const configured = CONTROL_CENTER_MODULE_KEYS.filter((moduleKey) => {
+      const permissions = resolveModuleActionPermissions({
+        role: effectiveRole,
+        moduleKey,
+        moduleVisibility: Boolean(store.controlCenterRoleVisibility[effectiveRole]?.[moduleKey]),
+        storedActionPermissions: store.controlCenterRoleActionPermissions[effectiveRole]?.[moduleKey],
+      });
+      return permissions.view;
+    });
+    const configuredSet = new Set(configured);
+
+    // Enforce baseline (code) + configured (store). Store can reduce, but cannot expand beyond baseline.
+    return dashboard.allowedModulesBaseline.filter((moduleKey) => configuredSet.has(moduleKey));
+  })();
 
   const requestHeaders = await headers();
   const currentPath = requestHeaders.get('x-marveo-pathname') ?? '/master';
@@ -106,15 +134,25 @@ export default async function MasterLayout({ children }: { children: React.React
   }
 
   return (
-    <div className="flex flex-col md:flex-row h-screen overflow-hidden bg-gray-50">
+    <div className="flex flex-col md:flex-row h-screen overflow-y-hidden overflow-x-visible bg-gray-50">
       <MasterSidebar
         displayName={session.user?.user_display_name ?? 'Admin'}
         email={session.user?.user_email ?? ''}
         allowedModules={allowedModules}
         dashboardLogoUrl={store.platformSettings.branding.dashboardLogoUrl || store.platformSettings.branding.logoUrl || ''}
         brandName={store.platformSettings.branding.brandName || 'Marveo'}
+        navItems={dashboard?.sidebar}
+        surfaceLabel="Control Center"
+        roleLabel={resolvedRoleLabel}
+        isSuperAdmin={superAdmin}
       />
       <main className="flex-1 overflow-auto pt-16 md:pt-0">
+        <SessionInactivityGuard
+          enabled={store.platformSettings.sessionSecurity.inactivityEnabled}
+          idleTimeoutMinutes={store.platformSettings.sessionSecurity.idleTimeoutMinutes}
+          idleWarningMinutes={store.platformSettings.sessionSecurity.idleWarningMinutes}
+          loginRedirectPath="/master-login?reason=inactive"
+        />
         {notifications.map((notice) => (
           <div
             key={notice.id}

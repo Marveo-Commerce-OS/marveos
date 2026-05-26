@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marveos CTO Architecture and Risk Report</title>
+  <style>
+    :root {
+      --bg: #efe7da;
+      --paper: #fffdf9;
+      --ink: #171512;
+      --muted: #5c544a;
+      --border: #d7c8b6;
+      --accent: #7a1f1f;
+      --accent-soft: #f8e9e8;
+      --gold: #8b6a1f;
+      --gold-soft: #f6eed7;
+      --green: #2d6a4f;
+      --green-soft: #e7f3ec;
+      --red: #a12626;
+      --red-soft: #f8e7e7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, #f8f2e9 0%, var(--bg) 100%);
+      font: 16px/1.62 Georgia, "Times New Roman", serif;
+    }
+
+    .page {
+      max-width: 980px;
+      margin: 28px auto;
+      padding: 42px 50px 60px;
+      background: var(--paper);
+      border: 1px solid var(--border);
+      box-shadow: 0 22px 50px rgba(43, 31, 20, 0.09);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      font: 700 11px/1.1 Arial, Helvetica, sans-serif;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 40px;
+      line-height: 1.08;
+    }
+
+    .meta {
+      margin: 14px 0 28px;
+      color: var(--muted);
+      font: 14px/1.5 Arial, Helvetica, sans-serif;
+    }
+
+    .hero {
+      margin: 26px 0 34px;
+      padding: 20px 22px;
+      border-left: 5px solid var(--accent);
+      background: var(--accent-soft);
+    }
+
+    h2 {
+      margin: 38px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      font-size: 28px;
+      line-height: 1.15;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    p { margin: 0 0 14px; }
+    ul, ol { margin: 0 0 18px 22px; }
+    li { margin: 0 0 7px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 18px 0 28px;
+      font: 14px/1.45 Arial, Helvetica, sans-serif;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f2e8d9;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .status {
+      display: inline-block;
+      min-width: 88px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .yellow { background: var(--gold-soft); color: var(--gold); }
+    .red { background: var(--red-soft); color: var(--red); }
+    .green { background: var(--green-soft); color: var(--green); }
+
+    .callout {
+      margin: 18px 0 22px;
+      padding: 16px 18px;
+      background: #faf6ef;
+      border: 1px solid var(--border);
+    }
+
+    .verdict {
+      margin-top: 30px;
+      padding: 18px 20px;
+      background: #f4ece0;
+      border: 1px solid var(--border);
+    }
+
+    .footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font: 13px/1.5 Arial, Helvetica, sans-serif;
+    }
+
+    code {
+      font-family: Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: #f4efe7;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+
+    @media print {
+      body { background: #ffffff; }
+      .page {
+        margin: 0;
+        max-width: none;
+        padding: 20px 24px 28px;
+        box-shadow: none;
+        border: 0;
+      }
+      table, tr, td, th, .callout, .verdict { break-inside: avoid; }
+      h2, h3 { break-after: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">CTO Review</p>
+    <h1>Marveos CTO Architecture and Risk Report</h1>
+    <p class="meta">Date: 2026-05-26<br />Scope: marveos, marveo-connector, marveo-templates<br />Assessment basis: current implementation only</p>
+
+    <section class="hero">
+      <p><strong>Executive position:</strong> Marveos is already a meaningful operational platform, but it is not yet a fully automated production deployment system.</p>
+      <p>It is strong enough for controlled operator-led onboarding and support-assisted client rollout. It is not yet strong enough for broad self-serve deployment promises because the deployment workflow is more mature than the deployment executor behind it.</p>
+    </section>
+
+    <h2>Decision Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Area</th>
+          <th>Status</th>
+          <th>CTO Assessment</th>
+          <th>Primary Owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Persistence model</td><td><span class="status yellow">Yellow</span></td><td>Works today, but centralizes too much risk in one JSONB control document.</td><td>Platform Engineering</td></tr>
+        <tr><td>Authentication and authorization</td><td><span class="status yellow">Yellow</span></td><td>Real role-aware security model, but not yet distributed-safe.</td><td>Platform Engineering + Security</td></tr>
+        <tr><td>Commercial onboarding</td><td><span class="status yellow">Yellow</span></td><td>Good enough for managed funnel operations.</td><td>Product Engineering</td></tr>
+        <tr><td>Workspace orchestration</td><td><span class="status yellow">Yellow</span></td><td>Real orchestration state machine, not real infrastructure truth.</td><td>Platform Engineering</td></tr>
+        <tr><td>WordPress connector</td><td><span class="status yellow">Yellow</span></td><td>Valuable adapter layer, but not a mature sync substrate.</td><td>Integrations Engineering</td></tr>
+        <tr><td>Template operations</td><td><span class="status yellow">Yellow</span></td><td>Operationally useful catalog, but deployment coupling is incomplete.</td><td>Product Engineering</td></tr>
+        <tr><td>Deployment automation</td><td><span class="status red">Red</span></td><td>Major gap. Workflow exists; infrastructure executor does not.</td><td>Platform Engineering + DevOps</td></tr>
+        <tr><td>Security hardening</td><td><span class="status red">Yellow/Red</span></td><td>Intent is strong; implementation is still partly single-instance.</td><td>Security + Platform Engineering</td></tr>
+        <tr><td>Client rollout readiness</td><td><span class="status yellow">Yellow</span></td><td>Suitable for operator-led clients, not broad self-serve.</td><td>CTO / Delivery</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Core Architecture Reality</h2>
+
+    <h3>System control plane</h3>
+    <p>The true control plane is the Postgres-backed admin store in <code>lib/adminStore.ts</code>. Almost all platform state is persisted into one JSONB document keyed by a single row and read back into an application-owned aggregate object.</p>
+    <div class="callout">
+      <p><strong>Code anchors:</strong> <code>lib/adminStore.ts</code>, including the Postgres table definition, JSONB upsert path, store read/update API, and the default control-document shape.</p>
+    </div>
+    <p>This architecture is fast to evolve, but it places data integrity, concurrency discipline, and tenant isolation pressure on application logic instead of database structure.</p>
+
+    <h3>Authentication model</h3>
+    <p>The platform uses native session resolution and a WordPress bridge path, then normalizes identity into Marveo roles enforced by server-side guards.</p>
+    <div class="callout">
+      <p><strong>Code anchors:</strong> <code>lib/auth.ts</code>, <code>lib/nativeAuth.ts</code>, <code>app/api/auth/login/route.ts</code>, <code>lib/master/permissions/guards.ts</code>.</p>
+    </div>
+    <p>The auth model is real. The main gap is operational hardening: OTP, rate-limit, and lockout state are process-local rather than shared.</p>
+
+    <h3>Workspace model</h3>
+    <p>Workspaces are created as orchestration objects containing ownership scope, onboarding steps, support state, rollout metadata, and deployment-readiness flags.</p>
+    <div class="callout">
+      <p><strong>Code anchors:</strong> <code>lib/cloudOrchestration.ts</code>, <code>lib/workspaceEntitlements.ts</code>, <code>app/api/cloud/workspaces/route.ts</code>.</p>
+    </div>
+    <p>The system has a real workspace domain, but a workspace still represents operational state much more than verified infrastructure reality.</p>
+
+    <h2>Subsystem Findings</h2>
+
+    <h3>Persistence and data integrity</h3>
+    <p>The JSONB store makes the system flexible, but domain boundaries are soft. Commercial, auth, workspace, finance, and operational data all move through one aggregate persistence model.</p>
+    <p><strong>CTO assessment:</strong> acceptable for the current phase if the platform is deliberately operated as a controlled service, not as a high-scale autonomous multi-tenant product.</p>
+    <p><strong>Owner:</strong> Platform Engineering</p>
+
+    <h3>Authentication and platform access</h3>
+    <p>The auth design is better than a typical early-stage internal tool. Native and bridged identities already coexist, internal versus client roles are explicit, and module-action authorization is enforced server-side.</p>
+    <p><strong>Main risk:</strong> distributed inconsistency in login protection and challenge handling.</p>
+    <p><strong>Owner:</strong> Security and Platform Engineering</p>
+
+    <h3>Commercial onboarding and entitlement</h3>
+    <p>Commercial onboarding is real and is one of the stronger slices of the platform. Public plans, templates, onboarding sessions, subscription states, and entitlement resolution are consistently wired into user-facing onboarding behavior.</p>
+    <div class="callout">
+      <p><strong>Code anchors:</strong> <code>lib/commercialOnboarding.ts</code>, <code>app/api/subscription/current/route.ts</code>.</p>
+    </div>
+    <p><strong>Main risk:</strong> billing truth remains application-owned rather than independently anchored.</p>
+    <p><strong>Owner:</strong> Product Engineering and Platform Engineering</p>
+
+    <h3>Onboarding workflow</h3>
+    <p>The onboarding page in <code>app/setup/mvp/page.tsx</code> is a real orchestration client. It restores draft state, validates entitlement, loads templates, verifies connectors, creates workspaces, assigns support, and fetches readiness state.</p>
+    <p><strong>Main risk:</strong> workflow-critical sequencing is concentrated in a large client component, and the current step guard means the visible flow is narrower than the component's latent model.</p>
+    <p><strong>Owner:</strong> Product Engineering</p>
+
+    <h3>WordPress connector</h3>
+    <p>The connector is already useful for runtime content reads, status verification, content mapping, module activation, and deployment-status reporting.</p>
+    <div class="callout">
+      <p><strong>Code anchors:</strong> <code>marveo-connector/includes/class-rest-api.php</code>, <code>marveo-connector/includes/class-rest-api-extended.php</code>, <code>marveo-connector/includes/class-hooks.php</code>.</p>
+    </div>
+    <p><strong>Main risk:</strong> runtime reads are comparatively open once connector status is active enough, and long-term sync hooks are still placeholders.</p>
+    <p><strong>Owner:</strong> Integrations Engineering</p>
+
+    <h3>Template system</h3>
+    <p>The template system is operationally real: metadata, import, resync, publish rules, and public filtering are implemented. It is useful for curated onboarding.</p>
+    <p><strong>Main risk:</strong> template availability can be mistaken for deployment readiness, but the deployment engine does not yet complete the promise.</p>
+    <p><strong>Owner:</strong> Product Engineering</p>
+
+    <h3>Deployment and launch</h3>
+    <p>This is the highest-risk gap in the platform. Deployment links, launch checklist, and launch guard exist, but the execution layer behind them is incomplete.</p>
+    <div class="callout">
+      <p><strong>Critical code anchors:</strong> <code>app/api/cloud/deployment-links/route.ts</code>, <code>app/api/cloud/deployment-links/[linkId]/route.ts</code>, <code>app/api/cloud/workspaces/[workspaceId]/launch-guard/route.ts</code>, <code>lib/cloudOrchestration.ts</code>.</p>
+      <p><strong>Critical implementation reality:</strong> the finalize route explicitly calls out future work for infrastructure provisioning, DNS configuration, SSL certificate generation, webhook registration, and content sync triggering.</p>
+    </div>
+    <p><strong>CTO conclusion:</strong> this is the main blocker to self-serve rollout.</p>
+    <p><strong>Owner:</strong> Platform Engineering and DevOps</p>
+
+    <h3>Infrastructure and security posture</h3>
+    <p>Security intent is good, but operational hardening is not complete. Public route throttling, audit logs, and permission guards exist, but several core control mechanisms remain in memory.</p>
+    <p><strong>Main risk:</strong> multi-instance production would weaken protection guarantees unless the state model changes.</p>
+    <p><strong>Owner:</strong> Security and Platform Engineering</p>
+
+    <h2>Client Readiness Assessment</h2>
+    <p>The platform can support a real client today if Marveo staff remain in the loop. It can capture entitlement, create workspaces, verify existing WordPress connectors, assign support, and generate readiness state.</p>
+    <p>It should not yet be described as a fully self-serve production deployment engine for new client environments.</p>
+    <div class="callout">
+      <p><strong>Recommended external posture:</strong> Marveos is a managed onboarding and operational orchestration platform with partial automation, not yet a fully autonomous deployment platform.</p>
+    </div>
+
+    <h2>Top Risks and Risk Owners</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Priority</th>
+          <th>Risk</th>
+          <th>Why it matters</th>
+          <th>Owner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>P1</td><td>Deployment execution gap</td><td>Core self-serve value proposition is not actually automated yet.</td><td>Platform Engineering + DevOps</td></tr>
+        <tr><td>P1</td><td>Process-local security controls</td><td>Multi-instance rollout would weaken lockout, OTP, and rate-limit guarantees.</td><td>Security + Platform Engineering</td></tr>
+        <tr><td>P1</td><td>Overloaded JSONB control plane</td><td>Scale, reporting, and concurrent mutation complexity will grow quickly.</td><td>Platform Engineering</td></tr>
+        <tr><td>P2</td><td>Connector runtime authorization looseness</td><td>Runtime reads are easier to expose than intended if connector status is active enough.</td><td>Integrations Engineering + Security</td></tr>
+        <tr><td>P2</td><td>Client workflow logic concentrated in frontend</td><td>Increases regression risk and makes future onboarding variants harder to maintain.</td><td>Product Engineering</td></tr>
+        <tr><td>P2</td><td>Template readiness not equal to deployment readiness</td><td>Commercial and delivery expectations can diverge.</td><td>Product Engineering + Delivery</td></tr>
+        <tr><td>P3</td><td>Mixed identity persistence complexity</td><td>Native and bridged auth coexistence is useful, but long-term ownership needs cleanup.</td><td>Platform Engineering</td></tr>
+      </tbody>
+    </table>
+
+    <h2>90-Day CTO Action Plan</h2>
+    <h3>Phase 1: harden what already exists</h3>
+    <ol>
+      <li>Move login OTP, lockout, and public rate-limit state into shared storage.</li>
+      <li>Tighten connector runtime authorization for non-public endpoints.</li>
+      <li>Add explicit operational telemetry around workspace creation, connector verification, support assignment, and launch approval.</li>
+    </ol>
+    <p><strong>Owner:</strong> Security + Platform Engineering</p>
+
+    <h3>Phase 2: make deployment real</h3>
+    <ol>
+      <li>Build a deployment executor behind the existing deployment-link and launch surfaces.</li>
+      <li>Represent provisioning steps as real jobs with retries, status, and audit events.</li>
+      <li>Wire DNS, certificate, and environment/bootstrap tasks into the executor.</li>
+    </ol>
+    <p><strong>Owner:</strong> Platform Engineering + DevOps</p>
+
+    <h3>Phase 3: reduce concentration risk</h3>
+    <ol>
+      <li>Pull workflow-critical sequencing out of the large onboarding client component.</li>
+      <li>Introduce clearer backend workflow handlers for onboarding progression.</li>
+      <li>Begin separating high-churn domains from the monolithic admin store aggregate.</li>
+    </ol>
+    <p><strong>Owner:</strong> Product Engineering + Platform Engineering</p>
+
+    <section class="verdict">
+      <p><strong>Final recommendation:</strong> continue forward as a managed-service-first platform.</p>
+      <p><strong>Final CTO verdict:</strong> approved for controlled managed onboarding. Not approved yet for broad self-serve production rollout.</p>
+    </section>
+
+    <h2>Reference Files Reviewed</h2>
+    <ul>
+      <li><code>lib/adminStore.ts</code></li>
+      <li><code>lib/auth.ts</code></li>
+      <li><code>lib/nativeAuth.ts</code></li>
+      <li><code>app/api/auth/login/route.ts</code></li>
+      <li><code>lib/workspaceEntitlements.ts</code></li>
+      <li><code>lib/cloudOrchestration.ts</code></li>
+      <li><code>app/api/cloud/workspaces/route.ts</code></li>
+      <li><code>app/api/cloud/workspaces/[workspaceId]/launch-checklist/route.ts</code></li>
+      <li><code>app/api/cloud/workspaces/[workspaceId]/launch-guard/route.ts</code></li>
+      <li><code>app/api/cloud/deployment-links/route.ts</code></li>
+      <li><code>app/api/cloud/deployment-links/[linkId]/route.ts</code></li>
+      <li><code>lib/commercialOnboarding.ts</code></li>
+      <li><code>app/api/subscription/current/route.ts</code></li>
+      <li><code>app/setup/mvp/page.tsx</code></li>
+      <li><code>marveo-connector/includes/class-rest-api.php</code></li>
+      <li><code>marveo-connector/includes/class-rest-api-extended.php</code></li>
+      <li><code>marveo-connector/includes/class-hooks.php</code></li>
+    </ul>
+
+    <p class="footer">Prepared by GitHub Copilot using GPT-5.4. Product: Marveos.</p>
+  </main>
+</body>
+</html>

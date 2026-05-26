@@ -7,31 +7,16 @@ export type PortalAccess = 'b2c' | 'b2b';
 export interface ManagedUserState {
   active: boolean;
   portals: PortalAccess[];
-  masterRole?:
-    | 'SUPER_ADMIN'
-    | 'ADMIN'
-    | 'SUPPORT_OFFICER'
-    | 'DEPLOYMENT_MANAGER'
-    | 'BILLING_MANAGER'
-    | 'CLIENT_OWNER'
-    | 'CLIENT_STAFF'
-    | 'CONNECTED_WORDPRESS_ADMIN'
-    | 'CONNECTED_WOOCOMMERCE_MANAGER';
+  masterRole?: string;
   rawAuthRole?: string;
   status?: 'ACTIVE' | 'INVITED' | 'DISABLED';
   assignedWorkspaceId?: string;
   assignedClientOrganizationId?: string;
   invitePending?: boolean;
+  ticketSignature?: string;
 }
 
-export type NativeRole =
-  | 'SUPER_ADMIN'
-  | 'ADMIN'
-  | 'SUPPORT_OFFICER'
-  | 'DEPLOYMENT_MANAGER'
-  | 'BILLING_MANAGER'
-  | 'CLIENT_OWNER'
-  | 'CLIENT_STAFF';
+export type NativeRole = string;
 
 export interface NativePlatformIdentity {
   id: string;
@@ -60,6 +45,18 @@ export interface NativePlatformSession {
 export interface NativePasswordChangeOtp {
   code: string;
   requestedAt: string;
+  expiresAt: string;
+}
+
+export interface NativeLoginOtpChallenge {
+  id: string;
+  identifier: string;
+  surface: 'master' | 'portal';
+  email: string;
+  displayName: string;
+  otpCode: string;
+  requestedAt: string;
+  lastSentAt: string;
   expiresAt: string;
 }
 
@@ -172,9 +169,18 @@ export interface PlatformSettings {
     | 'BILLING_NOTICE'
     | 'BILLING_SUSPENDED'
     | 'BILLING_REACTIVATED'
+    | 'SUPPORT_ACCESS_REQUESTED'
+    | 'SUPPORT_ACCESS_REQUESTED_SUPPORT'
+    | 'SUPPORT_ACCESS_APPROVED'
+    | 'SUPPORT_ACCESS_APPROVED_SUPPORT'
     | 'USER_INVITE'
     | 'USER_STATUS_CHANGED'
     | 'SUPPORT_ASSIGNED'
+    | 'SUPPORT_ASSIGNED_SUPPORT'
+    | 'TICKET_ASSIGNED'
+    | 'TICKET_ASSIGNED_SUPPORT'
+    | 'TICKET_REPLY_CLIENT'
+    | 'TICKET_REPLY_SUPPORT'
     | 'CONNECTOR_FAILED'
     | 'SYSTEM_FAILURE_ALERT',
     {
@@ -185,6 +191,20 @@ export interface PlatformSettings {
       text: string;
     }
   >;
+  sessionSecurity: {
+    inactivityEnabled: boolean;
+    idleTimeoutMinutes: number;
+    idleWarningMinutes: number;
+    enforceSingleSession: boolean;
+  };
+  loginProtection: {
+    enabled: boolean;
+    maxFailedAttempts: number;
+    windowMinutes: number;
+    lockoutMinutes: number;
+    requireOtpChallenge: boolean;
+    otpCodeTtlMinutes: number;
+  };
   reporting: {
     scheduleEnabled: boolean;
     frequency: 'WEEKLY' | 'MONTHLY';
@@ -243,6 +263,212 @@ export interface AuditRecord {
   action: string;
   target: string;
   details?: string;
+}
+
+export type TicketCategory =
+  | 'complaint'
+  | 'billing'
+  | 'technical_support'
+  | 'website_support'
+  | 'whatsapp_integration'
+  | 'general_enquiry';
+
+export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export type TicketStatus =
+  | 'open'
+  | 'awaiting_support'
+  | 'awaiting_client'
+  | 'in_progress'
+  | 'resolved'
+  | 'closed';
+
+export interface TicketAttachment {
+  id: string;
+  name: string;
+  url: string;
+  size?: number;
+  contentType?: string;
+  uploadedAt: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  ticketNumber: string;
+  workspaceId: string;
+  clientUserId: string;
+  clientEmail: string;
+  clientName: string;
+  category: TicketCategory;
+  priority: TicketPriority;
+  status: TicketStatus;
+  subject: string;
+  descriptionHtml: string;
+  descriptionText: string;
+  attachments: TicketAttachment[];
+  assignedTo: string | null;
+  source: 'os' | 'master' | 'api';
+  relatedModule: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  lastReplyAt: string | null;
+}
+
+export interface SupportTicketMessage {
+  id: string;
+  ticketId: string;
+  authorType: 'client' | 'support' | 'system';
+  authorId: string;
+  authorName: string;
+  messageHtml: string;
+  messageText: string;
+  attachments: TicketAttachment[];
+  isInternalNote: boolean;
+  createdAt: string;
+}
+
+export type LiveChatSessionStatus = 'queued' | 'active' | 'awaiting_client' | 'ended' | 'converted';
+
+export interface LiveChatSession {
+  id: string;
+  sessionNumber: string;
+  workspaceId: string;
+  clientEmail: string;
+  clientName: string;
+  category: TicketCategory;
+  subject: string;
+  status: LiveChatSessionStatus;
+  assignedResponderId: string | null;
+  assignedResponderName?: string;
+  lastClientAt: string | null;
+  lastSupportAt: string | null;
+  lastPresenceAt: string | null;
+  linkedTicketId: string | null;
+  linkedTicketNumber: string | null;
+  convertedAt: string | null;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LiveChatSessionMessage {
+  id: string;
+  sessionId: string;
+  authorType: 'client' | 'support' | 'system';
+  authorId: string;
+  authorName: string;
+  messageHtml: string;
+  messageText: string;
+  attachments: TicketAttachment[];
+  createdAt: string;
+}
+
+export interface LiveChatPresenceRecord {
+  sessionId: string;
+  clientOnline: boolean;
+  supportOnline: boolean;
+  lastClientSeenAt: string | null;
+  lastSupportSeenAt: string | null;
+  updatedAt: string;
+}
+
+export interface TicketingStore {
+  tickets: Record<string, SupportTicket>;
+  messages: Record<string, SupportTicketMessage[]>;
+  liveSessions: Record<string, LiveChatSession>;
+  liveMessages: Record<string, LiveChatSessionMessage[]>;
+  livePresence: Record<string, LiveChatPresenceRecord>;
+  definedReplies: Record<string, {
+    id: string;
+    title: string;
+    contentHtml: string;
+    contentText: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  knowledgeArticles: Record<string, {
+    id: string;
+    title: string;
+    summary: string;
+    audience: 'internal' | 'client' | 'both';
+    sourceDoc?: string;
+    heroImageUrl?: string;
+    videoUrl?: string;
+    contentHtml: string;
+    contentText: string;
+    createdBy: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  counters: {
+    nextTicketSequence: number;
+    nextLiveSessionSequence: number;
+  };
+}
+
+export type OperationalAssignmentEntity =
+  | 'ticket'
+  | 'deployment'
+  | 'support_queue'
+  | 'launch_readiness'
+  | 'support_session';
+
+export type OperationalAssignmentStatus =
+  | 'unassigned'
+  | 'assigned'
+  | 'in_progress'
+  | 'awaiting_response'
+  | 'escalated'
+  | 'completed';
+
+export interface OperationalAssignmentRecord {
+  id: string;
+  entityType: OperationalAssignmentEntity;
+  entityId: string;
+  workspaceId?: string;
+  assignedToUserId: string;
+  assignedToName: string;
+  assignedRole: string;
+  assignedAt: string;
+  assignedBy: string;
+  assignmentStatus: OperationalAssignmentStatus;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OperationalActivityEvent {
+  id: string;
+  type:
+    | 'ticket_assigned'
+    | 'deployment_assigned'
+    | 'connector_failed'
+    | 'payment_failed'
+    | 'launch_approved'
+    | 'support_session_started'
+    | 'template_selected'
+    | 'website_connected';
+  actor: string;
+  target: string;
+  workspaceId?: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface OperationalAuditEvent {
+  id: string;
+  actor: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  workspaceId?: string;
+  timestamp: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MasterOperationsStore {
+  assignments: Record<string, OperationalAssignmentRecord>;
+  activityFeed: OperationalActivityEvent[];
+  auditTrail: OperationalAuditEvent[];
 }
 
 export type OnboardingStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'rolled_back';
@@ -379,11 +605,17 @@ export interface WorkspaceOrchestration {
     assignedBy?: string;
     supportOfficerId?: string;
     supportOfficerName?: string;
+    supportOfficerType?: 'CUSTOMER_SUPPORT' | 'TECHNICAL_SUPPORT';
+    ticketId?: string;
     priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     reason?: string;
     setupType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
     requiredSkills?: string[];
     initialNotes?: string;
+    technicalSupportOfficerId?: string;
+    technicalSupportOfficerName?: string;
+    escalationStatus?: 'NONE' | 'REQUESTED' | 'ASSIGNED' | 'RESOLVED';
+    escalatedAt?: string;
   };
   launchGuardLastCheckedAt?: string;
   connectorStatus?: ConnectorStatusKey;
@@ -392,6 +624,8 @@ export interface WorkspaceOrchestration {
   connectorLastVerificationAttempt?: string;
   connectorVerificationError?: string;
   connectorSiteMetadata?: ConnectorSiteMetadata;
+  supportChatPin?: string;
+  supportChatPinUpdatedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -599,6 +833,7 @@ export interface CommercialTemplateConfig {
   slug: string;
   businessType: string;
   sector?: string;
+  professionKeys?: string[];
   category?: string;
   description: string;
   previewImage: string;
@@ -649,6 +884,46 @@ export interface CommercialConfig {
   billingCycleChangeRequests: Record<string, CommercialBillingCycleChangeRequest>;
 }
 
+export type FinanceLedgerType = 'income' | 'expense';
+export type FinanceIncomeStatus = 'pending' | 'paid' | 'failed' | 'refunded';
+export type FinanceExpenseStatus = 'pending' | 'approved' | 'paid' | 'cancelled';
+export type FinanceLedgerStatus = FinanceIncomeStatus | FinanceExpenseStatus;
+
+export interface FinanceLedgerEntry {
+  id: string;
+  type: FinanceLedgerType;
+  category: string;
+  subcategory: string;
+  amount: number;
+  currency: string;
+  description: string;
+  reference: string;
+  source: string;
+  sourceId: string;
+  workspaceId?: string;
+  clientId?: string;
+  status: FinanceLedgerStatus;
+  createdBy: string;
+  createdAt: string;
+  transactionDate: string;
+  vendor?: string;
+  paymentMethod?: string;
+  receipt?: string;
+  notes?: string;
+  incurredDate?: string;
+}
+
+export interface FinanceStore {
+  ledger: Record<string, FinanceLedgerEntry>;
+  categories: {
+    income: string[];
+    expense: string[];
+  };
+  counters: {
+    nextLedgerSequence: number;
+  };
+}
+
 export interface CloudOrchestrationStore {
   workspaces: Record<string, WorkspaceOrchestration>;
   pageSchemas: Record<string, VersionedSchema<PageSchemaData>[]>;
@@ -673,7 +948,10 @@ export interface CloudOrchestrationStore {
     businessModels: string[];
     countries: Array<{ code: string; name: string }>;
   };
+  operations: MasterOperationsStore;
+  ticketing: TicketingStore;
   commercial: CommercialConfig;
+  finance: FinanceStore;
 }
 
 export const PLAN_WORKSPACE_LIMITS: Record<AccountPlan, number> = {
@@ -700,15 +978,30 @@ export const CONTROL_CENTER_MODULE_KEYS = [
   'workspaces',
   'deploymentQueue',
   'supportQueue',
+  'tickets',
+  'knowledgeCenter',
+  'definedReplies',
   'launchReadiness',
   'connectors',
   'templates',
   'team',
+  'finance',
   'plansBilling',
   'reports',
   'analytics',
   'auditLogs',
   'systemSettings',
+  'rolePrivileges',
+] as const;
+
+export const MASTER_PERMISSION_ACTION_KEYS = [
+  'view',
+  'create',
+  'update',
+  'delete',
+  'assign',
+  'approve',
+  'export',
 ] as const;
 
 export const PLATFORM_EMAIL_TEMPLATE_KEYS = [
@@ -722,18 +1015,32 @@ export const PLATFORM_EMAIL_TEMPLATE_KEYS = [
   'BILLING_NOTICE',
   'BILLING_SUSPENDED',
   'BILLING_REACTIVATED',
+  'SUPPORT_ACCESS_REQUESTED',
+  'SUPPORT_ACCESS_REQUESTED_SUPPORT',
+  'SUPPORT_ACCESS_APPROVED',
+  'SUPPORT_ACCESS_APPROVED_SUPPORT',
   'USER_INVITE',
   'USER_STATUS_CHANGED',
   'SUPPORT_ASSIGNED',
+  'SUPPORT_ASSIGNED_SUPPORT',
+  'TICKET_ASSIGNED',
+  'TICKET_ASSIGNED_SUPPORT',
+  'TICKET_REPLY_CLIENT',
+  'TICKET_REPLY_SUPPORT',
   'CONNECTOR_FAILED',
   'SYSTEM_FAILURE_ALERT',
 ] as const;
 
 export type AdminModuleKey = (typeof ADMIN_MODULE_KEYS)[number];
 export type ControlCenterModuleKey = (typeof CONTROL_CENTER_MODULE_KEYS)[number];
+export type MasterPermissionActionKey = (typeof MASTER_PERMISSION_ACTION_KEYS)[number];
 export type PlatformEmailTemplateKey = (typeof PLATFORM_EMAIL_TEMPLATE_KEYS)[number];
 export type RoleModuleVisibility = Record<string, Partial<Record<AdminModuleKey, boolean>>>;
 export type ControlCenterRoleModuleVisibility = Record<string, Partial<Record<ControlCenterModuleKey, boolean>>>;
+export type ControlCenterRoleActionPermissions = Record<
+  string,
+  Partial<Record<ControlCenterModuleKey, Partial<Record<MasterPermissionActionKey, boolean>>>>
+>;
 
 export interface AdminConfigStore {
   users: Record<string, ManagedUserState>;
@@ -742,6 +1049,7 @@ export interface AdminConfigStore {
     sessions: Record<string, NativePlatformSession>;
     permissions: Record<string, string[]>;
     passwordChangeOtps: Record<string, NativePasswordChangeOtp>;
+    loginOtpChallenges: Record<string, NativeLoginOtpChallenge>;
   };
   platformSettings: PlatformSettings;
   tracking: TrackingConfig;
@@ -749,6 +1057,7 @@ export interface AdminConfigStore {
   forms: FormRoutingRule[];
   roleModuleVisibility: RoleModuleVisibility;
   controlCenterRoleVisibility: ControlCenterRoleModuleVisibility;
+  controlCenterRoleActionPermissions: ControlCenterRoleActionPermissions;
   maintenance: MaintenanceSettings;
   audit: AuditRecord[];
   cloud: CloudOrchestrationStore;
@@ -772,15 +1081,50 @@ const FULL_CONTROL_CENTER_ACCESS: Record<ControlCenterModuleKey, boolean> = {
   workspaces: true,
   deploymentQueue: true,
   supportQueue: true,
+  tickets: true,
+  knowledgeCenter: true,
+  definedReplies: true,
   launchReadiness: true,
   connectors: true,
   templates: true,
   team: true,
+  finance: true,
   plansBilling: true,
   reports: true,
   analytics: true,
   auditLogs: true,
   systemSettings: true,
+  rolePrivileges: true,
+};
+
+const FULL_ACTION_ACCESS: Record<MasterPermissionActionKey, boolean> = {
+  view: true,
+  create: true,
+  update: true,
+  delete: true,
+  assign: true,
+  approve: true,
+  export: true,
+};
+
+const VIEW_ONLY_ACTION_ACCESS: Record<MasterPermissionActionKey, boolean> = {
+  view: true,
+  create: false,
+  update: false,
+  delete: false,
+  assign: false,
+  approve: false,
+  export: false,
+};
+
+const NO_ACTION_ACCESS: Record<MasterPermissionActionKey, boolean> = {
+  view: false,
+  create: false,
+  update: false,
+  delete: false,
+  assign: false,
+  approve: false,
+  export: false,
 };
 
 const DEFAULT_EMAIL_TEMPLATES: Record<PlatformEmailTemplateKey, {
@@ -860,6 +1204,34 @@ const DEFAULT_EMAIL_TEMPLATES: Record<PlatformEmailTemplateKey, {
     html: '<p>Hello {{clientName}},</p><p>Your subscription {{subscriptionId}} has been reactivated.</p>',
     text: 'Hello {{clientName}}, your subscription {{subscriptionId}} has been reactivated.',
   },
+  SUPPORT_ACCESS_REQUESTED: {
+    enabled: true,
+    subject: 'Support access requested for {{workspaceName}}',
+    preheader: 'A temporary support access code was sent to your client.',
+    html: '<p>Hello {{clientName}},</p><p>A support officer requested temporary access for <strong>{{workspaceName}}</strong>.</p><p><strong>Verification code:</strong> {{otpCode}}</p><p>Reason: {{reason}}</p><p>Expires at: {{expiresAt}}</p>',
+    text: 'Hello {{clientName}}, a support officer requested temporary access for {{workspaceName}}. Verification code: {{otpCode}}. Reason: {{reason}}. Expires at: {{expiresAt}}.',
+  },
+  SUPPORT_ACCESS_REQUESTED_SUPPORT: {
+    enabled: true,
+    subject: 'Support access request sent for {{workspaceName}}',
+    preheader: 'The client has been sent a verification code.',
+    html: '<p>Hello {{supportOfficerName}},</p><p>The verification code has been sent to {{clientName}} ({{clientEmail}}) for <strong>{{workspaceName}}</strong>.</p><p>Expires at: {{expiresAt}}</p><p>Reason: {{reason}}</p>',
+    text: 'Hello {{supportOfficerName}}, the verification code has been sent to {{clientName}} ({{clientEmail}}) for {{workspaceName}}. Expires at: {{expiresAt}}. Reason: {{reason}}.',
+  },
+  SUPPORT_ACCESS_APPROVED: {
+    enabled: true,
+    subject: 'Support access approved for {{workspaceName}}',
+    preheader: 'Your support request was approved.',
+    html: '<p>Hello {{clientName}},</p><p>Your support access request for <strong>{{workspaceName}}</strong> has been approved.</p><p>Session reference: {{sessionId}}</p><p>Expires at: {{expiresAt}}</p>',
+    text: 'Hello {{clientName}}, your support access request for {{workspaceName}} has been approved. Session reference: {{sessionId}}. Expires at: {{expiresAt}}.',
+  },
+  SUPPORT_ACCESS_APPROVED_SUPPORT: {
+    enabled: true,
+    subject: 'Support access session issued for {{workspaceName}}',
+    preheader: 'Support access is now active.',
+    html: '<p>Hello {{supportOfficerName}},</p><p>Support access is now active for <strong>{{workspaceName}}</strong>.</p><p>Client: {{clientEmail}}</p><p>Session reference: {{sessionId}}</p><p>Expires at: {{expiresAt}}</p>',
+    text: 'Hello {{supportOfficerName}}, support access is now active for {{workspaceName}}. Client: {{clientEmail}}. Session reference: {{sessionId}}. Expires at: {{expiresAt}}.',
+  },
   USER_INVITE: {
     enabled: true,
     subject: 'You have been invited to Marveo Control Center',
@@ -880,6 +1252,41 @@ const DEFAULT_EMAIL_TEMPLATES: Record<PlatformEmailTemplateKey, {
     preheader: 'A support officer has been assigned to your workspace.',
     html: '<p>Hello {{clientName}},</p><p>{{supportOfficerName}} has been assigned to support your workspace {{workspaceName}}.</p>',
     text: 'Hello {{clientName}}, {{supportOfficerName}} has been assigned to support your workspace {{workspaceName}}.',
+  },
+  SUPPORT_ASSIGNED_SUPPORT: {
+    enabled: true,
+    subject: 'Support assignment for {{workspaceName}}',
+    preheader: 'You have been assigned to a workspace support request.',
+    html: '<p>Hello {{supportOfficerName}},</p><p>You have been assigned to support <strong>{{workspaceName}}</strong>.</p><p>Client: {{clientEmail}}</p><p>Ticket reference: {{ticketId}}</p><p>Priority: {{priority}}</p>',
+    text: 'Hello {{supportOfficerName}}, you have been assigned to support {{workspaceName}}. Client: {{clientEmail}}. Ticket reference: {{ticketId}}. Priority: {{priority}}.',
+  },
+  TICKET_ASSIGNED: {
+    enabled: true,
+    subject: 'Ticket assigned: {{ticketNumber}}',
+    preheader: 'A support ticket was assigned to your team.',
+    html: '<p>Hello {{clientName}},</p><p>Your ticket <strong>{{ticketNumber}}</strong> is now assigned.</p><p>Workspace: {{workspaceName}}</p><p>Status: {{ticketStatus}}</p>',
+    text: 'Hello {{clientName}}, your ticket {{ticketNumber}} is now assigned. Workspace: {{workspaceName}}. Status: {{ticketStatus}}.',
+  },
+  TICKET_ASSIGNED_SUPPORT: {
+    enabled: true,
+    subject: 'Ticket assigned: {{ticketNumber}}',
+    preheader: 'You have a new assigned support ticket.',
+    html: '<p>Hello {{supportOfficerName}},</p><p>You have been assigned ticket <strong>{{ticketNumber}}</strong>.</p><p>Workspace: {{workspaceName}}</p><p>Subject: {{ticketSubject}}</p><p>Client: {{clientEmail}}</p>',
+    text: 'Hello {{supportOfficerName}}, you have been assigned ticket {{ticketNumber}}. Workspace: {{workspaceName}}. Subject: {{ticketSubject}}. Client: {{clientEmail}}.',
+  },
+  TICKET_REPLY_CLIENT: {
+    enabled: true,
+    subject: 'You have a new reply to your support ticket {{ticketNumber}}',
+    preheader: 'A Marveo support specialist replied to your ticket.',
+    html: '<p>Hello {{clientName}},</p><p>You have a new reply to your support ticket.</p><p><strong>Ticket Reference:</strong> {{ticketNumber}}</p><p><strong>From:</strong> {{supportOfficerName}} ({{supportOfficerRole}})</p><p><strong>Message:</strong></p><div>{{messageBody}}</div><p>To respond, log into your Marveo workspace support center where you can view your full ticket history.</p><p>Thank you,<br/>{{brandName}}</p>',
+    text: 'Hello {{clientName}}, you have a new reply to your support ticket {{ticketNumber}}. From: {{supportOfficerName}} ({{supportOfficerRole}}). Message: {{messageText}}. Reply from your Marveo workspace support center. Thank you, {{brandName}}.',
+  },
+  TICKET_REPLY_SUPPORT: {
+    enabled: true,
+    subject: 'Client replied on ticket {{ticketNumber}}',
+    preheader: 'A client has responded and needs follow-up.',
+    html: '<p>Hello {{supportOfficerName}},</p><p>The client replied on ticket <strong>{{ticketNumber}}</strong>.</p><p><strong>Workspace:</strong> {{workspaceName}}</p><p><strong>Client:</strong> {{clientEmail}}</p><p><strong>Message:</strong></p><div>{{messageBody}}</div>',
+    text: 'Hello {{supportOfficerName}}, the client replied on ticket {{ticketNumber}}. Workspace: {{workspaceName}}. Client: {{clientEmail}}. Message: {{messageText}}.',
   },
   CONNECTOR_FAILED: {
     enabled: true,
@@ -1030,6 +1437,198 @@ async function ensurePostgresStoreTable() {
 
 const LEGACY_STORE_PATH = path.join(process.cwd(), '.admin-data', 'ecommerce-admin-config.json');
 
+function buildActionPermissionsFromModuleVisibility(
+  visibility: ControlCenterRoleModuleVisibility,
+): ControlCenterRoleActionPermissions {
+  const operationalEditor = {
+    view: true,
+    create: true,
+    update: true,
+    delete: false,
+    assign: true,
+    approve: false,
+    export: true,
+  };
+
+  const resolveRoleDefault = (
+    role: string,
+    moduleKey: ControlCenterModuleKey,
+    enabled: boolean,
+  ): Record<MasterPermissionActionKey, boolean> => {
+    if (!enabled) return { ...NO_ACTION_ACCESS };
+    if (role === 'SUPER_ADMIN') return { ...FULL_ACTION_ACCESS };
+
+    if (role === 'ADMIN') {
+      if (moduleKey === 'systemSettings' || moduleKey === 'rolePrivileges') return { ...NO_ACTION_ACCESS };
+      const next = { ...operationalEditor };
+      if (moduleKey === 'deploymentQueue' || moduleKey === 'launchReadiness') next.approve = true;
+      return next;
+    }
+
+    if (role === 'CUSTOMER_SUPPORT') {
+      if (moduleKey === 'tickets') return { view: true, create: true, update: true, delete: false, assign: false, approve: false, export: true };
+      if (moduleKey === 'supportQueue' || moduleKey === 'definedReplies' || moduleKey === 'knowledgeCenter') return { view: true, create: true, update: true, delete: false, assign: false, approve: false, export: false };
+      return { ...VIEW_ONLY_ACTION_ACCESS };
+    }
+
+    if (role === 'TECHNICAL_SUPPORT') {
+      if (moduleKey === 'deploymentQueue' || moduleKey === 'launchReadiness' || moduleKey === 'connectors' || moduleKey === 'supportQueue' || moduleKey === 'tickets') {
+        return { view: true, create: false, update: true, delete: false, assign: true, approve: false, export: false };
+      }
+      return { ...VIEW_ONLY_ACTION_ACCESS };
+    }
+
+    if (role === 'DEPLOYMENT_MANAGER') {
+      if (moduleKey === 'deploymentQueue' || moduleKey === 'launchReadiness') {
+        return { view: true, create: false, update: true, delete: false, assign: true, approve: true, export: true };
+      }
+      if (moduleKey === 'workspaces' || moduleKey === 'supportQueue') {
+        return { view: true, create: false, update: true, delete: false, assign: true, approve: false, export: false };
+      }
+      return { ...VIEW_ONLY_ACTION_ACCESS };
+    }
+
+    if (role === 'BILLING_MANAGER') {
+      if (moduleKey === 'finance') {
+        return { view: true, create: true, update: true, delete: false, assign: false, approve: true, export: true };
+      }
+      if (moduleKey === 'plansBilling') {
+        return { view: true, create: false, update: true, delete: false, assign: false, approve: true, export: true };
+      }
+      if (moduleKey === 'reports') {
+        return { view: true, create: false, update: false, delete: false, assign: false, approve: false, export: true };
+      }
+      if (moduleKey === 'tickets') {
+        return { view: true, create: false, update: true, delete: false, assign: false, approve: false, export: false };
+      }
+      return { ...VIEW_ONLY_ACTION_ACCESS };
+    }
+
+    return { ...VIEW_ONLY_ACTION_ACCESS };
+  };
+
+  return Object.fromEntries(
+    Object.entries(visibility).map(([role, moduleMap]) => [
+      role,
+      Object.fromEntries(
+        CONTROL_CENTER_MODULE_KEYS.map((moduleKey) => {
+          const enabled = Boolean(moduleMap?.[moduleKey]);
+          return [moduleKey, resolveRoleDefault(role, moduleKey, enabled)];
+        }),
+      ),
+    ]),
+  ) as ControlCenterRoleActionPermissions;
+}
+
+const DEFAULT_CONTROL_CENTER_ROLE_VISIBILITY: ControlCenterRoleModuleVisibility = {
+  SUPER_ADMIN: { ...FULL_CONTROL_CENTER_ACCESS },
+  ADMIN: {
+    overview: true,
+    clients: true,
+    workspaces: true,
+    deploymentQueue: true,
+    supportQueue: true,
+    tickets: true,
+    knowledgeCenter: true,
+    definedReplies: false,
+    launchReadiness: true,
+    connectors: false,
+    templates: false,
+    team: false,
+    finance: true,
+    plansBilling: false,
+    reports: true,
+    analytics: false,
+    auditLogs: false,
+    systemSettings: false,
+    rolePrivileges: false,
+  },
+  CUSTOMER_SUPPORT: {
+    overview: true,
+    clients: false,
+    workspaces: false,
+    deploymentQueue: false,
+    supportQueue: true,
+    tickets: true,
+    knowledgeCenter: true,
+    definedReplies: true,
+    launchReadiness: false,
+    connectors: false,
+    templates: false,
+    team: false,
+    finance: false,
+    plansBilling: false,
+    reports: false,
+    analytics: false,
+    auditLogs: false,
+    systemSettings: false,
+    rolePrivileges: false,
+  },
+  TECHNICAL_SUPPORT: {
+    overview: true,
+    clients: false,
+    workspaces: true,
+    deploymentQueue: true,
+    supportQueue: true,
+    tickets: true,
+    knowledgeCenter: true,
+    definedReplies: true,
+    launchReadiness: true,
+    connectors: true,
+    templates: false,
+    team: false,
+    finance: false,
+    plansBilling: false,
+    reports: false,
+    analytics: false,
+    auditLogs: false,
+    systemSettings: false,
+    rolePrivileges: false,
+  },
+  DEPLOYMENT_MANAGER: {
+    overview: true,
+    clients: false,
+    workspaces: true,
+    deploymentQueue: true,
+    supportQueue: true,
+    tickets: false,
+    knowledgeCenter: true,
+    definedReplies: false,
+    launchReadiness: true,
+    connectors: false,
+    templates: true,
+    team: false,
+    finance: false,
+    plansBilling: false,
+    reports: false,
+    analytics: false,
+    auditLogs: false,
+    systemSettings: false,
+    rolePrivileges: false,
+  },
+  BILLING_MANAGER: {
+    overview: true,
+    clients: true,
+    workspaces: false,
+    deploymentQueue: false,
+    supportQueue: false,
+    tickets: true,
+    knowledgeCenter: true,
+    definedReplies: false,
+    launchReadiness: false,
+    connectors: false,
+    templates: false,
+    team: false,
+    finance: true,
+    plansBilling: true,
+    reports: true,
+    analytics: false,
+    auditLogs: false,
+    systemSettings: false,
+    rolePrivileges: false,
+  },
+};
+
 const DEFAULT_STORE: AdminConfigStore = {
   users: {},
   nativeAuth: {
@@ -1037,6 +1636,7 @@ const DEFAULT_STORE: AdminConfigStore = {
     sessions: {},
     permissions: {},
     passwordChangeOtps: {},
+    loginOtpChallenges: {},
   },
   platformSettings: {
     trialDurationDays: 14,
@@ -1189,7 +1789,7 @@ const DEFAULT_STORE: AdminConfigStore = {
       replyToEmail: '',
       appBaseUrl: process.env.NEXT_PUBLIC_BASE_URL || '',
       apiBaseUrl: process.env.NEXT_PUBLIC_WORDPRESS_API_URL || '',
-      supportPortalUrl: '/master/support',
+      supportPortalUrl: '/os/support',
       supportEmail: '',
       billingEmail: '',
       deploymentEmail: '',
@@ -1212,6 +1812,20 @@ const DEFAULT_STORE: AdminConfigStore = {
       lastRunStatus: undefined,
     },
     emailTemplates: { ...DEFAULT_EMAIL_TEMPLATES },
+    sessionSecurity: {
+      inactivityEnabled: true,
+      idleTimeoutMinutes: 30,
+      idleWarningMinutes: 2,
+      enforceSingleSession: true,
+    },
+    loginProtection: {
+      enabled: true,
+      maxFailedAttempts: 5,
+      windowMinutes: 10,
+      lockoutMinutes: 15,
+      requireOtpChallenge: true,
+      otpCodeTtlMinutes: 10,
+    },
   },
   tracking: {
     ecommerceDomain: '',
@@ -1264,10 +1878,21 @@ const DEFAULT_STORE: AdminConfigStore = {
   roleModuleVisibility: {
     SUPER_ADMIN: { ...FULL_ACCESS },
     ADMIN: { ...FULL_ACCESS },
-    SUPPORT_OFFICER: {
+    CUSTOMER_SUPPORT: {
       dashboard: true,
       products: false,
       orders: true,
+      reports: true,
+      customers: true,
+      blog: false,
+      stores: true,
+      siteSettings: false,
+      adminSettings: false,
+    },
+    TECHNICAL_SUPPORT: {
+      dashboard: true,
+      products: true,
+      orders: false,
       reports: true,
       customers: true,
       blog: false,
@@ -1320,62 +1945,8 @@ const DEFAULT_STORE: AdminConfigStore = {
       adminSettings: false,
     },
   },
-  controlCenterRoleVisibility: {
-    SUPER_ADMIN: { ...FULL_CONTROL_CENTER_ACCESS },
-    ADMIN: {
-      ...FULL_CONTROL_CENTER_ACCESS,
-      auditLogs: false,
-      systemSettings: false,
-    },
-    SUPPORT_OFFICER: {
-      overview: true,
-      clients: true,
-      workspaces: true,
-      deploymentQueue: true,
-      supportQueue: true,
-      launchReadiness: true,
-      connectors: true,
-      templates: false,
-      team: false,
-      plansBilling: false,
-      reports: true,
-      analytics: true,
-      auditLogs: false,
-      systemSettings: false,
-    },
-    DEPLOYMENT_MANAGER: {
-      overview: true,
-      clients: true,
-      workspaces: true,
-      deploymentQueue: true,
-      supportQueue: true,
-      launchReadiness: true,
-      connectors: true,
-      templates: true,
-      team: false,
-      plansBilling: false,
-      reports: true,
-      analytics: true,
-      auditLogs: false,
-      systemSettings: false,
-    },
-    BILLING_MANAGER: {
-      overview: true,
-      clients: true,
-      workspaces: true,
-      deploymentQueue: false,
-      supportQueue: false,
-      launchReadiness: false,
-      connectors: false,
-      templates: false,
-      team: false,
-      plansBilling: true,
-      reports: true,
-      analytics: true,
-      auditLogs: true,
-      systemSettings: false,
-    },
-  },
+  controlCenterRoleVisibility: { ...DEFAULT_CONTROL_CENTER_ROLE_VISIBILITY },
+  controlCenterRoleActionPermissions: buildActionPermissionsFromModuleVisibility(DEFAULT_CONTROL_CENTER_ROLE_VISIBILITY),
   maintenance: {
     site_under_construction: false,
     under_construction_title: 'We are coming back soon',
@@ -1404,6 +1975,24 @@ const DEFAULT_STORE: AdminConfigStore = {
         { code: 'ZA', name: 'South Africa' },
         { code: 'AU', name: 'Australia' },
       ],
+    },
+    operations: {
+      assignments: {},
+      activityFeed: [],
+      auditTrail: [],
+    },
+    ticketing: {
+      tickets: {},
+      messages: {},
+      liveSessions: {},
+      liveMessages: {},
+      livePresence: {},
+      definedReplies: {},
+      knowledgeArticles: {},
+      counters: {
+        nextTicketSequence: 1,
+        nextLiveSessionSequence: 1,
+      },
     },
     commercial: {
       countryCurrencyMap: {
@@ -1629,6 +2218,126 @@ const DEFAULT_STORE: AdminConfigStore = {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
+        {
+          templateId: 'template-saas-platform',
+          name: 'SaaS Platform',
+          slug: 'saas-platform',
+          businessType: 'Professional Services / Technology',
+          sector: 'technology-software',
+          professionKeys: ['saas-software-platform'],
+          category: 'subscription-platform',
+          description: 'Subscription-led SaaS template for product companies and software platforms.',
+          previewImage: '/images/templates/business-pro.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'NEXTJS'],
+          planAvailability: ['starter', 'growth', 'all'],
+          featureModules: ['subscriptions-lite', 'billing-lite', 'analytics', 'onboarding-requests'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          templateId: 'template-digital-agency',
+          name: 'Agency Growth',
+          slug: 'agency-growth',
+          businessType: 'Professional Services / Technology',
+          sector: 'technology-software',
+          professionKeys: ['digital-agency'],
+          category: 'service-commerce',
+          description: 'Lead-generation and project pipeline template for digital agencies.',
+          previewImage: '/images/templates/product-launch.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'NEXTJS'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          featureModules: ['campaigns', 'projects', 'milestones', 'invoices'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          templateId: 'template-it-support',
+          name: 'IT Support Center',
+          slug: 'it-support-center',
+          businessType: 'Professional Services / Technology',
+          sector: 'technology-software',
+          professionKeys: ['it-support-company'],
+          category: 'support-operations',
+          description: 'Service desk and client support template for managed IT teams.',
+          previewImage: '/images/templates/business-pro.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'WORDPRESS_ONLY', 'NEXTJS'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          featureModules: ['tickets', 'live-chat', 'service-requests', 'assets'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          templateId: 'template-software-development',
+          name: 'Dev Studio',
+          slug: 'dev-studio',
+          businessType: 'Professional Services / Technology',
+          sector: 'technology-software',
+          professionKeys: ['software-development-company'],
+          category: 'delivery-operations',
+          description: 'Project and milestone-driven template for software development teams.',
+          previewImage: '/images/templates/product-launch.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'NEXTJS'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          featureModules: ['projects', 'milestones', 'tickets', 'analytics'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        {
+          templateId: 'template-automation-consultant',
+          name: 'Automation Consultant',
+          slug: 'automation-consultant',
+          businessType: 'Professional Services / Technology',
+          sector: 'technology-software',
+          professionKeys: ['automation-consultant'],
+          category: 'consulting',
+          description: 'Consulting and automation delivery template for workflow specialists.',
+          previewImage: '/images/templates/business-pro.jpg',
+          status: 'ACTIVE',
+          visibility: 'PUBLIC',
+          supportedWebsiteTypes: ['NEW_WEBSITE'],
+          supportedStacks: ['WORDPRESS_NEXTJS', 'NEXTJS', 'CUSTOM'],
+          planAvailability: ['growth', 'enterprise', 'all'],
+          featureModules: ['consultations', 'automations', 'invoices', 'campaigns'],
+          requiresSupport: true,
+          repoSource: 'MANUAL',
+          repoPath: '',
+          version: '1.0.0',
+          artifactStatus: 'NOT_VALIDATED',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
       ],
       trialDefaults: {
         trialEnabled: true,
@@ -1640,6 +2349,43 @@ const DEFAULT_STORE: AdminConfigStore = {
       onboardingSessions: {},
       invoices: {},
       billingCycleChangeRequests: {},
+    },
+    finance: {
+      ledger: {},
+      categories: {
+        income: [
+          'subscriptions',
+          'workspace_setup',
+          'deployment_services',
+          'template_sales',
+          'ai_addons',
+          'website_support',
+          'domain_hosting',
+          'custom_development',
+          'consulting',
+          'training',
+          'partner_revenue',
+        ],
+        expense: [
+          'cloud_hosting',
+          'infrastructure',
+          'software_subscriptions',
+          'domains',
+          'marketing_ads',
+          'staff_salaries',
+          'contractors',
+          'refunds',
+          'operations',
+          'office_admin',
+          'customer_support',
+          'development_costs',
+          'payment_gateway_charges',
+          'taxes_compliance',
+        ],
+      },
+      counters: {
+        nextLedgerSequence: 1,
+      },
     },
   },
 };
@@ -1797,6 +2543,9 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
           slug: String(template.slug || template.templateId).trim().toLowerCase(),
           businessType: String(template.businessType || 'General').trim(),
           sector: String(template.sector || '').trim() || undefined,
+          professionKeys: Array.isArray(template.professionKeys)
+            ? template.professionKeys.map((item) => String(item).trim()).filter(Boolean)
+            : undefined,
           category: String(template.category || '').trim() || undefined,
           description: String(template.description || '').trim(),
           previewImage: String(template.previewImage || '').trim(),
@@ -1870,6 +2619,268 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
     );
   };
 
+  const normalizeTicketing = (ticketing: Partial<TicketingStore> | undefined): TicketingStore => {
+    const tickets = Object.fromEntries(
+      Object.entries(ticketing?.tickets ?? {}).map(([key, ticket]) => [
+        key,
+        {
+          ...ticket,
+          assignedTo: ticket.assignedTo ?? null,
+          source: ticket.source ?? 'os',
+          relatedModule: String(ticket.relatedModule ?? ''),
+          closedAt: ticket.closedAt ?? null,
+          lastReplyAt: ticket.lastReplyAt ?? null,
+          attachments: Array.isArray(ticket.attachments) ? ticket.attachments : [],
+        },
+      ]),
+    ) as Record<string, SupportTicket>;
+
+    const messages = Object.fromEntries(
+      Object.entries(ticketing?.messages ?? {}).map(([key, rows]) => [
+        key,
+        Array.isArray(rows)
+          ? rows.map((message) => ({
+              ...message,
+              attachments: Array.isArray(message.attachments) ? message.attachments : [],
+              isInternalNote: Boolean(message.isInternalNote),
+            }))
+          : [],
+      ]),
+    ) as Record<string, SupportTicketMessage[]>;
+
+    const liveSessions = Object.fromEntries(
+      Object.entries(ticketing?.liveSessions ?? {}).map(([key, session]) => [
+        key,
+        {
+          id: String(session.id || key),
+          sessionNumber: String(session.sessionNumber || key),
+          workspaceId: String(session.workspaceId || '').trim(),
+          clientEmail: String(session.clientEmail || '').trim().toLowerCase(),
+          clientName: String(session.clientName || '').trim() || 'Client',
+          category: session.category,
+          subject: String(session.subject || '').trim(),
+          status: session.status || 'queued',
+          assignedResponderId: session.assignedResponderId ? String(session.assignedResponderId).trim() : null,
+          assignedResponderName: session.assignedResponderName ? String(session.assignedResponderName).trim() : undefined,
+          lastClientAt: session.lastClientAt || null,
+          lastSupportAt: session.lastSupportAt || null,
+          lastPresenceAt: session.lastPresenceAt || null,
+          linkedTicketId: session.linkedTicketId || null,
+          linkedTicketNumber: session.linkedTicketNumber || null,
+          convertedAt: session.convertedAt || null,
+          endedAt: session.endedAt || null,
+          createdAt: String(session.createdAt || new Date().toISOString()),
+          updatedAt: String(session.updatedAt || new Date().toISOString()),
+        },
+      ]),
+    ) as TicketingStore['liveSessions'];
+
+    const liveMessages = Object.fromEntries(
+      Object.entries(ticketing?.liveMessages ?? {}).map(([key, rows]) => [
+        key,
+        Array.isArray(rows)
+          ? rows.map((message) => ({
+              ...message,
+              sessionId: String(message.sessionId || key),
+              attachments: Array.isArray(message.attachments) ? message.attachments : [],
+              createdAt: String(message.createdAt || new Date().toISOString()),
+            }))
+          : [],
+      ]),
+    ) as TicketingStore['liveMessages'];
+
+    const livePresence = Object.fromEntries(
+      Object.entries(ticketing?.livePresence ?? {}).map(([key, presence]) => [
+        key,
+        {
+          sessionId: String(presence.sessionId || key),
+          clientOnline: Boolean(presence.clientOnline),
+          supportOnline: Boolean(presence.supportOnline),
+          lastClientSeenAt: presence.lastClientSeenAt || null,
+          lastSupportSeenAt: presence.lastSupportSeenAt || null,
+          updatedAt: String(presence.updatedAt || new Date().toISOString()),
+        },
+      ]),
+    ) as TicketingStore['livePresence'];
+
+    const definedReplies = Object.fromEntries(
+      Object.entries(ticketing?.definedReplies ?? {}).map(([key, reply]) => [
+        key,
+        {
+          id: String(reply.id || key),
+          title: String(reply.title || '').trim(),
+          contentHtml: String(reply.contentHtml || '').trim(),
+          contentText: String(reply.contentText || '').trim(),
+          createdAt: String(reply.createdAt || new Date().toISOString()),
+          updatedAt: String(reply.updatedAt || new Date().toISOString()),
+        },
+      ]).filter(([, reply]) => {
+        const normalized = reply as { title?: string; contentHtml?: string };
+        return Boolean(normalized.title && normalized.contentHtml);
+      }),
+    ) as TicketingStore['definedReplies'];
+
+    const knowledgeArticles = Object.fromEntries(
+      Object.entries(ticketing?.knowledgeArticles ?? {}).map(([key, article]) => [
+        key,
+        {
+          id: String(article.id || key),
+          title: String(article.title || '').trim(),
+          summary: String(article.summary || '').trim(),
+          audience: article.audience === 'internal' || article.audience === 'client' || article.audience === 'both'
+            ? article.audience
+            : 'both',
+          sourceDoc: String(article.sourceDoc || '').trim() || undefined,
+          heroImageUrl: String(article.heroImageUrl || '').trim() || undefined,
+          videoUrl: String(article.videoUrl || '').trim() || undefined,
+          contentHtml: String(article.contentHtml || '').trim(),
+          contentText: String(article.contentText || '').trim(),
+          createdBy: String(article.createdBy || 'system'),
+          createdAt: String(article.createdAt || new Date().toISOString()),
+          updatedAt: String(article.updatedAt || new Date().toISOString()),
+        },
+      ]).filter(([, article]) => {
+        const normalized = article as { title?: string; contentHtml?: string };
+        return Boolean(normalized.title && normalized.contentHtml);
+      }),
+    ) as TicketingStore['knowledgeArticles'];
+
+    return {
+      tickets,
+      messages,
+      liveSessions,
+      liveMessages,
+      livePresence,
+      definedReplies,
+      knowledgeArticles,
+      counters: {
+        nextTicketSequence: Number.isFinite(Number(ticketing?.counters?.nextTicketSequence))
+          ? Math.max(1, Number(ticketing?.counters?.nextTicketSequence))
+          : DEFAULT_STORE.cloud.ticketing.counters.nextTicketSequence,
+        nextLiveSessionSequence: Number.isFinite(Number(ticketing?.counters?.nextLiveSessionSequence))
+          ? Math.max(1, Number(ticketing?.counters?.nextLiveSessionSequence))
+          : DEFAULT_STORE.cloud.ticketing.counters.nextLiveSessionSequence,
+      },
+    };
+  };
+
+  const normalizeOperations = (
+    operations: Partial<MasterOperationsStore> | undefined,
+  ): MasterOperationsStore => {
+    const assignments = Object.fromEntries(
+      Object.entries(operations?.assignments ?? {}).map(([key, assignment]) => [
+        key,
+        {
+          id: String(assignment.id || key),
+          entityType: assignment.entityType || 'ticket',
+          entityId: String(assignment.entityId || ''),
+          workspaceId: assignment.workspaceId ? String(assignment.workspaceId) : undefined,
+          assignedToUserId: String(assignment.assignedToUserId || ''),
+          assignedToName: String(assignment.assignedToName || '').trim(),
+          assignedRole: String(assignment.assignedRole || '').trim(),
+          assignedAt: String(assignment.assignedAt || new Date().toISOString()),
+          assignedBy: String(assignment.assignedBy || '').trim(),
+          assignmentStatus: assignment.assignmentStatus || 'assigned',
+          metadata: assignment.metadata && typeof assignment.metadata === 'object'
+            ? assignment.metadata
+            : undefined,
+        },
+      ]),
+    ) as Record<string, OperationalAssignmentRecord>;
+
+    const activityFeed = Array.isArray(operations?.activityFeed)
+      ? operations.activityFeed
+          .map((event) => ({
+            id: String(event.id || ''),
+            type: event.type,
+            actor: String(event.actor || '').trim(),
+            target: String(event.target || '').trim(),
+            workspaceId: event.workspaceId ? String(event.workspaceId) : undefined,
+            createdAt: String(event.createdAt || new Date().toISOString()),
+            metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : undefined,
+          }))
+          .filter((event) => Boolean(event.id && event.type))
+      : [];
+
+    const auditTrail = Array.isArray(operations?.auditTrail)
+      ? operations.auditTrail
+          .map((event) => ({
+            id: String(event.id || ''),
+            actor: String(event.actor || '').trim(),
+            action: String(event.action || '').trim(),
+            entity: String(event.entity || '').trim(),
+            entityId: String(event.entityId || '').trim(),
+            workspaceId: event.workspaceId ? String(event.workspaceId) : undefined,
+            timestamp: String(event.timestamp || new Date().toISOString()),
+            metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : undefined,
+          }))
+          .filter((event) => Boolean(event.id && event.action && event.entity && event.entityId))
+      : [];
+
+    return {
+      assignments,
+      activityFeed,
+      auditTrail,
+    };
+  };
+
+  const normalizeFinance = (finance: Partial<FinanceStore> | undefined): FinanceStore => {
+    const ledger = Object.fromEntries(
+      Object.entries(finance?.ledger ?? {}).map(([key, entry]) => {
+        const type = entry.type === 'expense' ? 'expense' : 'income';
+        const status = String(entry.status || (type === 'income' ? 'pending' : 'pending')).toLowerCase();
+
+        const normalizedStatus: FinanceLedgerStatus = type === 'income'
+          ? (status === 'paid' || status === 'failed' || status === 'refunded' || status === 'pending' ? status : 'pending')
+          : (status === 'approved' || status === 'paid' || status === 'cancelled' || status === 'pending' ? status : 'pending');
+
+        return [
+          key,
+          {
+            id: String(entry.id || key),
+            type,
+            category: String(entry.category || '').trim(),
+            subcategory: String(entry.subcategory || '').trim(),
+            amount: Math.max(0, Number(entry.amount || 0)),
+            currency: String(entry.currency || 'USD').trim().toUpperCase(),
+            description: String(entry.description || '').trim(),
+            reference: String(entry.reference || '').trim(),
+            source: String(entry.source || '').trim(),
+            sourceId: String(entry.sourceId || '').trim(),
+            workspaceId: entry.workspaceId ? String(entry.workspaceId).trim() : undefined,
+            clientId: entry.clientId ? String(entry.clientId).trim() : undefined,
+            status: normalizedStatus,
+            createdBy: String(entry.createdBy || 'system').trim(),
+            createdAt: String(entry.createdAt || new Date().toISOString()),
+            transactionDate: String(entry.transactionDate || entry.createdAt || new Date().toISOString()),
+            vendor: entry.vendor ? String(entry.vendor).trim() : undefined,
+            paymentMethod: entry.paymentMethod ? String(entry.paymentMethod).trim() : undefined,
+            receipt: entry.receipt ? String(entry.receipt).trim() : undefined,
+            notes: entry.notes ? String(entry.notes).trim() : undefined,
+            incurredDate: entry.incurredDate ? String(entry.incurredDate).trim() : undefined,
+          } as FinanceLedgerEntry,
+        ];
+      }),
+    ) as FinanceStore['ledger'];
+
+    return {
+      ledger,
+      categories: {
+        income: Array.isArray(finance?.categories?.income)
+          ? finance.categories.income.map((item) => String(item).trim()).filter(Boolean)
+          : DEFAULT_STORE.cloud.finance.categories.income,
+        expense: Array.isArray(finance?.categories?.expense)
+          ? finance.categories.expense.map((item) => String(item).trim()).filter(Boolean)
+          : DEFAULT_STORE.cloud.finance.categories.expense,
+      },
+      counters: {
+        nextLedgerSequence: Number.isFinite(Number(finance?.counters?.nextLedgerSequence))
+          ? Math.max(1, Number(finance?.counters?.nextLedgerSequence))
+          : DEFAULT_STORE.cloud.finance.counters.nextLedgerSequence,
+      },
+    };
+  };
+
   return {
     ...DEFAULT_STORE,
     ...parsed,
@@ -1879,6 +2890,7 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       sessions: parsed.nativeAuth?.sessions ?? {},
       permissions: parsed.nativeAuth?.permissions ?? {},
       passwordChangeOtps: parsed.nativeAuth?.passwordChangeOtps ?? {},
+      loginOtpChallenges: parsed.nativeAuth?.loginOtpChallenges ?? {},
     },
     platformSettings: {
       ...DEFAULT_STORE.platformSettings,
@@ -1934,6 +2946,12 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
         password: parsed.platformSettings?.email?.password || parsed.smtp?.password || DEFAULT_STORE.platformSettings.email.password,
         fromEmail: parsed.platformSettings?.email?.fromEmail?.trim() || parsed.smtp?.fromEmail?.trim() || DEFAULT_STORE.platformSettings.email.fromEmail,
         fromName: parsed.platformSettings?.email?.fromName?.trim() || parsed.smtp?.fromName?.trim() || DEFAULT_STORE.platformSettings.email.fromName,
+        supportPortalUrl: (() => {
+          const configured = String(parsed.platformSettings?.email?.supportPortalUrl || '').trim();
+          if (!configured) return DEFAULT_STORE.platformSettings.email.supportPortalUrl;
+          if (configured === '/master/support') return '/os/support';
+          return configured;
+        })(),
         failureAlertRecipients: Array.isArray(parsed.platformSettings?.email?.failureAlertRecipients)
           ? parsed.platformSettings.email.failureAlertRecipients.map((item) => String(item).trim()).filter(Boolean)
           : DEFAULT_STORE.platformSettings.email.failureAlertRecipients,
@@ -1961,6 +2979,44 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
           },
         ]),
       ) as PlatformSettings['emailTemplates'],
+      sessionSecurity: {
+        ...DEFAULT_STORE.platformSettings.sessionSecurity,
+        ...(parsed.platformSettings?.sessionSecurity ?? {}),
+        inactivityEnabled: typeof parsed.platformSettings?.sessionSecurity?.inactivityEnabled === 'boolean'
+          ? parsed.platformSettings.sessionSecurity.inactivityEnabled
+          : DEFAULT_STORE.platformSettings.sessionSecurity.inactivityEnabled,
+        idleTimeoutMinutes: Number.isFinite(Number(parsed.platformSettings?.sessionSecurity?.idleTimeoutMinutes))
+          ? Math.min(240, Math.max(5, Number(parsed.platformSettings?.sessionSecurity?.idleTimeoutMinutes)))
+          : DEFAULT_STORE.platformSettings.sessionSecurity.idleTimeoutMinutes,
+        idleWarningMinutes: Number.isFinite(Number(parsed.platformSettings?.sessionSecurity?.idleWarningMinutes))
+          ? Math.min(30, Math.max(1, Number(parsed.platformSettings?.sessionSecurity?.idleWarningMinutes)))
+          : DEFAULT_STORE.platformSettings.sessionSecurity.idleWarningMinutes,
+        enforceSingleSession: typeof parsed.platformSettings?.sessionSecurity?.enforceSingleSession === 'boolean'
+          ? parsed.platformSettings.sessionSecurity.enforceSingleSession
+          : DEFAULT_STORE.platformSettings.sessionSecurity.enforceSingleSession,
+      },
+      loginProtection: {
+        ...DEFAULT_STORE.platformSettings.loginProtection,
+        ...(parsed.platformSettings?.loginProtection ?? {}),
+        enabled: typeof parsed.platformSettings?.loginProtection?.enabled === 'boolean'
+          ? parsed.platformSettings.loginProtection.enabled
+          : DEFAULT_STORE.platformSettings.loginProtection.enabled,
+        maxFailedAttempts: Number.isFinite(Number(parsed.platformSettings?.loginProtection?.maxFailedAttempts))
+          ? Math.min(20, Math.max(3, Number(parsed.platformSettings?.loginProtection?.maxFailedAttempts)))
+          : DEFAULT_STORE.platformSettings.loginProtection.maxFailedAttempts,
+        windowMinutes: Number.isFinite(Number(parsed.platformSettings?.loginProtection?.windowMinutes))
+          ? Math.min(60, Math.max(1, Number(parsed.platformSettings?.loginProtection?.windowMinutes)))
+          : DEFAULT_STORE.platformSettings.loginProtection.windowMinutes,
+        lockoutMinutes: Number.isFinite(Number(parsed.platformSettings?.loginProtection?.lockoutMinutes))
+          ? Math.min(240, Math.max(1, Number(parsed.platformSettings?.loginProtection?.lockoutMinutes)))
+          : DEFAULT_STORE.platformSettings.loginProtection.lockoutMinutes,
+        requireOtpChallenge: typeof parsed.platformSettings?.loginProtection?.requireOtpChallenge === 'boolean'
+          ? parsed.platformSettings.loginProtection.requireOtpChallenge
+          : DEFAULT_STORE.platformSettings.loginProtection.requireOtpChallenge,
+        otpCodeTtlMinutes: Number.isFinite(Number(parsed.platformSettings?.loginProtection?.otpCodeTtlMinutes))
+          ? Math.min(30, Math.max(2, Number(parsed.platformSettings?.loginProtection?.otpCodeTtlMinutes)))
+          : DEFAULT_STORE.platformSettings.loginProtection.otpCodeTtlMinutes,
+      },
     },
     tracking: { ...DEFAULT_STORE.tracking, ...(parsed.tracking ?? {}) },
     smtp: { ...DEFAULT_STORE.smtp, ...(parsed.smtp ?? {}) },
@@ -1969,10 +3025,45 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
       ...DEFAULT_STORE.roleModuleVisibility,
       ...(parsed.roleModuleVisibility ?? {}),
     },
-    controlCenterRoleVisibility: {
-      ...DEFAULT_STORE.controlCenterRoleVisibility,
-      ...(parsed.controlCenterRoleVisibility ?? {}),
-    },
+    controlCenterRoleVisibility: Object.fromEntries(
+      Object.entries(DEFAULT_STORE.controlCenterRoleVisibility).map(([role, defaults]) => [
+        role,
+        {
+          ...defaults,
+          ...(parsed.controlCenterRoleVisibility?.[role] ?? {}),
+        },
+      ]),
+    ) as ControlCenterRoleModuleVisibility,
+    controlCenterRoleActionPermissions: Object.fromEntries(
+      Object.entries(DEFAULT_STORE.controlCenterRoleActionPermissions).map(([role, moduleDefaults]) => [
+        role,
+        Object.fromEntries(
+          CONTROL_CENTER_MODULE_KEYS.map((moduleKey) => {
+            const storedActions = parsed.controlCenterRoleActionPermissions?.[role]?.[moduleKey];
+            const storedVisibility = parsed.controlCenterRoleVisibility?.[role]?.[moduleKey];
+
+            if (storedActions && typeof storedActions === 'object') {
+              return [
+                moduleKey,
+                {
+                  ...moduleDefaults[moduleKey],
+                  ...storedActions,
+                },
+              ];
+            }
+
+            if (typeof storedVisibility === 'boolean') {
+              return [
+                moduleKey,
+                storedVisibility ? { ...moduleDefaults[moduleKey] } : { ...NO_ACTION_ACCESS },
+              ];
+            }
+
+            return [moduleKey, { ...moduleDefaults[moduleKey] }];
+          }),
+        ),
+      ]),
+    ) as ControlCenterRoleActionPermissions,
     maintenance: { ...DEFAULT_STORE.maintenance, ...(parsed.maintenance ?? {}) },
     audit: Array.isArray(parsed.audit) ? parsed.audit : [],
     cloud: {
@@ -2004,6 +3095,8 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
               .filter((item) => item.code && item.name)
           : DEFAULT_STORE.cloud.lookups.countries,
       },
+      operations: normalizeOperations((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.operations),
+      ticketing: normalizeTicketing((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.ticketing),
       commercial: {
         countryCurrencyMap: {
           ...DEFAULT_STORE.cloud.commercial.countryCurrencyMap,
@@ -2022,6 +3115,7 @@ function mergeWithDefaults(parsed: Partial<AdminConfigStore>): AdminConfigStore 
         invoices: normalizeCommercialInvoices((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.invoices),
         billingCycleChangeRequests: normalizeBillingCycleChangeRequests((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.commercial?.billingCycleChangeRequests),
       },
+      finance: normalizeFinance((parsed.cloud as Partial<CloudOrchestrationStore> | undefined)?.finance),
     },
   };
 }
@@ -2229,6 +3323,59 @@ export async function getWorkspaceConnectorState(workspaceId: string) {
     connectorVerificationError: workspace.connectorVerificationError ?? null,
     connectorSiteMetadata: workspace.connectorSiteMetadata ?? null,
   };
+}
+
+function createSupportChatPin(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export async function ensureWorkspaceSupportChatPin(workspaceId: string): Promise<string | null> {
+  let resolvedPin: string | null = null;
+
+  await updateAdminStore((current) => {
+    const workspace = current.cloud.workspaces[workspaceId];
+    if (!workspace) return current;
+
+    if (workspace.supportChatPin) {
+      resolvedPin = workspace.supportChatPin;
+      return current;
+    }
+
+    const now = new Date().toISOString();
+    const generated = createSupportChatPin();
+    resolvedPin = generated;
+
+    return {
+      ...current,
+      cloud: {
+        ...current.cloud,
+        workspaces: {
+          ...current.cloud.workspaces,
+          [workspaceId]: {
+            ...workspace,
+            supportChatPin: generated,
+            supportChatPinUpdatedAt: now,
+            updatedAt: now,
+          },
+        },
+      },
+    };
+  });
+
+  return resolvedPin;
+}
+
+export async function getWorkspaceSupportChatPin(workspaceId: string): Promise<string | null> {
+  const store = await readAdminStore();
+  const workspace = store.cloud.workspaces[workspaceId];
+  if (!workspace) return null;
+  return workspace.supportChatPin || null;
+}
+
+export async function verifyWorkspaceSupportChatPin(workspaceId: string, submittedPin: string): Promise<boolean> {
+  const expected = await ensureWorkspaceSupportChatPin(workspaceId);
+  if (!expected) return false;
+  return String(submittedPin || '').trim() === expected;
 }
 
 export async function setWorkspaceConnectorState(

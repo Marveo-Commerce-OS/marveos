@@ -15,6 +15,7 @@ export const eventPlannerProfession: ProfessionConfig = {
     { label: 'Team', href: '/os/team', module: 'team' },
     { label: 'WhatsApp', href: '/os/whatsapp', module: 'whatsapp' },
     { label: 'Reports', href: '/os/reports', module: 'reports' },
+    { label: 'Support Center', href: '/os/support' },
   ],
   onboardingQuestions: [
     { id: 'event-types', label: 'Primary event types?', type: 'select', options: ['Weddings', 'Corporate', 'Social', 'Mixed'] },
@@ -27,6 +28,14 @@ export const eventPlannerProfession: ProfessionConfig = {
     order: 'Engagement',
     customer: 'Client',
   },
+  quickActions: [
+    'Add Event',
+    'Add Lead',
+    'Create Proposal',
+    'Add Team Member',
+    'Create Payment Link',
+    'Open WhatsApp',
+  ],
 };
 
 export default eventPlannerProfession;

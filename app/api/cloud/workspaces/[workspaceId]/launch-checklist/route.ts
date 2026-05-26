@@ -1,22 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, isAdmin } from '@/lib/auth';
 import { readAdminStore } from '@/lib/adminStore';
 import type { WorkspaceOrchestration } from '@/lib/adminStore';
 import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
 import { requireWorkspaceAccess } from '@/lib/permissions/access';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const admin = await isAdmin(session.token);
-  if (!admin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('launchReadiness', 'view');
 }
 
 function toBool(value: unknown): boolean {
@@ -79,6 +69,19 @@ function hasNewWebsiteBackendSubdomain(workspace: WorkspaceOrchestration): boole
   return Boolean(String((collected as Record<string, unknown>).backendCmsSubdomain || '').trim());
 }
 
+function requiresIntegrationValidation(workspace: WorkspaceOrchestration): boolean {
+  const websiteType = String(workspace.websiteType || '').toUpperCase();
+  if (websiteType === 'CUSTOM_HEADLESS') return true;
+
+  const collected = workspace.collectedBusinessData;
+  if (!collected || typeof collected !== 'object') return false;
+
+  const data = collected as Record<string, unknown>;
+  const apiDetails = String(data.apiDetails || '').trim();
+  const integrationNotes = String(data.integrationNotes || '').trim();
+  return Boolean(apiDetails || integrationNotes);
+}
+
 export async function GET(
   _req: NextRequest,
   context: { params: Promise<{ workspaceId: string }> },
@@ -110,11 +113,13 @@ export async function GET(
   const collectedBusinessData = (workspace.collectedBusinessData as Record<string, unknown> | undefined) || undefined;
   const connectionMethod = String(collectedBusinessData?.connectionMethod || '').toLowerCase();
   const manualSetupSelected = connectionMethod === 'manual';
+  const noWebsiteConnectionSelected = connectionMethod === 'none' || connectionMethod === 'skip' || connectionMethod === 'not_applicable';
   const connectorFailed = connectorStatus === 'FAILED' || connectorStatus === 'SUPPORT_REQUIRED';
-  const connectorVerificationRequired = isExistingWebsite && !manualSetupSelected;
+  const connectorVerificationRequired = isExistingWebsite && !manualSetupSelected && !noWebsiteConnectionSelected;
   const supportRequiredForChecklist = isExistingWebsite
     ? manualSetupSelected || connectorFailed
     : Boolean(workspace.supportRequired);
+  const integrationValidationRequired = requiresIntegrationValidation(workspace);
 
   const backendPreparationReady = isNewWebsite
     ? Number(workspace.currentStep || 0) >= 7 || onboardingStatus === 'DEPLOYING' || onboardingStatus === 'READY_FOR_REVIEW' || onboardingStatus === 'READY_FOR_LAUNCH' || onboardingStatus === 'LIVE'
@@ -203,6 +208,12 @@ export async function GET(
       label: 'Launch guard checked',
       completed: launchGuardChecked,
       required: true,
+    },
+    {
+      key: 'integration_validation_checked',
+      label: 'Integration validation checked',
+      completed: launchGuardChecked,
+      required: integrationValidationRequired,
     },
     {
       key: 'client_review_ready',

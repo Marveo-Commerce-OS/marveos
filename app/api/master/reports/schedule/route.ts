@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
-import { getCurrentPlatformUser, getSession, isAdmin, isSuperAdmin } from '@/lib/auth';
+import { getCurrentPlatformUser, isSuperAdmin } from '@/lib/auth';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const admin = await isAdmin(session.token);
-  if (!admin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('reports', 'view');
 }
 
 export async function GET() {
@@ -32,7 +23,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('reports', 'update');
   if ('error' in auth) return auth.error;
 
   const canEdit = await isSuperAdmin(auth.session.token);

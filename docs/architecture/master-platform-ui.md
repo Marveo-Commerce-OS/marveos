@@ -53,7 +53,7 @@ These legacy website-management modules remain under `/dashboard` during migrati
 
 ## Data Classification (Live vs Placeholder)
 
-Live data currently used:
+Current operational data used:
 - Workspace counts and status
 - Client list derived from workspace/business profile data
 - Support assignment state

@@ -48,11 +48,17 @@ function shortToken(value?: string | null) {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
+const PAGE_SIZE = 12;
+
 export default function MasterConnectorsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busyWorkspace, setBusyWorkspace] = useState('');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | NonNullable<Workspace['connectorStatus']>>('ALL');
+  const [sourceFilter, setSourceFilter] = useState<'ALL' | Workspace['contentSource']>('ALL');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void loadWorkspaces();
@@ -222,7 +228,44 @@ export default function MasterConnectorsPage() {
     }
   }
 
-  const connectorRows = useMemo(() => workspaces, [workspaces]);
+  const connectorRows = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+
+    return workspaces.filter((workspace) => {
+      if (statusFilter !== 'ALL' && (workspace.connectorStatus || 'NOT_CONNECTED') !== statusFilter) return false;
+      if (sourceFilter !== 'ALL' && workspace.contentSource !== sourceFilter) return false;
+      if (!needle) return true;
+
+      const blob = [
+        workspace.name,
+        workspace.id,
+        workspace.contentBaseUrl,
+        workspace.connectorSiteMetadata?.siteUrl,
+        workspace.connectorSiteMetadata?.platform,
+      ]
+        .map((item) => String(item || '').toLowerCase())
+        .join(' ');
+
+      return blob.includes(needle);
+    });
+  }, [workspaces, search, statusFilter, sourceFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(connectorRows.length / PAGE_SIZE));
+
+  const pagedRows = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return connectorRows.slice(start, start + PAGE_SIZE);
+  }, [connectorRows, page]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, sourceFilter]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const counts = useMemo(() => {
     return {
@@ -241,15 +284,17 @@ export default function MasterConnectorsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Connectors</h1>
-          <p className="mt-2 text-sm text-slate-600">Operational connector state, token management, and verification across WordPress and Next.js workspaces.</p>
+          <p className="mt-2 text-sm text-slate-600">Operational connector state, token management, and verification across all workspaces.</p>
         </div>
-        <button
-          onClick={() => loadWorkspaces()}
-          disabled={loading}
-          className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          Refresh connectors
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadWorkspaces()}
+            disabled={loading}
+            className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            Refresh connectors
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -295,6 +340,54 @@ export default function MasterConnectorsPage() {
         <p className="mt-2 text-2xl font-bold text-slate-900">{counts.woocommerce}</p>
       </div>
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="grid gap-3 md:grid-cols-4">
+          <label className="text-sm text-slate-700 md:col-span-2">
+            Search workspace
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Name, workspace ID, URL, platform"
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            />
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Status
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as 'ALL' | NonNullable<Workspace['connectorStatus']>)}
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            >
+              <option value="ALL">All statuses</option>
+              <option value="NOT_CONNECTED">Not connected</option>
+              <option value="TOKEN_GENERATED">Token generated</option>
+              <option value="PENDING_VERIFICATION">Pending verification</option>
+              <option value="CONNECTED">Connected</option>
+              <option value="FAILED">Failed</option>
+              <option value="SUPPORT_REQUIRED">Support required</option>
+            </select>
+          </label>
+
+          <label className="text-sm text-slate-700">
+            Source
+            <select
+              value={sourceFilter}
+              onChange={(event) => setSourceFilter(event.target.value as 'ALL' | Workspace['contentSource'])}
+              className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            >
+              <option value="ALL">All sources</option>
+              <option value="wordpress">WordPress</option>
+              <option value="nextjs">Next.js</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3 text-xs text-slate-500">
+          Showing {connectorRows.length} workspace{connectorRows.length === 1 ? '' : 's'}
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
         <div className="border-b border-slate-200 bg-slate-50 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-900">Connector operations</h2>
@@ -304,99 +397,105 @@ export default function MasterConnectorsPage() {
           <div className="p-6 text-sm text-slate-600">Loading connector workspaces...</div>
         ) : connectorRows.length === 0 ? (
           <div className="p-6 text-sm text-slate-600">
-            No workspaces found. Create a workspace to enable connector operations.
+            No matching workspaces. Adjust filters or create more workspaces.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1320px]">
-              <thead className="border-b border-slate-200 bg-white">
-                <tr>
-                  {['Workspace', 'Source', 'Status', 'Token', 'Site URL', 'Detected platform', 'WooCommerce', 'Last verification', 'Error', 'Actions'].map((header) => (
-                    <th key={header} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {connectorRows.map((workspace) => (
-                  <tr key={workspace.id} className="border-b border-slate-100 align-top">
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{workspace.name}</p>
+          <div className="space-y-4 p-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {pagedRows.map((workspace) => (
+                <article key={workspace.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-base font-semibold text-slate-900">{workspace.name}</p>
                       <p className="text-xs text-slate-500">{workspace.id}</p>
-                      <Link href={`/master/mvp-deployments/${workspace.id}`} className="mt-2 inline-block text-xs font-semibold text-slate-700 underline">
-                        View workspace
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase text-slate-700">
-                        {workspace.contentSource || 'unknown'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${badge(workspace.connectorStatus)}`}>
-                        {workspace.connectorStatus || 'NOT_CONNECTED'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{shortToken(workspace.connectorToken)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorSiteMetadata?.siteUrl || workspace.contentBaseUrl || '—'}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{workspace.connectorSiteMetadata?.platform || 'Unknown'}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {typeof workspace.connectorSiteMetadata?.woocommerceEnabled === 'boolean'
-                        ? (workspace.connectorSiteMetadata.woocommerceEnabled ? 'Enabled' : 'Not detected')
-                        : 'Unknown'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-slate-700">
-                      {workspace.connectorLastVerificationAttempt
-                        ? new Date(workspace.connectorLastVerificationAttempt).toLocaleString()
-                        : 'Never'}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-red-700 max-w-[260px]">
-                      {workspace.connectorVerificationError || '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col gap-2">
-                        <button
-                          onClick={() => generateToken(workspace.id)}
-                          disabled={busyWorkspace === workspace.id}
-                          className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-60"
-                        >
-                          Generate token
-                        </button>
-                        <button
-                          onClick={() => verifyConnector(workspace)}
-                          disabled={busyWorkspace === workspace.id || workspace.contentSource !== 'wordpress'}
-                          className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-200 disabled:opacity-60"
-                        >
-                          Verify connector
-                        </button>
-                        {workspace.contentSource !== 'wordpress' ? (
-                          <button
-                            onClick={() => updateConnectorStatus(workspace.id, 'CONNECTED')}
-                            disabled={busyWorkspace === workspace.id}
-                            className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-                          >
-                            Mark connected
-                          </button>
-                        ) : null}
-                        <button
-                          onClick={() => updateConnectorStatus(workspace.id, 'SUPPORT_REQUIRED')}
-                          disabled={busyWorkspace === workspace.id}
-                          className="rounded-full bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-200 disabled:opacity-60"
-                        >
-                          Mark support required
-                        </button>
-                        <button
-                          onClick={() => refreshConnectorState(workspace.id)}
-                          disabled={busyWorkspace === workspace.id}
-                          className="rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-200 disabled:opacity-60"
-                        >
-                          Refresh state
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${badge(workspace.connectorStatus)}`}>
+                      {workspace.connectorStatus || 'NOT_CONNECTED'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 text-xs text-slate-600">
+                    <p><span className="font-semibold text-slate-700">Source:</span> {workspace.contentSource}</p>
+                    <p><span className="font-semibold text-slate-700">Token:</span> {shortToken(workspace.connectorToken)}</p>
+                    <p className="break-all"><span className="font-semibold text-slate-700">Site:</span> {workspace.connectorSiteMetadata?.siteUrl || workspace.contentBaseUrl || '—'}</p>
+                    <p><span className="font-semibold text-slate-700">Platform:</span> {workspace.connectorSiteMetadata?.platform || 'Unknown'}</p>
+                    <p><span className="font-semibold text-slate-700">WooCommerce:</span> {typeof workspace.connectorSiteMetadata?.woocommerceEnabled === 'boolean' ? (workspace.connectorSiteMetadata.woocommerceEnabled ? 'Enabled' : 'Not detected') : 'Unknown'}</p>
+                    <p><span className="font-semibold text-slate-700">Last verification:</span> {workspace.connectorLastVerificationAttempt ? new Date(workspace.connectorLastVerificationAttempt).toLocaleString() : 'Never'}</p>
+                    {workspace.connectorVerificationError ? (
+                      <p className="rounded-xl border border-red-200 bg-red-50 px-2 py-1 text-red-700">
+                        {workspace.connectorVerificationError}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => generateToken(workspace.id)}
+                      disabled={busyWorkspace === workspace.id}
+                      className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      Generate token
+                    </button>
+                    <button
+                      onClick={() => verifyConnector(workspace)}
+                      disabled={busyWorkspace === workspace.id || workspace.contentSource !== 'wordpress'}
+                      className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-200 disabled:opacity-60"
+                    >
+                      Verify
+                    </button>
+                    {workspace.contentSource !== 'wordpress' ? (
+                      <button
+                        onClick={() => updateConnectorStatus(workspace.id, 'CONNECTED')}
+                        disabled={busyWorkspace === workspace.id}
+                        className="rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                      >
+                        Mark connected
+                      </button>
+                    ) : null}
+                    <button
+                      onClick={() => updateConnectorStatus(workspace.id, 'SUPPORT_REQUIRED')}
+                      disabled={busyWorkspace === workspace.id}
+                      className="rounded-full bg-red-100 px-3 py-1.5 text-xs font-semibold text-red-800 hover:bg-red-200 disabled:opacity-60"
+                    >
+                      Support required
+                    </button>
+                    <button
+                      onClick={() => refreshConnectorState(workspace.id)}
+                      disabled={busyWorkspace === workspace.id}
+                      className="rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-200 disabled:opacity-60"
+                    >
+                      Refresh
+                    </button>
+                    <Link
+                      href={`/master/mvp-deployments/${workspace.id}`}
+                      className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                    >
+                      Open workspace
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
+              <p className="text-xs text-slate-500">Page {page} of {totalPages}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page <= 1}
+                  className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page >= totalPages}
+                  className="rounded-full border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-60"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

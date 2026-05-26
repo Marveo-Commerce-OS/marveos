@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
+import { getCurrentWpUser } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { updateStepStatus } from '@/lib/cloudOrchestration';
 import {
@@ -10,6 +10,7 @@ import { validateCollectedBusinessData } from '@/src/contexts/onboarding/onboard
 import { MVP_ONBOARDING_STEP_SEQUENCE } from '@/src/contexts/onboarding/constants';
 import type { OnboardingStatusKey, OnboardingStepKey, WebsiteTypeKey } from '@/src/contexts/onboarding/types';
 import { requireWorkspaceAccess } from '@/lib/permissions/access';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 type OnboardingAction = 'start' | 'complete' | 'fail' | 'retry' | 'rollback';
 
@@ -28,17 +29,7 @@ const ONBOARDING_STATUSES = new Set<OnboardingStatusKey>([
 const ONBOARDING_STEP_KEYS = new Set<OnboardingStepKey>(MVP_ONBOARDING_STEP_SEQUENCE);
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const superAdmin = await isSuperAdmin(session.token);
-  if (!superAdmin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('deploymentQueue', 'update');
 }
 
 function isAction(value: string): value is OnboardingAction {

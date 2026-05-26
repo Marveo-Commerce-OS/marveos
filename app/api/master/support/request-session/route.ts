@@ -3,12 +3,17 @@ import { appendAuditLog, readAdminStore } from '@/lib/adminStore';
 import { requireMasterAccess, requireWorkspaceAccess } from '@/lib/permissions/access';
 import { createSupportOtpChallenge } from '@/lib/support-access/requestSupportSession';
 import { sendPlatformEmailNotification } from '@/lib/emailNotifications';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
+import { appendOperationalAuditEvent } from '@/lib/master/operations';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
 export async function POST(req: NextRequest) {
+  const actionGuard = await requireActionPermission('supportQueue', 'update');
+  if ('error' in actionGuard) return actionGuard.error;
+
   const master = await requireMasterAccess();
   if ('error' in master) return master.error;
 
@@ -37,25 +42,61 @@ export async function POST(req: NextRequest) {
   });
 
   const store = await readAdminStore();
-  const appBaseUrl = String(store.platformSettings.email.appBaseUrl || `${req.nextUrl.protocol}//${req.nextUrl.host}`).trim();
+  const workspace = store.cloud.workspaces[workspaceId];
+  const clientName = String(workspace?.businessProfile?.businessName || clientEmail).trim();
+  const supportOfficerName = String(store.nativeAuth.identities[supportUserId]?.name || master.session.user?.display_name || 'Support Officer').trim();
+  const supportOfficerEmail = String(
+    store.nativeAuth.identities[supportUserId]?.email
+      || store.platformSettings.email.supportEmail
+      || store.platformSettings.email.userOpsEmail
+      || '',
+  ).trim().toLowerCase();
 
   await sendPlatformEmailNotification({
-    templateKey: 'PASSWORD_RESET_REQUESTED',
     to: clientEmail,
+    templateKey: 'SUPPORT_ACCESS_REQUESTED',
     variables: {
-      userName: clientEmail,
+      clientName,
+      workspaceName: workspace?.name || workspaceId,
       otpCode: challenge.otpCode,
-      appBaseUrl,
-      workspaceId,
+      expiresAt: challenge.expiresAt,
       reason,
     },
   });
+
+  if (supportOfficerEmail && supportOfficerEmail !== clientEmail) {
+    await sendPlatformEmailNotification({
+      to: supportOfficerEmail,
+      templateKey: 'SUPPORT_ACCESS_REQUESTED_SUPPORT',
+      variables: {
+        supportOfficerName,
+        workspaceName: workspace?.name || workspaceId,
+        clientEmail,
+        clientName,
+        expiresAt: challenge.expiresAt,
+        reason,
+      },
+    });
+  }
 
   await appendAuditLog({
     actorEmail: master.session.user?.user_email ?? 'unknown',
     action: 'support.session.otp_requested',
     target: workspaceId,
     details: `challenge=${challenge.challengeId};supportUserId=${supportUserId};clientEmail=${clientEmail}`,
+  });
+
+  await appendOperationalAuditEvent({
+    actor: master.session.user?.user_email ?? 'unknown',
+    action: 'support.access.requested',
+    entity: 'workspace',
+    entityId: workspaceId,
+    workspaceId,
+    metadata: {
+      challengeId: challenge.challengeId,
+      clientEmail,
+      supportUserId,
+    },
   });
 
   return NextResponse.json({

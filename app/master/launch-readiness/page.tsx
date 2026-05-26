@@ -76,12 +76,17 @@ function statusTone(ready: boolean) {
 
 function isConnectorScopedRequirement(requirement: string): boolean {
   const text = requirement.toLowerCase();
-  return text.includes('connector') || text.includes('site connection token');
+  return text.includes('connector')
+    || text.includes('site connection token')
+    || text.includes('website connection');
 }
 
 function isSupportOfficer(user: TeamUserRow): boolean {
   const roles = Array.isArray(user.normalizedRoles) ? user.normalizedRoles : [];
-  return roles.includes('SUPPORT_OFFICER') || roles.includes('ADMIN') || roles.includes('SUPER_ADMIN');
+  return roles.includes('CUSTOMER_SUPPORT')
+    || roles.includes('TECHNICAL_SUPPORT')
+    || roles.includes('ADMIN')
+    || roles.includes('SUPER_ADMIN');
 }
 
 export default function MasterLaunchReadinessPage() {
@@ -106,7 +111,9 @@ export default function MasterLaunchReadinessPage() {
       });
 
       const supportPending = Boolean(workspace.supportRequired) && (workspace.supportAssignment?.status || 'UNASSIGNED') !== 'ASSIGNED';
-      const connectorPending = workspace.websiteType === 'EXISTING_WEBSITE' && workspace.connectorStatus !== 'CONNECTED';
+      const connectorPending = workspace.websiteType === 'EXISTING_WEBSITE'
+        && !workspace.supportRequired
+        && workspace.connectorStatus !== 'CONNECTED';
       const blockedByRequirements = scopedMissingRequirements.length > 0;
       const ready = !supportPending && !connectorPending && !blockedByRequirements && workspace.status !== 'blocked';
 

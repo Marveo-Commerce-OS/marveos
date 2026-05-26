@@ -146,6 +146,7 @@ function mapTemplate(template: CommercialTemplateConfig) {
     slug: template.slug,
     businessType: template.businessType,
     sector: template.sector,
+    professionKeys: template.professionKeys,
     category: template.category,
     description: template.description,
     previewImage: template.previewImage,
@@ -174,12 +175,42 @@ function mapTemplate(template: CommercialTemplateConfig) {
   };
 }
 
+function normalizeTemplateKey(value?: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function scoreTemplateMatch(template: CommercialTemplateConfig, filter: {
+  businessType?: string;
+  sector?: string;
+  professionKey?: string;
+}) {
+  const businessType = normalizeTemplateKey(filter.businessType);
+  const sector = normalizeTemplateKey(filter.sector);
+  const professionKey = normalizeTemplateKey(filter.professionKey);
+  const templateBusinessType = normalizeTemplateKey(template.businessType);
+  const templateSector = normalizeTemplateKey(template.sector);
+  const templateProfessions = Array.isArray(template.professionKeys)
+    ? template.professionKeys.map((item) => normalizeTemplateKey(item)).filter(Boolean)
+    : [];
+
+  let score = 0;
+  if (professionKey && templateProfessions.includes(professionKey)) score += 300;
+  if (sector && templateSector === sector) score += 200;
+  if (businessType && templateBusinessType === businessType) score += 100;
+  if (!templateSector && !templateBusinessType && templateProfessions.length === 0) score += 10;
+
+  return score;
+}
+
 function isTemplateVisibleForFilter(template: CommercialTemplateConfig, filter: {
   status?: string;
   visibility?: string;
   websiteType?: string;
   country?: string;
   planId?: string;
+  businessType?: string;
+  sector?: string;
+  professionKey?: string;
 }) {
   const status = String(filter.status || '').trim().toUpperCase();
   const visibility = String(filter.visibility || '').trim().toUpperCase();
@@ -196,6 +227,19 @@ function isTemplateVisibleForFilter(template: CommercialTemplateConfig, filter: 
   }
 
   if (plan && !template.planAvailability.includes('all') && !template.planAvailability.includes(plan)) return false;
+
+  const businessType = normalizeTemplateKey(filter.businessType);
+  const sector = normalizeTemplateKey(filter.sector);
+  const professionKey = normalizeTemplateKey(filter.professionKey);
+  const templateBusinessType = normalizeTemplateKey(template.businessType);
+  const templateSector = normalizeTemplateKey(template.sector);
+  const templateProfessions = Array.isArray(template.professionKeys)
+    ? template.professionKeys.map((item) => normalizeTemplateKey(item)).filter(Boolean)
+    : [];
+
+  if (businessType && templateBusinessType && templateBusinessType !== businessType) return false;
+  if (sector && templateSector && templateSector !== sector) return false;
+  if (professionKey && templateProfessions.length > 0 && !templateProfessions.includes(professionKey)) return false;
 
   // Public template API must not expose unmapped artifacts unless the template is explicitly support/manual-driven.
   if (template.status === 'ACTIVE' && template.visibility === 'PUBLIC') {
@@ -394,6 +438,9 @@ export async function getPublicTemplates(filter: {
   websiteType?: string;
   country?: string;
   planId?: string;
+  businessType?: string;
+  sector?: string;
+  professionKey?: string;
 } = {}) {
   const store = await readAdminStore();
   const effectiveFilter = {
@@ -404,7 +451,12 @@ export async function getPublicTemplates(filter: {
 
   const templates = store.cloud.commercial.templates
     .filter((template) => isTemplateVisibleForFilter(template, effectiveFilter))
-    .map((template) => mapTemplate(template));
+    .map((template) => ({ template, score: scoreTemplateMatch(template, effectiveFilter) }))
+    .sort((left, right) => {
+      if (right.score !== left.score) return right.score - left.score;
+      return left.template.name.localeCompare(right.template.name);
+    })
+    .map(({ template }) => mapTemplate(template));
 
   return {
     filters: {
@@ -413,6 +465,9 @@ export async function getPublicTemplates(filter: {
       websiteType: filter.websiteType || null,
       country: filter.country || null,
       planId: filter.planId || null,
+      businessType: filter.businessType || null,
+      sector: filter.sector || null,
+      professionKey: filter.professionKey || null,
     },
     templates,
   };
@@ -422,6 +477,9 @@ export async function findTemplateForPublicOnboarding(payload: {
   selectedTemplateId: string;
   country?: string;
   planId?: string;
+  businessType?: string;
+  sector?: string;
+  professionKey?: string;
 }) {
   const store = await readAdminStore();
   const templateId = payload.selectedTemplateId.trim();
@@ -434,6 +492,9 @@ export async function findTemplateForPublicOnboarding(payload: {
     websiteType: 'NEW_WEBSITE',
     country: payload.country,
     planId: payload.planId,
+    businessType: payload.businessType,
+    sector: payload.sector,
+    professionKey: payload.professionKey,
   });
 
   return visible ? mapTemplate(template) : null;

@@ -6,6 +6,15 @@ import { useEffect } from 'react';
 import { useRef } from 'react';
 import { useState } from 'react';
 
+function toRoleLabel(raw: string): string {
+  const normalized = String(raw || '').trim();
+  if (!normalized) return '';
+  return normalized
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export default function MasterProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -17,6 +26,8 @@ export default function MasterProfilePage() {
     displayName: '',
     email: '',
     avatarUrl: '',
+    role: '',
+    ticketSignature: '',
   });
 
   useEffect(() => {
@@ -26,13 +37,15 @@ export default function MasterProfilePage() {
         const res = await fetch('/api/auth/me', { cache: 'no-store' });
         const body = (await res.json().catch(() => null)) as {
           ok?: boolean;
-          user?: { displayName?: string; email?: string; avatarUrl?: string };
+          user?: { displayName?: string; email?: string; avatarUrl?: string; role?: string; ticketSignature?: string };
         } | null;
         if (!res.ok || !body?.ok || !body.user || cancelled) return;
         setForm({
           displayName: body.user.displayName || '',
           email: body.user.email || '',
           avatarUrl: body.user.avatarUrl || '',
+          role: body.user.role || '',
+          ticketSignature: body.user.ticketSignature || '',
         });
       } catch {
         if (!cancelled) {
@@ -64,12 +77,13 @@ export default function MasterProfilePage() {
           displayName: form.displayName,
           email: form.email,
           avatarUrl: form.avatarUrl,
+          ticketSignature: form.ticketSignature,
         }),
       });
       const body = (await res.json().catch(() => null)) as {
         ok?: boolean;
         error?: string;
-        user?: { displayName?: string; email?: string; avatarUrl?: string };
+        user?: { displayName?: string; email?: string; avatarUrl?: string; role?: string; ticketSignature?: string };
       } | null;
       if (!res.ok || !body?.ok || !body.user) throw new Error(body?.error || 'Failed to update profile.');
 
@@ -77,6 +91,8 @@ export default function MasterProfilePage() {
         displayName: body.user.displayName || '',
         email: body.user.email || '',
         avatarUrl: body.user.avatarUrl || '',
+        role: body.user.role || '',
+        ticketSignature: body.user.ticketSignature || '',
       });
       setNotice('Profile updated.');
     } catch (err) {
@@ -149,6 +165,26 @@ export default function MasterProfilePage() {
             required
             disabled={saving || loading}
           />
+        </label>
+        <label className="block text-sm text-slate-700">
+          Role
+          <input
+            type="text"
+            value={toRoleLabel(form.role) || 'N/A'}
+            readOnly
+            className="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm text-slate-700">
+          Ticket signature
+          <textarea
+            value={form.ticketSignature}
+            onChange={(e) => setForm((prev) => ({ ...prev, ticketSignature: e.target.value }))}
+            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            rows={4}
+            disabled={saving || loading}
+          />
+          <p className="mt-1 text-xs text-slate-500">Automatically appended to outgoing ticket replies. Use multiple lines, for example: Best Regards, Name, Role.</p>
         </label>
         <label className="block text-sm text-slate-700">
           Avatar (optional)

@@ -9,4 +9,5 @@ export interface ProfessionConfig {
   defaultWorkflows: string[];
   kpiCards: string[];
   terminology: Record<string, string>;
+  quickActions: string[];
 }

@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import { getSession, isAdmin } from '@/lib/auth';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const admin = await isAdmin(session.token);
-  if (!admin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('systemSettings', 'update');
 }
 
 type SmtpAttempt = {

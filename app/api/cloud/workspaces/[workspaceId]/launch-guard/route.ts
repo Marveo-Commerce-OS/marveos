@@ -1,24 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentWpUser, isSuperAdmin } from '@/lib/auth';
+import { getCurrentWpUser } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore } from '@/lib/adminStore';
 import { getWordPressApiBase } from '@/src/lib/endpoints';
 import { validateWorkspaceReadiness } from '@/lib/cloudOrchestration';
 import { mapLegacyStepToMvpStepKey } from '@/src/contexts/onboarding/onboarding-step.mapper';
 import { requireWorkspaceAccess } from '@/lib/permissions/access';
-
-async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const superAdmin = await isSuperAdmin(session.token);
-  if (!superAdmin) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
-}
+import { requireActionPermission } from '@/lib/master/permissions/guards';
+import { appendOperationalActivityEvent, appendOperationalAuditEvent } from '@/lib/master/operations';
 
 function deploymentStatusEndpoint(): string {
   const base = getWordPressApiBase().replace(/\/$/, '');
@@ -93,7 +81,7 @@ export async function GET(
   _req: NextRequest,
   context: { params: Promise<{ workspaceId: string }> },
 ) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('launchReadiness', 'view');
   if ('error' in auth) {
     return auth.error;
   }
@@ -128,7 +116,7 @@ export async function POST(
   req: NextRequest,
   context: { params: Promise<{ workspaceId: string }> },
 ) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('launchReadiness', 'approve');
   if ('error' in auth) {
     return auth.error;
   }
@@ -176,6 +164,29 @@ export async function POST(
     target: workspaceId,
     details: `launch=${launch} ready=${validated.missingRequirements.length === 0} missing=${validated.missingRequirements.join('; ') || 'none'}`,
   });
+
+  if (launch && validated.missingRequirements.length === 0) {
+    await appendOperationalActivityEvent({
+      type: 'launch_approved',
+      actor: actor?.email ?? auth.session.user?.user_email ?? 'unknown',
+      target: workspaceId,
+      workspaceId,
+      metadata: {
+        onboardingStatus: workspace.onboardingStatus || null,
+      },
+    });
+
+    await appendOperationalAuditEvent({
+      actor: actor?.email ?? auth.session.user?.user_email ?? 'unknown',
+      action: 'launch.approved',
+      entity: 'workspace',
+      entityId: workspaceId,
+      workspaceId,
+      metadata: {
+        ready: true,
+      },
+    });
+  }
 
   if (validated.missingRequirements.length > 0) {
     return NextResponse.json(

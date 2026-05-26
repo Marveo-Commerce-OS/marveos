@@ -69,6 +69,11 @@ export default function PortalPage() {
   const [workspaceHealth, setWorkspaceHealth] = useState<WorkspaceHealth[]>([]);
   const [healthLoading, setHealthLoading] = useState(true);
   const [healthError, setHealthError] = useState('');
+  const [supportPinMasked, setSupportPinMasked] = useState('');
+  const [supportPin, setSupportPin] = useState('');
+  const [canRevealSupportPin, setCanRevealSupportPin] = useState(false);
+  const [revealingPin, setRevealingPin] = useState(false);
+  const [supportPinError, setSupportPinError] = useState('');
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('');
   const [lastCheckedAt, setLastCheckedAt] = useState('');
   const workspaceSections = useMemo(
@@ -82,6 +87,7 @@ export default function PortalPage() {
       'Media',
       'Settings',
       'Support',
+      'Knowledge Center',
       'Grant Support Access',
     ],
     [],
@@ -104,6 +110,25 @@ export default function PortalPage() {
         }));
       } catch {
         // keep fallback branding from config
+      }
+    })();
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/os/support/chat-context', { cache: 'no-store' });
+        const payload = (await res.json().catch(() => null)) as {
+          supportPin?: string | null;
+          maskedSupportPin?: string | null;
+          canRevealSupportPin?: boolean;
+          error?: string;
+        } | null;
+        if (!res.ok || !payload) {
+          throw new Error(payload?.error || 'Unable to load support PIN.');
+        }
+        setSupportPinMasked(String(payload.maskedSupportPin || ''));
+        setCanRevealSupportPin(Boolean(payload.canRevealSupportPin));
+      } catch (err) {
+        setSupportPinError(err instanceof Error ? err.message : 'Unable to load support PIN.');
       }
     })();
 
@@ -173,6 +198,24 @@ export default function PortalPage() {
       unknown: checks.filter((item) => item.status === 'unknown').length,
     };
   }, [selectedWorkspace]);
+
+  async function revealSupportPin() {
+    if (!canRevealSupportPin) return;
+    setRevealingPin(true);
+    setSupportPinError('');
+    try {
+      const res = await fetch('/api/os/support/chat-context?revealPin=true', { cache: 'no-store' });
+      const payload = (await res.json().catch(() => null)) as { supportPin?: string | null; error?: string } | null;
+      if (!res.ok || !payload?.supportPin) {
+        throw new Error(payload?.error || 'Unable to reveal support PIN.');
+      }
+      setSupportPin(String(payload.supportPin));
+    } catch (err) {
+      setSupportPinError(err instanceof Error ? err.message : 'Unable to reveal support PIN.');
+    } finally {
+      setRevealingPin(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -254,12 +297,53 @@ export default function PortalPage() {
             </button>
             <button
               type="button"
-              onClick={() => setShowComingSoon(true)}
+              onClick={() => router.push('/portal/knowledge-center')}
               className="rounded-full border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 font-['Space_Grotesk']"
             >
-              Contact support
+              Open knowledge center
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/os/support/live-chat')}
+              className="rounded-full border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 font-['Space_Grotesk']"
+            >
+              Open live support chat
             </button>
           </div>
+        </div>
+
+        <div className="mt-8 w-full max-w-3xl rounded-3xl border border-sky-100 bg-sky-50 p-8 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 font-['Space_Grotesk']">Support PIN</h2>
+              <p className="mt-2 text-sm text-slate-600 font-['Space_Grotesk']">
+                Use this PIN for technical support live chat. Enquiry chat does not require a PIN.
+              </p>
+            </div>
+            {supportPinMasked || supportPin ? (
+              <div className="rounded-2xl border border-sky-200 bg-white px-5 py-3 text-center">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-600 font-['Space_Grotesk']">Support PIN</p>
+                <p className="mt-1 text-3xl font-bold tracking-[0.25em] text-sky-900 font-['Space_Grotesk']">{supportPin || supportPinMasked}</p>
+                {!supportPin && canRevealSupportPin ? (
+                  <button
+                    type="button"
+                    onClick={() => void revealSupportPin()}
+                    disabled={revealingPin}
+                    className="mt-3 rounded-full border border-sky-200 px-3 py-1.5 text-xs font-semibold text-sky-700"
+                  >
+                    {revealingPin ? 'Revealing...' : 'Reveal PIN'}
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm text-slate-500 font-['Space_Grotesk']">
+                {supportPinError || 'Support PIN unavailable right now.'}
+              </div>
+            )}
+          </div>
+          <p className="mt-3 text-xs text-slate-500 font-['Space_Grotesk']">
+            PIN stays masked by default for session safety. Technical support chat always requires a valid PIN.
+          </p>
         </div>
 
         <div className="mt-8 w-full max-w-3xl rounded-3xl border border-gray-100 bg-white p-8 shadow-sm">

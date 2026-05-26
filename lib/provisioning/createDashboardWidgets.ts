@@ -17,11 +17,6 @@ export async function createDashboardWidgets(input: CreateDashboardWidgetsInput)
     ];
   }
 
-  return [
-    'Pipeline Overview',
-    'Client Follow-ups',
-    'Payment Status',
-    'Team Activity',
-    'Reports Snapshot',
-  ];
+  const profession = await import('@/config/professions').then((module) => module.resolveProfessionConfig(input.professionKey));
+  return profession.dashboardWidgets;
 }

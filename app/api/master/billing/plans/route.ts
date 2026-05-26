@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession, getCurrentPlatformUser, isAdmin, isSuperAdmin } from '@/lib/auth';
+import { getCurrentPlatformUser, isSuperAdmin } from '@/lib/auth';
 import { appendAuditLog, readAdminStore, updateAdminStore, type CommercialPlanConfig, type CommercialPlanRegionalPricing } from '@/lib/adminStore';
+import { requireActionPermission } from '@/lib/master/permissions/guards';
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
 async function ensureAdminSession() {
-  const session = await getSession();
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
-  }
-
-  const allowed = await isAdmin(session.token);
-  if (!allowed) {
-    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
-  }
-
-  return { session };
+  return requireActionPermission('plansBilling', 'view');
 }
 
 function normalizePlanId(value: string): string {
@@ -151,7 +142,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('plansBilling', 'update');
   if ('error' in auth) return auth.error;
 
   const canMutate = await isSuperAdmin(auth.session.token);
@@ -206,7 +197,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const auth = await ensureAdminSession();
+  const auth = await requireActionPermission('plansBilling', 'update');
   if ('error' in auth) return auth.error;
 
   const canMutate = await isSuperAdmin(auth.session.token);

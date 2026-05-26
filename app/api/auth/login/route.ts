@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { readAdminStore, updateAdminStore, type NativeRole } from '@/lib/adminStore';
+import { readAdminStore, updateAdminStore, type NativePlatformSession } from '@/lib/adminStore';
 import {
   hasClientMasterAccess,
   hasInternalMasterAccess,
@@ -10,6 +10,171 @@ import {
 import { getConfig } from '@/src/config/client';
 import { randomUUID } from 'node:crypto';
 import { getPasswordEntry, upsertPasswordEntries, verifyPasswordEntry } from '@/lib/nativePasswords';
+import { sendPlatformDirectEmail } from '@/lib/emailNotifications';
+
+type LoginAttemptState = {
+  count: number;
+  firstFailedAt: number;
+  lockedUntilMs: number;
+};
+
+type LoginOtpChallenge = {
+  id: string;
+  identifier: string;
+  surface: 'master' | 'portal';
+  email: string;
+  displayName: string;
+  otpCode: string;
+  expiresAtMs: number;
+};
+
+const LOGIN_ATTEMPT_LEDGER = new Map<string, LoginAttemptState>();
+const LOGIN_OTP_CHALLENGES = new Map<string, LoginOtpChallenge>();
+const LOGIN_OTP_LAST_SENT = new Map<string, number>();
+const OTP_RESEND_MIN_INTERVAL_MS = 45 * 1000;
+
+function normalizeClientIp(raw: string): string {
+  return raw.split(',')[0]?.trim() || 'unknown';
+}
+
+function buildAttemptKey(identifier: string, clientIp: string): string {
+  return `${identifier.toLowerCase()}::${clientIp}`;
+}
+
+function getAttemptState(key: string): LoginAttemptState | null {
+  const state = LOGIN_ATTEMPT_LEDGER.get(key);
+  if (!state) return null;
+  const now = Date.now();
+  if (state.lockedUntilMs > 0 && state.lockedUntilMs <= now) {
+    LOGIN_ATTEMPT_LEDGER.delete(key);
+    return null;
+  }
+  return state;
+}
+
+function registerFailedAttempt(key: string, maxFailedAttempts: number, windowMinutes: number, lockoutMinutes: number) {
+  const now = Date.now();
+  const windowMs = windowMinutes * 60 * 1000;
+  const lockoutMs = lockoutMinutes * 60 * 1000;
+  const existing = getAttemptState(key);
+
+  if (!existing) {
+    LOGIN_ATTEMPT_LEDGER.set(key, {
+      count: 1,
+      firstFailedAt: now,
+      lockedUntilMs: 0,
+    });
+    return;
+  }
+
+  const withinWindow = now - existing.firstFailedAt <= windowMs;
+  const nextCount = withinWindow ? existing.count + 1 : 1;
+  const firstFailedAt = withinWindow ? existing.firstFailedAt : now;
+  const lockedUntilMs = nextCount >= maxFailedAttempts ? now + lockoutMs : 0;
+
+  LOGIN_ATTEMPT_LEDGER.set(key, {
+    count: nextCount,
+    firstFailedAt,
+    lockedUntilMs,
+  });
+}
+
+function clearAttemptState(key: string) {
+  LOGIN_ATTEMPT_LEDGER.delete(key);
+}
+
+function generateOtpCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function maskEmail(email: string): string {
+  const trimmed = email.trim();
+  const atIndex = trimmed.indexOf('@');
+  if (atIndex <= 1) return '***';
+  const local = trimmed.slice(0, atIndex);
+  const domain = trimmed.slice(atIndex + 1);
+  if (!domain) return `${local[0]}***`;
+  return `${local[0]}***@${domain}`;
+}
+
+async function issueLoginOtpChallenge(params: {
+  identifier: string;
+  surface: 'master' | 'portal';
+  email: string;
+  displayName: string;
+  ttlMinutes: number;
+}) {
+  const lastSentAt = LOGIN_OTP_LAST_SENT.get(params.identifier);
+  if (lastSentAt && Date.now() - lastSentAt < OTP_RESEND_MIN_INTERVAL_MS) {
+    return {
+      ok: false as const,
+      reason: 'rate-limited' as const,
+      retryAfterSeconds: Math.ceil((OTP_RESEND_MIN_INTERVAL_MS - (Date.now() - lastSentAt)) / 1000),
+    };
+  }
+
+  const challengeId = randomUUID();
+  const otpCode = generateOtpCode();
+  const expiresAtMs = Date.now() + params.ttlMinutes * 60 * 1000;
+
+  LOGIN_OTP_CHALLENGES.set(challengeId, {
+    id: challengeId,
+    identifier: params.identifier,
+    surface: params.surface,
+    email: params.email.trim().toLowerCase(),
+    displayName: params.displayName,
+    otpCode,
+    expiresAtMs,
+  });
+
+  const expiryText = new Date(expiresAtMs).toLocaleTimeString();
+  const subject = 'Your Marveo login verification code';
+  const html = `<p>Hello ${params.displayName || 'there'},</p><p>Your login verification code is:</p><p style="font-size:24px;font-weight:700;letter-spacing:2px;">${otpCode}</p><p>This code expires at ${expiryText}.</p><p>If you did not try to log in, ignore this email.</p>`;
+  const text = `Hello ${params.displayName || 'there'}, your Marveo login verification code is ${otpCode}. It expires at ${expiryText}. If this was not you, ignore this email.`;
+
+  const sent = await sendPlatformDirectEmail({
+    to: params.email,
+    subject,
+    html,
+    text,
+  });
+
+  if (!sent.ok) {
+    LOGIN_OTP_CHALLENGES.delete(challengeId);
+    return { ok: false as const, reason: 'delivery-failed' as const };
+  }
+
+  LOGIN_OTP_LAST_SENT.set(params.identifier, Date.now());
+
+  return {
+    ok: true as const,
+    challengeId,
+    deliveryHint: maskEmail(params.email),
+  };
+}
+
+function verifyLoginOtpChallenge(params: {
+  challengeId: string;
+  identifier: string;
+  surface: 'master' | 'portal';
+  otpCode: string;
+}) {
+  const challenge = LOGIN_OTP_CHALLENGES.get(params.challengeId);
+  if (!challenge) return { ok: false as const, reason: 'not-found' as const };
+  if (challenge.expiresAtMs <= Date.now()) {
+    LOGIN_OTP_CHALLENGES.delete(params.challengeId);
+    return { ok: false as const, reason: 'expired' as const };
+  }
+  if (challenge.surface !== params.surface || challenge.identifier !== params.identifier) {
+    return { ok: false as const, reason: 'invalid-context' as const };
+  }
+  if (challenge.otpCode !== params.otpCode.trim()) {
+    return { ok: false as const, reason: 'invalid-code' as const };
+  }
+
+  LOGIN_OTP_CHALLENGES.delete(params.challengeId);
+  return { ok: true as const };
+}
 
 const getWpApiUrl = () => {
   const config = getConfig();
@@ -64,13 +229,45 @@ const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutM
   }
 };
 
+function upsertSessionForIdentity(
+  sessions: Record<string, NativePlatformSession>,
+  identityId: string,
+  session: NativePlatformSession,
+  enforceSingleSession: boolean,
+): Record<string, NativePlatformSession> {
+  const base = enforceSingleSession
+    ? Object.fromEntries(Object.entries(sessions).filter(([, existing]) => existing.userId !== identityId))
+    : sessions;
+
+  return {
+    ...base,
+    [session.id]: session,
+  };
+}
+
 export async function POST(req: NextRequest) {
+  let loginSucceeded = false;
+  let trackFailures = false;
+  let suppressFailureTracking = false;
+  let loginAttemptKey = '';
+  let loginProtection = {
+    enabled: true,
+    maxFailedAttempts: 5,
+    windowMinutes: 10,
+    lockoutMinutes: 15,
+    requireOtpChallenge: true,
+    otpCodeTtlMinutes: 10,
+  };
+
   try {
     const payload = await req.json();
     const username = payload?.username;
     const password = payload?.password;
     const requestedSurface = payload?.loginSurface === 'master' ? 'master' : 'portal';
+    const otpChallengeId = String(payload?.otpChallengeId || '').trim();
+    const otpCode = String(payload?.otpCode || '').trim();
     const WP_API_URL = getWpApiUrl();
+    let otpVerified = false;
 
     const persistNativeSession = async (mutate: Parameters<typeof updateAdminStore>[0]) => {
       try {
@@ -86,10 +283,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Username and password required' }, { status: 400 });
     }
 
+    const loginIdentifier = String(username).trim().toLowerCase();
+    const clientIp = normalizeClientIp(req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown');
+    loginAttemptKey = buildAttemptKey(loginIdentifier, clientIp);
+    trackFailures = true;
+
+    const securityStore = await readAdminStore();
+    loginProtection = {
+      ...loginProtection,
+      ...(securityStore.platformSettings.loginProtection ?? {}),
+    };
+
+    if (loginProtection.enabled) {
+      const attemptState = getAttemptState(loginAttemptKey);
+      if (attemptState?.lockedUntilMs && attemptState.lockedUntilMs > Date.now()) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((attemptState.lockedUntilMs - Date.now()) / 1000));
+        return NextResponse.json(
+          {
+            error: `Too many failed login attempts. Try again in ${retryAfterSeconds} seconds.`,
+            retryAfterSeconds,
+          },
+          { status: 429 },
+        );
+      }
+    }
+
+    if (loginProtection.enabled && loginProtection.requireOtpChallenge && otpChallengeId) {
+      if (!otpCode) {
+        return NextResponse.json({ error: 'OTP code is required.' }, { status: 400 });
+      }
+      const otpCheck = verifyLoginOtpChallenge({
+        challengeId: otpChallengeId,
+        identifier: loginIdentifier,
+        surface: requestedSurface,
+        otpCode,
+      });
+      if (!otpCheck.ok) {
+        return NextResponse.json({ error: 'Invalid or expired verification code.' }, { status: 401 });
+      }
+      otpVerified = true;
+    }
+
     const nativeBootstrap = getNativeSuperadminCredentials();
     if (requestedSurface === 'master' && nativeBootstrap.email && nativeBootstrap.password) {
       const normalizedUsername = String(username).trim().toLowerCase();
       if (normalizedUsername === nativeBootstrap.email && password === nativeBootstrap.password) {
+        if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
+          const challenge = await issueLoginOtpChallenge({
+            identifier: loginIdentifier,
+            surface: requestedSurface,
+            email: nativeBootstrap.email,
+            displayName: nativeBootstrap.name,
+            ttlMinutes: loginProtection.otpCodeTtlMinutes,
+          });
+          if (!challenge.ok) {
+            return NextResponse.json({ error: 'Could not send verification code. Please try again.' }, { status: 503 });
+          }
+          suppressFailureTracking = true;
+          return NextResponse.json({
+            otpRequired: true,
+            otpChallengeId: challenge.challengeId,
+            otpDeliveryHint: challenge.deliveryHint,
+            message: 'Verification code sent. Enter it to continue.',
+          });
+        }
+
         const cookieStore = await cookies();
         const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
         const nativeSessionToken = randomUUID();
@@ -127,9 +385,10 @@ export async function POST(req: NextRequest) {
                 updatedAt: nowIso,
               },
             },
-            sessions: {
-              ...current.nativeAuth.sessions,
-              [nativeSessionId]: {
+            sessions: upsertSessionForIdentity(
+              current.nativeAuth.sessions,
+              nativeIdentityId,
+              {
                 id: nativeSessionId,
                 userId: nativeIdentityId,
                 token: nativeSessionToken,
@@ -137,7 +396,8 @@ export async function POST(req: NextRequest) {
                 createdAt: nowIso,
                 expiresAt,
               },
-            },
+              current.platformSettings.sessionSecurity.enforceSingleSession,
+            ),
             permissions: {
               ...current.nativeAuth.permissions,
               [nativeIdentityId]: upsertPasswordEntries(current.nativeAuth.permissions[nativeIdentityId], password),
@@ -159,6 +419,8 @@ export async function POST(req: NextRequest) {
           requirePasswordChange: false,
         }), opts);
 
+        loginSucceeded = true;
+        clearAttemptState(loginAttemptKey);
         return NextResponse.json({ success: true, redirect: '/master' });
       }
     }
@@ -170,6 +432,26 @@ export async function POST(req: NextRequest) {
       }
       if (requestedSurface !== 'master') {
         return NextResponse.json({ error: 'Internal team access is only available on /master-login.' }, { status: 403 });
+      }
+
+      if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
+        const challenge = await issueLoginOtpChallenge({
+          identifier: loginIdentifier,
+          surface: requestedSurface,
+          email: 'demo@marveo.local',
+          displayName: 'Demo Admin',
+          ttlMinutes: loginProtection.otpCodeTtlMinutes,
+        });
+        if (!challenge.ok) {
+          return NextResponse.json({ error: 'Could not send verification code. Please try again.' }, { status: 503 });
+        }
+        suppressFailureTracking = true;
+        return NextResponse.json({
+          otpRequired: true,
+          otpChallengeId: challenge.challengeId,
+          otpDeliveryHint: challenge.deliveryHint,
+          message: 'Verification code sent. Enter it to continue.',
+        });
       }
 
       const cookieStore = await cookies();
@@ -198,9 +480,10 @@ export async function POST(req: NextRequest) {
               updatedAt: nowIso,
             },
           },
-          sessions: {
-            ...current.nativeAuth.sessions,
-            [nativeSessionId]: {
+          sessions: upsertSessionForIdentity(
+            current.nativeAuth.sessions,
+            nativeIdentityId,
+            {
               id: nativeSessionId,
               userId: nativeIdentityId,
               token: nativeSessionToken,
@@ -208,7 +491,8 @@ export async function POST(req: NextRequest) {
               createdAt: nowIso,
               expiresAt,
             },
-          },
+            current.platformSettings.sessionSecurity.enforceSingleSession,
+          ),
           permissions: {
             ...current.nativeAuth.permissions,
             [nativeIdentityId]: upsertPasswordEntries(current.nativeAuth.permissions[nativeIdentityId], password),
@@ -230,6 +514,8 @@ export async function POST(req: NextRequest) {
         requirePasswordChange: false,
       }), opts);
 
+      loginSucceeded = true;
+      clearAttemptState(loginAttemptKey);
       return NextResponse.json({ success: true, redirect: '/master' });
     }
 
@@ -272,6 +558,27 @@ export async function POST(req: NextRequest) {
       }
 
       const requiresPasswordChange = Boolean(userState?.invitePending);
+
+      if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
+        const challenge = await issueLoginOtpChallenge({
+          identifier: loginIdentifier,
+          surface: requestedSurface,
+          email: identity.email,
+          displayName: identity.name,
+          ttlMinutes: loginProtection.otpCodeTtlMinutes,
+        });
+        if (!challenge.ok) {
+          return NextResponse.json({ error: 'Could not send verification code. Please try again.' }, { status: 503 });
+        }
+        suppressFailureTracking = true;
+        return NextResponse.json({
+          otpRequired: true,
+          otpChallengeId: challenge.challengeId,
+          otpDeliveryHint: challenge.deliveryHint,
+          message: 'Verification code sent. Enter it to continue.',
+        });
+      }
+
       const cookieStore = await cookies();
       const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
       const nativeSessionId = randomUUID();
@@ -300,9 +607,10 @@ export async function POST(req: NextRequest) {
               updatedAt: nowIso,
             },
           },
-          sessions: {
-            ...current.nativeAuth.sessions,
-            [nativeSessionId]: {
+          sessions: upsertSessionForIdentity(
+            current.nativeAuth.sessions,
+            identityId,
+            {
               id: nativeSessionId,
               userId: identityId,
               token: nativeSessionToken,
@@ -310,7 +618,8 @@ export async function POST(req: NextRequest) {
               createdAt: nowIso,
               expiresAt,
             },
-          },
+            current.platformSettings.sessionSecurity.enforceSingleSession,
+          ),
         },
       }));
 
@@ -328,6 +637,8 @@ export async function POST(req: NextRequest) {
         requirePasswordChange: requiresPasswordChange,
       }), opts);
 
+      loginSucceeded = true;
+      clearAttemptState(loginAttemptKey);
       return NextResponse.json({
         success: true,
         redirect: requiresPasswordChange ? resolveForcedPasswordChangeRedirect('master') : '/master',
@@ -364,6 +675,27 @@ export async function POST(req: NextRequest) {
       const passwordEntry = getPasswordEntry(nativeStore.nativeAuth.permissions[identityId]);
       if (passwordEntry && verifyPasswordEntry(password, passwordEntry)) {
         const requiresPasswordChange = Boolean(userState?.invitePending);
+
+        if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
+          const challenge = await issueLoginOtpChallenge({
+            identifier: loginIdentifier,
+            surface: requestedSurface,
+            email: identity.email,
+            displayName: identity.name,
+            ttlMinutes: loginProtection.otpCodeTtlMinutes,
+          });
+          if (!challenge.ok) {
+            return NextResponse.json({ error: 'Could not send verification code. Please try again.' }, { status: 503 });
+          }
+          suppressFailureTracking = true;
+          return NextResponse.json({
+            otpRequired: true,
+            otpChallengeId: challenge.challengeId,
+            otpDeliveryHint: challenge.deliveryHint,
+            message: 'Verification code sent. Enter it to continue.',
+          });
+        }
+
         const cookieStore = await cookies();
         const opts = { httpOnly: true, secure: process.env.NODE_ENV === 'production', path: '/', maxAge: 60 * 60 * 24 * 7 };
         const nativeSessionId = randomUUID();
@@ -392,9 +724,10 @@ export async function POST(req: NextRequest) {
                 updatedAt: nowIso,
               },
             },
-            sessions: {
-              ...current.nativeAuth.sessions,
-              [nativeSessionId]: {
+            sessions: upsertSessionForIdentity(
+              current.nativeAuth.sessions,
+              identityId,
+              {
                 id: nativeSessionId,
                 userId: identityId,
                 token: nativeSessionToken,
@@ -402,7 +735,8 @@ export async function POST(req: NextRequest) {
                 createdAt: nowIso,
                 expiresAt,
               },
-            },
+              current.platformSettings.sessionSecurity.enforceSingleSession,
+            ),
           },
         }));
 
@@ -420,6 +754,8 @@ export async function POST(req: NextRequest) {
           requirePasswordChange: requiresPasswordChange,
         }), opts);
 
+        loginSucceeded = true;
+        clearAttemptState(loginAttemptKey);
         return NextResponse.json({
           success: true,
           redirect: requiresPasswordChange ? resolveForcedPasswordChangeRedirect('portal') : '/portal',
@@ -477,7 +813,7 @@ export async function POST(req: NextRequest) {
       ...roles,
       ...(userState?.masterRole ? [userState.masterRole] : []),
     ]);
-    const nativeRoles = marveoRoles.filter((role): role is NativeRole => !role.startsWith('CONNECTED_'));
+    const nativeRoles = marveoRoles.filter((role) => !role.startsWith('CONNECTED_'));
 
     const internalAccess = hasInternalMasterAccess(marveoRoles);
     const clientAccess = hasClientMasterAccess(marveoRoles);
@@ -490,6 +826,26 @@ export async function POST(req: NextRequest) {
     }
     if (userState && !userState.active) {
       return NextResponse.json({ error: 'Your account has been suspended.' }, { status: 403 });
+    }
+
+    if (loginProtection.enabled && loginProtection.requireOtpChallenge && !otpVerified) {
+      const challenge = await issueLoginOtpChallenge({
+        identifier: loginIdentifier,
+        surface: requestedSurface,
+        email: String(data.user_email || '').trim(),
+        displayName: String(data.user_display_name || username || 'User'),
+        ttlMinutes: loginProtection.otpCodeTtlMinutes,
+      });
+      if (!challenge.ok) {
+        return NextResponse.json({ error: 'Could not send verification code. Please try again.' }, { status: 503 });
+      }
+      suppressFailureTracking = true;
+      return NextResponse.json({
+        otpRequired: true,
+        otpChallengeId: challenge.challengeId,
+        otpDeliveryHint: challenge.deliveryHint,
+        message: 'Verification code sent. Enter it to continue.',
+      });
     }
 
     const cookieStore = await cookies();
@@ -519,9 +875,10 @@ export async function POST(req: NextRequest) {
             updatedAt: nowIso,
           },
         },
-        sessions: {
-          ...current.nativeAuth.sessions,
-          [nativeSessionId]: {
+        sessions: upsertSessionForIdentity(
+          current.nativeAuth.sessions,
+          nativeIdentityId,
+          {
             id: nativeSessionId,
             userId: nativeIdentityId,
             token: nativeSessionToken,
@@ -529,7 +886,8 @@ export async function POST(req: NextRequest) {
             createdAt: nowIso,
             expiresAt,
           },
-        },
+          current.platformSettings.sessionSecurity.enforceSingleSession,
+        ),
         permissions: {
           ...current.nativeAuth.permissions,
           [nativeIdentityId]: upsertPasswordEntries(current.nativeAuth.permissions[nativeIdentityId], password),
@@ -551,9 +909,20 @@ export async function POST(req: NextRequest) {
       requirePasswordChange: false,
     }), opts);
 
+    loginSucceeded = true;
+    clearAttemptState(loginAttemptKey);
     return NextResponse.json({ success: true, redirect: '/portal' });
   } catch (error) {
     console.error('Login error:', error);
     return NextResponse.json({ error: 'An unexpected error occurred. Please try again.' }, { status: 500 });
+  } finally {
+    if (trackFailures && !suppressFailureTracking && loginAttemptKey && loginProtection.enabled && !loginSucceeded) {
+      registerFailedAttempt(
+        loginAttemptKey,
+        loginProtection.maxFailedAttempts,
+        loginProtection.windowMinutes,
+        loginProtection.lockoutMinutes,
+      );
+    }
   }
 }

@@ -92,6 +92,9 @@ export default function OverviewAnalytics({ workspaces, countryCatalog = [] }: P
   const [country, setCountry] = useState<string>('all');
   const [state, setState] = useState<string>('all');
   const [websiteType, setWebsiteType] = useState<'all' | 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS'>('all');
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const [pdfNotice, setPdfNotice] = useState('');
 
   // Pinned countries always appear first in the dropdown.
   const countryOptions = useMemo(() => {
@@ -121,6 +124,7 @@ export default function OverviewAnalytics({ workspaces, countryCatalog = [] }: P
   }, [workspaces]);
 
   const filtered = useMemo(() => {
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
     const windowMs = period === 'all' ? Number.POSITIVE_INFINITY : Number(period) * 24 * 60 * 60 * 1000;
 
@@ -232,6 +236,70 @@ export default function OverviewAnalytics({ workspaces, countryCatalog = [] }: P
     URL.revokeObjectURL(url);
   }
 
+  async function exportPdf() {
+    setPdfBusy(true);
+    setPdfError('');
+    setPdfNotice('');
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45000);
+
+    try {
+      const payload = {
+        generatedAt: new Date().toISOString(),
+        filters: {
+          period,
+          country,
+          state,
+          websiteType,
+        },
+        totalWorkspaces: filtered.length,
+        launchReadinessRate,
+        statusCounts,
+        connectorCounts,
+        supportLoad,
+        timeline,
+      };
+
+      const res = await fetch('/api/master/decision-dashboard-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || 'Failed to generate PDF report.');
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/i);
+      const fileName = match?.[1] ?? `decision-dashboard-${Date.now()}.pdf`;
+
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      setPdfNotice('PDF report downloaded.');
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        setPdfError('PDF generation timed out. Please reduce filters and try again.');
+      } else {
+        setPdfError(error instanceof Error ? error.message : 'Failed to generate PDF report.');
+      }
+    } finally {
+      window.clearTimeout(timeout);
+      setPdfBusy(false);
+    }
+  }
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -239,6 +307,8 @@ export default function OverviewAnalytics({ workspaces, countryCatalog = [] }: P
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Global Analytics</p>
           <h2 className="mt-1 text-xl font-bold text-slate-900">Decision Dashboard</h2>
           <p className="mt-1 text-sm text-slate-600">Filter operations signals to evaluate growth, delivery health, and risk exposure.</p>
+          {pdfError ? <p className="mt-2 text-xs font-semibold text-rose-700">{pdfError}</p> : null}
+          {pdfNotice ? <p className="mt-2 text-xs font-semibold text-emerald-700">{pdfNotice}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -250,10 +320,11 @@ export default function OverviewAnalytics({ workspaces, countryCatalog = [] }: P
           </button>
           <button
             type="button"
-            onClick={() => window.print()}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            onClick={() => void exportPdf()}
+            disabled={pdfBusy}
+            className="rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-60"
           >
-            Print / PDF
+            {pdfBusy ? 'Generating PDF…' : 'Download PDF Report'}
           </button>
           <select
             value={period}

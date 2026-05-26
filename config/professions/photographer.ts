@@ -15,6 +15,7 @@ export const photographerProfession: ProfessionConfig = {
     { label: 'Inventory', href: '/os/inventory', module: 'inventory' },
     { label: 'Team', href: '/os/team', module: 'team' },
     { label: 'Reports', href: '/os/reports', module: 'reports' },
+    { label: 'Support Center', href: '/os/support' },
   ],
   onboardingQuestions: [
     { id: 'shoot-type', label: 'What type of shoots do you run most?', type: 'select', options: ['Events', 'Studio', 'Product', 'Mixed'] },
@@ -27,6 +28,14 @@ export const photographerProfession: ProfessionConfig = {
     order: 'Project',
     customer: 'Client',
   },
+  quickActions: [
+    'Add Booking',
+    'Add Lead',
+    'Create Invoice',
+    'Upload Deliverables',
+    'Add Team Member',
+    'View Reports',
+  ],
 };
 
 export default photographerProfession;

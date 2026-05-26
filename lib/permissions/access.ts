@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeRoles } from '@/lib/auth';
+import { getSession, hasClientWorkspaceAccess, hasInternalPlatformAccess, normalizeMarveoRoles, normalizeRoles } from '@/lib/auth';
 import { readAdminStore, type CommercialSubscriptionStatus } from '@/lib/adminStore';
 
 export type AccessResult = {
@@ -21,6 +21,21 @@ export async function requireMasterAccess(): Promise<AccessResult | AccessErrorR
   }
 
   return { session, roles };
+}
+
+const FINANCE_ALLOWED_ROLES = new Set(['SUPER_ADMIN', 'ADMIN', 'BILLING_MANAGER']);
+
+export async function requireFinanceAccess(): Promise<AccessResult | AccessErrorResult> {
+  const access = await requireMasterAccess();
+  if ('error' in access) return access;
+
+  const normalized = normalizeMarveoRoles(access.roles);
+  const allowed = normalized.some((role) => FINANCE_ALLOWED_ROLES.has(String(role).trim().toUpperCase()));
+  if (!allowed) {
+    return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+  }
+
+  return access;
 }
 
 export async function requireOSAccess(): Promise<AccessResult | AccessErrorResult> {

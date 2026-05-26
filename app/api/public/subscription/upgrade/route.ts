@@ -7,6 +7,7 @@ import {
   parseEmail,
   parsePaymentProvider,
 } from '@/lib/security/requestGuards';
+import { recordIncomeEvent } from '@/lib/finance/automation';
 
 function badRequest(message: string) {
   return NextResponse.json({ ok: false, error: message }, { status: 400 });
@@ -46,6 +47,20 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.reason }, { status: 404 });
   }
+
+  await recordIncomeEvent({
+    source: 'subscription_paid',
+    sourceId: String(result.subscriptionId),
+    amount: Number(result.amount || 0),
+    currency: String(result.currency || 'USD'),
+    reference: String(paymentReference || result.subscriptionId),
+    description: `Subscription upgrade initiated for plan ${String(result.selectedPlanId || '')}`,
+    status: 'pending',
+    createdBy: 'system',
+    category: 'subscriptions',
+    clientId: email,
+    transactionDate: new Date().toISOString(),
+  });
 
   return NextResponse.json(result);
 }

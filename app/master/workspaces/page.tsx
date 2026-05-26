@@ -11,6 +11,11 @@ type SupportAssignment = {
   status: SupportStatus;
   supportOfficerId?: string;
   supportOfficerName?: string;
+  supportOfficerType?: 'CUSTOMER_SUPPORT' | 'TECHNICAL_SUPPORT';
+  ticketId?: string;
+  technicalSupportOfficerId?: string;
+  technicalSupportOfficerName?: string;
+  escalationStatus?: 'NONE' | 'REQUESTED' | 'ASSIGNED' | 'RESOLVED';
   priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   reason?: string;
   setupType?: 'NEW_WEBSITE' | 'EXISTING_WEBSITE' | 'CUSTOM_HEADLESS';
@@ -18,6 +23,7 @@ type SupportAssignment = {
 
 type Workspace = {
   id: string;
+  clientOrganizationId?: string;
   name: string;
   clientOrganizationName?: string;
   planId?: string;
@@ -37,9 +43,13 @@ type TeamUserRow = {
   id: string;
   name: string;
   email: string;
+  rawAuthRole?: string | null;
+  normalizedRole?: string | null;
   normalizedRoles: string[];
   status: 'ACTIVE' | 'INVITED' | 'DISABLED';
 };
+
+type SupportOfficerTrack = 'CUSTOMER_SUPPORT' | 'TECHNICAL_SUPPORT';
 
 type SubscriptionRow = {
   id: string;
@@ -112,9 +122,45 @@ function getContactEmail(workspace: Workspace): string {
   return email;
 }
 
-function isSupportOfficer(user: TeamUserRow): boolean {
+function isSupportTeamMember(user: TeamUserRow): boolean {
   const roles = Array.isArray(user.normalizedRoles) ? user.normalizedRoles : [];
-  return roles.includes('SUPPORT_OFFICER') || roles.includes('ADMIN') || roles.includes('SUPER_ADMIN');
+  const classifier = `${user.rawAuthRole || ''} ${user.normalizedRole || ''}`.toUpperCase();
+  return roles.includes('CUSTOMER_SUPPORT')
+    || roles.includes('TECHNICAL_SUPPORT')
+    || classifier.includes('CUSTOMER_SUPPORT')
+    || classifier.includes('TECHNICAL_SUPPORT')
+    || classifier.includes('TECH_SUPPORT');
+}
+
+function getSupportOfficerTrack(user: TeamUserRow): SupportOfficerTrack {
+  const classifier = `${user.rawAuthRole || ''} ${user.normalizedRole || ''} ${user.name || ''}`.toUpperCase();
+  const roles = Array.isArray(user.normalizedRoles) ? user.normalizedRoles : [];
+  if (roles.includes('TECHNICAL_SUPPORT')) {
+    return 'TECHNICAL_SUPPORT';
+  }
+  if (roles.includes('CUSTOMER_SUPPORT')) {
+    return 'CUSTOMER_SUPPORT';
+  }
+  if (classifier.includes('TECHNICAL') || classifier.includes('TECH_SUPPORT') || classifier.includes('TECHNICAL_SUPPORT')) {
+    return 'TECHNICAL_SUPPORT';
+  }
+  if (roles.includes('DEPLOYMENT_MANAGER') || classifier.includes('DEPLOYMENT_MANAGER')) {
+    return 'TECHNICAL_SUPPORT';
+  }
+  if (classifier.includes('CUSTOMER_SUPPORT') || classifier.includes('CUSTOMER SUPPORT')) {
+    return 'CUSTOMER_SUPPORT';
+  }
+  return 'CUSTOMER_SUPPORT';
+}
+
+function workspaceMatchesClientFilter(workspace: Workspace, filter: string): boolean {
+  if (!filter) return true;
+  const normalizedFilter = filter.trim().toLowerCase();
+  if (!normalizedFilter) return true;
+
+  const contactEmail = getContactEmail(workspace);
+  const organizationId = String(workspace.clientOrganizationId || '').trim().toLowerCase();
+  return contactEmail === normalizedFilter || organizationId === normalizedFilter;
 }
 
 export default function MasterWorkspacesPage() {
@@ -128,8 +174,9 @@ export default function MasterWorkspacesPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [officers, setOfficers] = useState<TeamUserRow[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
-  const [draftByWorkspace, setDraftByWorkspace] = useState<Record<string, { officerId: string }>>({});
+  const [draftByWorkspace, setDraftByWorkspace] = useState<Record<string, { officerId: string; technicalOfficerId: string }>>({});
 
   const subscriptionByEmail = useMemo(() => {
     const map = new Map<string, SubscriptionRow>();
@@ -145,9 +192,34 @@ export default function MasterWorkspacesPage() {
   }, [subscriptions]);
 
   const filtered = useMemo(() => {
-    if (!clientFilter) return workspaces;
-    return workspaces.filter((workspace) => getContactEmail(workspace) === clientFilter);
-  }, [workspaces, clientFilter]);
+    const term = searchTerm.trim().toLowerCase();
+    return workspaces.filter((workspace) => {
+      if (!workspaceMatchesClientFilter(workspace, clientFilter)) return false;
+      if (!term) return true;
+      const blob = [
+        workspace.name,
+        workspace.id,
+        workspace.clientOrganizationId || '',
+        workspace.clientOrganizationName || '',
+        getContactEmail(workspace),
+        workspace.planId || '',
+        workspace.supportAssignment?.ticketId || '',
+        workspace.supportAssignment?.supportOfficerName || '',
+        workspace.supportAssignment?.technicalSupportOfficerName || '',
+      ].join(' ').toLowerCase();
+      return blob.includes(term);
+    });
+  }, [workspaces, clientFilter, searchTerm]);
+
+  const customerSupportOfficers = useMemo(
+    () => officers.filter((officer) => getSupportOfficerTrack(officer) === 'CUSTOMER_SUPPORT'),
+    [officers],
+  );
+
+  const technicalSupportOfficers = useMemo(
+    () => officers.filter((officer) => getSupportOfficerTrack(officer) === 'TECHNICAL_SUPPORT'),
+    [officers],
+  );
 
   async function loadData() {
     setLoading(true);
@@ -171,7 +243,7 @@ export default function MasterWorkspacesPage() {
       if (!billingRes.ok) throw new Error(billingData?.error || 'Failed to load subscriptions.');
 
       const nextWorkspaces = Array.isArray(workspaceData?.workspaces) ? workspaceData.workspaces : [];
-      const nextOfficers = Array.isArray(usersData?.users) ? usersData.users.filter(isSupportOfficer).filter((u) => u.status === 'ACTIVE') : [];
+      const nextOfficers = Array.isArray(usersData?.users) ? usersData.users.filter(isSupportTeamMember).filter((u) => u.status === 'ACTIVE') : [];
       const nextSubscriptions = Array.isArray(billingData?.subscriptions) ? billingData.subscriptions : [];
 
       setWorkspaces(nextWorkspaces);
@@ -182,7 +254,10 @@ export default function MasterWorkspacesPage() {
         const next = { ...current };
         for (const ws of nextWorkspaces) {
           if (next[ws.id]) continue;
-          next[ws.id] = { officerId: ws.supportAssignment?.supportOfficerId || '' };
+          next[ws.id] = {
+            officerId: ws.supportAssignment?.supportOfficerId || '',
+            technicalOfficerId: ws.supportAssignment?.technicalSupportOfficerId || '',
+          };
         }
         return next;
       });
@@ -261,6 +336,7 @@ export default function MasterWorkspacesPage() {
             initialNotes: 'Created via Master Workspaces',
             supportOfficerId: draft.officerId,
             supportOfficerName: officerName,
+            supportOfficerType: 'CUSTOMER_SUPPORT',
           }),
         });
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -273,6 +349,7 @@ export default function MasterWorkspacesPage() {
             status: 'ASSIGNED',
             supportOfficerId: draft.officerId,
             supportOfficerName: officerName,
+            supportOfficerType: 'CUSTOMER_SUPPORT',
           }),
         });
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -283,6 +360,43 @@ export default function MasterWorkspacesPage() {
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to assign support officer.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function escalateToTechnicalSupport(workspace: Workspace) {
+    const draft = draftByWorkspace[workspace.id];
+    if (!draft || !draft.technicalOfficerId) {
+      setError('Select a technical support officer first.');
+      return;
+    }
+
+    setBusyId(workspace.id);
+    setError('');
+    setMessage('');
+
+    try {
+      const officer = technicalSupportOfficers.find((user) => user.id === draft.technicalOfficerId) || null;
+      const officerName = officer ? officer.name : draft.technicalOfficerId;
+
+      const res = await fetch(`/api/cloud/workspaces/${encodeURIComponent(workspace.id)}/support-assignment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: workspace.supportAssignment?.status === 'COMPLETED' ? 'IN_PROGRESS' : (workspace.supportAssignment?.status || 'IN_PROGRESS'),
+          technicalSupportOfficerId: draft.technicalOfficerId,
+          technicalSupportOfficerName: officerName,
+          escalationStatus: 'ASSIGNED',
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      if (!res.ok) throw new Error(data?.error || 'Technical escalation failed.');
+
+      setMessage(`Escalated ${workspace.name} to technical support.`);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to escalate to technical support.');
     } finally {
       setBusyId(null);
     }
@@ -313,6 +427,16 @@ export default function MasterWorkspacesPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filter workspaces</label>
+        <input
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search by workspace, client, email, ticket, or officer"
+          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+        />
+      </div>
+
       {error ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
           <p className="text-sm font-semibold">Workspace operations unavailable</p>
@@ -326,161 +450,149 @@ export default function MasterWorkspacesPage() {
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
         {loading ? (
-          <div className="p-6 text-sm text-slate-600">Loading workspaces...</div>
+          <div className="p-2 text-sm text-slate-600">Loading workspaces...</div>
         ) : filtered.length === 0 ? (
-          <div className="p-6 text-sm text-slate-600">No workspaces found.</div>
+          <div className="p-2 text-sm text-slate-600">No workspaces found.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1400px]">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  {[
-                    'Workspace',
-                    'Client org',
-                    'Plan',
-                    'Subscription',
-                    'Website type',
-                    'Onboarding',
-                    'Connector',
-                    'Launch readiness',
-                    'Support',
-                    'Support required',
-                    'Updated',
-                    'Actions',
-                  ].map((header) => (
-                    <th key={header} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">{header}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((workspace) => {
-                  const busy = busyId === workspace.id;
-                  const email = getContactEmail(workspace);
-                  const subscription = email ? subscriptionByEmail.get(email) : undefined;
-                  const supportStatus = workspace.supportAssignment?.status || 'UNASSIGNED';
-                  const connectorStatus = workspace.connectorStatus || 'NOT_CONNECTED';
-                  const readinessBlocked = (workspace.status || '').toLowerCase() === 'blocked' || supportStatus !== 'ASSIGNED' && workspace.supportRequired;
+          <div className="space-y-3">
+            {filtered.map((workspace) => {
+              const busy = busyId === workspace.id;
+              const email = getContactEmail(workspace);
+              const subscription = email ? subscriptionByEmail.get(email) : undefined;
+              const supportStatus = workspace.supportAssignment?.status || 'UNASSIGNED';
+              const connectorStatus = workspace.connectorStatus || 'NOT_CONNECTED';
+              const readinessBlocked = (workspace.status || '').toLowerCase() === 'blocked' || (supportStatus !== 'ASSIGNED' && workspace.supportRequired);
 
-                  return (
-                    <tr key={workspace.id} className="border-b border-slate-100 align-top">
-                      <td className="px-4 py-3">
-                        <p className="font-semibold text-slate-900">{workspace.name}</p>
-                        <p className="text-xs text-slate-500">{workspace.id}</p>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {workspace.clientOrganizationName || '—'}
-                        {email ? <p className="mt-1 text-xs text-slate-500">{email}</p> : null}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{workspace.planId || subscription?.planId || 'starter'}</td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {subscription ? (
-                          <div>
-                            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${badge(subscription.status)}`}>{prettyValue(subscription.status)}</span>
-                            <p className="mt-1 text-xs text-slate-500">{subscription.currency} {subscription.amount} · {subscription.billingInterval}</p>
-                            {subscription.trialEndDate ? <p className="mt-1 text-xs text-slate-500">Trial ends {new Date(subscription.trialEndDate).toLocaleDateString()}</p> : null}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-slate-500">Not linked</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{prettyValue(workspace.websiteType || 'Not set')}</td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${badge(workspace.onboardingStatus || workspace.status)}`}>
-                          {prettyValue(workspace.onboardingStatus || workspace.status)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">
-                        {prettyValue(connectorStatus)}
-                        {workspace.connectorSiteMetadata?.platform ? (
-                          <p className="mt-1 text-xs text-slate-500">{workspace.connectorSiteMetadata.platform}</p>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${readinessBlocked ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                          {readinessBlocked ? 'Blocked / Needs review' : 'Clear'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{prettyValue(supportStatus)}</td>
-                      <td className="px-4 py-3">
-                        <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(workspace.supportRequired)}
-                            onChange={(e) => void setSupportRequired(workspace.id, e.target.checked)}
-                            disabled={busy}
-                          />
-                          <span className="text-xs">{workspace.supportRequired ? 'Yes' : 'No'}</span>
-                        </label>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-slate-700">{new Date(workspace.updatedAt).toLocaleString()}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col gap-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <select
-                              value={draftByWorkspace[workspace.id]?.officerId || ''}
-                              onChange={(e) => setDraftByWorkspace((prev) => ({
-                                ...prev,
-                                [workspace.id]: { officerId: e.target.value },
-                              }))}
-                              className="rounded-xl border border-slate-300 px-2 py-1 text-xs"
-                              disabled={busy}
-                              title="Assign support officer"
-                            >
-                              <option value="">Select officer…</option>
-                              {officers.map((officer) => (
-                                <option key={`${workspace.id}-${officer.id}`} value={officer.id}>
-                                  {officer.name}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => void assignSupportOfficer(workspace)}
-                              disabled={busy}
-                              className="rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-900 disabled:opacity-60"
-                            >
-                              Assign
-                            </button>
-                          </div>
+              return (
+                <div key={workspace.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-900">{workspace.name}</p>
+                      <p className="text-xs text-slate-500">{workspace.id}</p>
+                      <p className="mt-1 text-sm text-slate-700">{workspace.clientOrganizationName || '—'}{email ? ` · ${email}` : ''}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className={`rounded-full px-2 py-1 font-semibold ${badge(workspace.onboardingStatus || workspace.status)}`}>{prettyValue(workspace.onboardingStatus || workspace.status)}</span>
+                      <span className={`rounded-full px-2 py-1 font-semibold ${badge(connectorStatus)}`}>{prettyValue(connectorStatus)}</span>
+                      <span className={`rounded-full px-2 py-1 font-semibold ${readinessBlocked ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{readinessBlocked ? 'Needs review' : 'Ready'}</span>
+                    </div>
+                  </div>
 
-                          <div className="flex flex-wrap gap-2">
-                            <Link
-                              href={`/master/mvp-deployments/${workspace.id}`}
-                              className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 text-center"
-                            >
-                              View
-                            </Link>
-                            <Link
-                              href={`/master/mvp-deployments/${workspace.id}`}
-                              className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-900 text-center"
-                            >
-                              Launch checklist
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={() => void copyWorkspaceId(workspace.id)}
-                              className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800"
-                            >
-                              Copy ID
-                            </button>
-                            <button
-                              type="button"
-                              disabled
-                              className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500"
-                              title="Archiving is disabled until pilot-safe retention rules are finalized."
-                            >
-                              Archive (coming soon)
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2 xl:grid-cols-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Plan</p>
+                      <p>{workspace.planId || subscription?.planId || 'starter'}</p>
+                      {subscription ? <p className="text-xs text-slate-500">{subscription.currency} {subscription.amount} · {subscription.billingInterval}</p> : null}
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Support Ticket</p>
+                      <p>{workspace.supportAssignment?.ticketId || 'Not created'}</p>
+                      <p className="text-xs text-slate-500">{prettyValue(supportStatus)}{workspace.supportAssignment?.escalationStatus ? ` · Escalation ${prettyValue(workspace.supportAssignment.escalationStatus)}` : ''}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assigned Officers</p>
+                      <p>Customer: {workspace.supportAssignment?.supportOfficerName || 'Unassigned'}</p>
+                      <p className="text-xs text-slate-500">Technical: {workspace.supportAssignment?.technicalSupportOfficerName || 'Unassigned'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated</p>
+                      <p>{new Date(workspace.updatedAt).toLocaleString()}</p>
+                      <label className="mt-1 inline-flex items-center gap-2 text-xs text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(workspace.supportRequired)}
+                          onChange={(e) => void setSupportRequired(workspace.id, e.target.checked)}
+                          disabled={busy}
+                        />
+                        Support required
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select
+                      value={draftByWorkspace[workspace.id]?.officerId || ''}
+                      onChange={(e) => setDraftByWorkspace((prev) => ({
+                        ...prev,
+                        [workspace.id]: {
+                          officerId: e.target.value,
+                          technicalOfficerId: prev[workspace.id]?.technicalOfficerId || '',
+                        },
+                      }))}
+                      className="rounded-xl border border-slate-300 px-2 py-1 text-xs"
+                      disabled={busy}
+                      title="Assign customer support officer"
+                    >
+                      <option value="">Customer support…</option>
+                      {customerSupportOfficers.map((officer) => (
+                        <option key={`${workspace.id}-customer-${officer.id}`} value={officer.id}>
+                          {officer.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void assignSupportOfficer(workspace)}
+                      disabled={busy}
+                      className="rounded-full bg-indigo-100 px-3 py-1.5 text-xs font-semibold text-indigo-900 disabled:opacity-60"
+                    >
+                      Assign Customer Support
+                    </button>
+
+                    <select
+                      value={draftByWorkspace[workspace.id]?.technicalOfficerId || ''}
+                      onChange={(e) => setDraftByWorkspace((prev) => ({
+                        ...prev,
+                        [workspace.id]: {
+                          officerId: prev[workspace.id]?.officerId || '',
+                          technicalOfficerId: e.target.value,
+                        },
+                      }))}
+                      className="rounded-xl border border-slate-300 px-2 py-1 text-xs"
+                      disabled={busy}
+                      title="Escalate to technical support"
+                    >
+                      <option value="">Technical support…</option>
+                      {technicalSupportOfficers.map((officer) => (
+                        <option key={`${workspace.id}-technical-${officer.id}`} value={officer.id}>
+                          {officer.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => void escalateToTechnicalSupport(workspace)}
+                      disabled={busy}
+                      className="rounded-full bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-900 disabled:opacity-60"
+                    >
+                      Escalate Technical
+                    </button>
+
+                    <Link
+                      href={`/master/mvp-deployments/${workspace.id}`}
+                      className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-800 text-center"
+                    >
+                      View
+                    </Link>
+                    <Link
+                      href={`/master/mvp-deployments/${workspace.id}`}
+                      className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-900 text-center"
+                    >
+                      Launch checklist
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void copyWorkspaceId(workspace.id)}
+                      className="rounded-full bg-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-800"
+                    >
+                      Copy ID
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

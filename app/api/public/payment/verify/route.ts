@@ -9,6 +9,7 @@ import {
   parseEmail,
   parsePaymentProvider,
 } from '@/lib/security/requestGuards';
+import { recordIncomeEvent } from '@/lib/finance/automation';
 
 export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, 'public:payment:verify');
@@ -54,6 +55,19 @@ export async function POST(req: NextRequest) {
     appBaseUrl,
   });
   if (!result.ok) {
+    await recordIncomeEvent({
+      source: 'invoice_paid',
+      sourceId: paymentReference,
+      amount: typeof amount === 'number' ? amount : 0,
+      currency: currency || 'USD',
+      reference: paymentReference,
+      description: 'Payment verification failed',
+      status: 'failed',
+      createdBy: 'system',
+      category: 'subscriptions',
+      transactionDate: new Date().toISOString(),
+    });
+
     if (customerEmail) {
       await sendPlatformEmailNotification({
         templateKey: 'PAYMENT_FAILED',
@@ -74,6 +88,20 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: false, error: result.reason }, { status: 404 });
   }
+
+  await recordIncomeEvent({
+    source: 'invoice_paid',
+    sourceId: paymentReference,
+    amount: typeof amount === 'number' ? amount : 0,
+    currency: currency || 'USD',
+    reference: paymentReference,
+    description: 'Payment verified and applied to subscription',
+    status: 'paid',
+    createdBy: 'system',
+    category: 'subscriptions',
+    clientId: customerEmail,
+    transactionDate: new Date().toISOString(),
+  });
 
   if (customerEmail) {
     await sendPlatformEmailNotification({

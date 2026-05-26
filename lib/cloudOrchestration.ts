@@ -30,6 +30,15 @@ function makeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function makeWorkspaceId(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let token = '';
+  for (let index = 0; index < 7; index += 1) {
+    token += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `WS-${token}`;
+}
+
 function hashString(input: string): string {
   let hash = 0;
   for (let index = 0; index < input.length; index += 1) {
@@ -131,10 +140,10 @@ export function createWorkspace(payload: {
         'Connector plugin installation not confirmed',
         'Site connection token not validated',
       ]
-    : ['Website connection review pending'];
+    : [];
 
   return {
-    id: makeId('ws'),
+    id: makeWorkspaceId(),
     name: payload.name,
     clientOrganizationId: ownership.clientOrganizationId,
     clientOrganizationName: ownership.clientOrganizationName,
@@ -248,12 +257,27 @@ export function validateWorkspaceReadiness(
   },
 ): WorkspaceOrchestration {
   const isExistingWebsite = workspace.websiteType === 'EXISTING_WEBSITE';
+  const isCustomHeadless = workspace.websiteType === 'CUSTOM_HEADLESS';
+  const collectedBusinessData =
+    workspace.collectedBusinessData && typeof workspace.collectedBusinessData === 'object'
+      ? (workspace.collectedBusinessData as Record<string, unknown>)
+      : null;
+  const connectionMethod = String(collectedBusinessData?.connectionMethod || '').trim().toLowerCase();
+  const connectorOptional = !isExistingWebsite || connectionMethod === 'manual' || connectionMethod === 'none' || connectionMethod === 'skip';
+  const integrationValidationRequired =
+    isCustomHeadless ||
+    Boolean(String(collectedBusinessData?.apiDetails || '').trim() || String(collectedBusinessData?.integrationNotes || '').trim());
+
   const onboardingComplete = workspace.onboardingSteps.every((item) => item.status === 'completed');
   const architectureValidated = Boolean(workspace.architecture);
   const modulesValid = workspace.selectedModules.length > 0;
-  const apisReachable = isExistingWebsite ? Boolean(connectorDeploymentStatus) : true;
-  const frontendValidated = Boolean(connectorDeploymentStatus?.validation_passed);
-  const contentMapped = Boolean(connectorDeploymentStatus?.setup_completed);
+  const apisReachable = connectorOptional ? true : Boolean(connectorDeploymentStatus);
+  const frontendValidated = connectorOptional
+    ? Boolean(workspace.selectedTemplateId || workspace.currentStep >= 6)
+    : Boolean(connectorDeploymentStatus?.validation_passed);
+  const contentMapped = connectorOptional
+    ? Boolean(workspace.selectedTemplateId || workspace.selectedModules.length > 0 || workspace.currentStep >= 6)
+    : Boolean(connectorDeploymentStatus?.setup_completed);
   const integrationsConfigured = workspace.onboardingSteps.find((item) => item.key === 'validation')?.status === 'completed';
 
   const missingRequirements: string[] = [];
@@ -264,7 +288,7 @@ export function validateWorkspaceReadiness(
   if (!architectureValidated) {
     missingRequirements.push('Architecture is not selected');
   }
-  if (isExistingWebsite && !apisReachable) {
+  if (!connectorOptional && !apisReachable) {
     missingRequirements.push('Connector deployment status is not reachable');
   }
   if (!modulesValid) {
@@ -276,7 +300,7 @@ export function validateWorkspaceReadiness(
   if (!contentMapped) {
     missingRequirements.push('Content mapping is incomplete');
   }
-  if (!integrationsConfigured) {
+  if (integrationValidationRequired && !integrationsConfigured) {
     missingRequirements.push('Validation and integration checks are incomplete');
   }
 

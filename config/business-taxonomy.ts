@@ -21,6 +21,7 @@ export const businessTypes: BusinessTypeOption[] = [
   { key: 'Service', label: 'Service' },
   { key: 'Ecommerce', label: 'Ecommerce' },
   { key: 'Professional Services', label: 'Professional Services' },
+  { key: 'Professional Services / Technology', label: 'Professional Services / Technology' },
   { key: 'Creative Services', label: 'Creative Services' },
   { key: 'Health & Wellness', label: 'Health & Wellness' },
   { key: 'Education / Training', label: 'Education / Training' },
@@ -34,6 +35,7 @@ export const sectors: SectorOption[] = [
   { key: 'Creative Production', label: 'Creative Production', businessTypeKeys: ['Creative Services', 'Service'] },
   { key: 'Events & Lifestyle', label: 'Events & Lifestyle', businessTypeKeys: ['Service', 'Creative Services', 'Hospitality'] },
   { key: 'General Services', label: 'General Services', businessTypeKeys: ['Service', 'Professional Services', 'Other'] },
+  { key: 'Technology & Software', label: 'Technology & Software', businessTypeKeys: ['Professional Services', 'Professional Services / Technology', 'Service'] },
 ];
 
 export const professionsBySector: Record<string, ProfessionOption[]> = {
@@ -60,6 +62,14 @@ export const professionsBySector: Record<string, ProfessionOption[]> = {
   ],
   'General Services': [
     { key: 'generic-service-business', label: 'Generic Service Business', hasProfessionConfig: true },
+    { key: 'other', label: 'Other', hasProfessionConfig: false },
+  ],
+  'Technology & Software': [
+    { key: 'saas-software-platform', label: 'SaaS / Software Platform', hasProfessionConfig: true },
+    { key: 'digital-agency', label: 'Digital Agency', hasProfessionConfig: true },
+    { key: 'it-support-company', label: 'IT Support Company', hasProfessionConfig: true },
+    { key: 'software-development-company', label: 'Software Development Company', hasProfessionConfig: true },
+    { key: 'automation-consultant', label: 'Automation Consultant', hasProfessionConfig: true },
     { key: 'other', label: 'Other', hasProfessionConfig: false },
   ],
 };

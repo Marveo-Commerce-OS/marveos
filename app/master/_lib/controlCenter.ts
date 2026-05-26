@@ -100,6 +100,50 @@ export async function getControlCenterSnapshot() {
     unconfigured: workspaces.filter((workspace) => !workspace.connectorStatus || workspace.connectorStatus === 'NOT_CONNECTED').length,
   };
 
+  const subscriptionsById = new Map(subscriptions.map((subscription) => [subscription.id, subscription]));
+  const scopedSubscriptionIds = Array.from(new Set(workspaces.map((workspace) => normalize(workspace.clientSubscriptionId)).filter(Boolean)));
+
+  let subscriptionsWithinCapacity = 0;
+  let subscriptionsAtCapacity = 0;
+  let subscriptionsOverCapacity = 0;
+  let unresolvedSubscriptionRecords = 0;
+  let totalExcessWorkspaces = 0;
+
+  for (const subscriptionId of scopedSubscriptionIds) {
+    const subscription = subscriptionsById.get(subscriptionId);
+    if (!subscription) {
+      unresolvedSubscriptionRecords += 1;
+      continue;
+    }
+
+    const scopedEntitlement = resolveWorkspaceEntitlement(store, {
+      subscriptionPlanId: subscription.planId,
+      accountPlan: store.cloud.accountPlan,
+      scope: {
+        clientOrganizationId: subscription.organizationId,
+        clientSubscriptionId: subscription.id,
+      },
+    });
+
+    if (!scopedEntitlement.ok) {
+      unresolvedSubscriptionRecords += 1;
+      continue;
+    }
+
+    if (!scopedEntitlement.entitlement.hasCapacity) {
+      subscriptionsOverCapacity += 1;
+      totalExcessWorkspaces += Math.max(0, scopedEntitlement.entitlement.workspaceCount - scopedEntitlement.entitlement.workspaceLimit);
+      continue;
+    }
+
+    if (scopedEntitlement.entitlement.remainingWorkspaces === 0) {
+      subscriptionsAtCapacity += 1;
+      continue;
+    }
+
+    subscriptionsWithinCapacity += 1;
+  }
+
   return {
     accountPlan: store.cloud.accountPlan,
     workspaceLimit: entitlement.ok ? entitlement.entitlement.workspaceLimit : 0,
@@ -123,6 +167,14 @@ export async function getControlCenterSnapshot() {
     maintenance: store.maintenance,
     roleVisibility: store.controlCenterRoleVisibility,
     connectorCounts,
+    subscriptionCapacity: {
+      trackedSubscriptions: scopedSubscriptionIds.length,
+      withinCapacity: subscriptionsWithinCapacity,
+      atCapacity: subscriptionsAtCapacity,
+      overCapacity: subscriptionsOverCapacity,
+      unresolved: unresolvedSubscriptionRecords,
+      totalExcessWorkspaces,
+    },
     templatesInUse: workspaces.filter((workspace) => Boolean(normalize(workspace.selectedTemplateId))).length,
     websiteTypeBreakdown: {
       newWebsite: workspaces.filter((workspace) => workspace.websiteType === 'NEW_WEBSITE').length,
